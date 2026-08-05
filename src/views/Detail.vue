@@ -1,215 +1,429 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showToast } from 'vant'
-import { fetchNoticeById } from '../utils/request'
+import { useUserSettingsStore } from '../stores/userSettings'
+import { ApiConfigurationError, fetchNoticeById } from '../utils/request'
 import type { NoticeItem } from '../types/notice'
+import ShareDialog from '../components/ShareDialog.vue'
+import ImagePreview from '../components/ImagePreview.vue'
+import SkeletonLoader from '../components/SkeletonLoader.vue'
+import { useSnackbar } from '../composables/useSnackbar'
+import { copyText } from '../utils/share'
+import { DataValidationError, normalizeHttpUrl } from '../utils/validation'
+import { sanitizeNoticeContent } from '../utils/sanitizeNoticeContent'
 
 const route = useRoute()
 const router = useRouter()
+const store = useUserSettingsStore()
+const snackbar = useSnackbar()
 
 const notice = ref<NoticeItem | null>(null)
 const loading = ref(true)
+const loadError = ref('')
+const showShare = ref(false)
+const showImagePreview = ref(false)
+const previewImages = ref<string[]>([])
+const previewIndex = ref(0)
+let loadSequence = 0
+let loadController: AbortController | null = null
 
-onMounted(async () => {
-  const id = route.params.id as string
+function getLoadErrorMessage(error: unknown): string {
+  if (error instanceof ApiConfigurationError) return error.message
+  if (error instanceof DataValidationError) return `通知数据校验失败：${error.message}`
+  if (error instanceof Error && error.message === '通知不存在') return error.message
+  return '加载通知详情失败，请检查网络后重试'
+}
+
+async function loadNotice(): Promise<void> {
+  const sequence = ++loadSequence
+  loadController?.abort()
+  const controller = new AbortController()
+  loadController = controller
+  loading.value = true
+  loadError.value = ''
+  notice.value = null
+
   try {
-    notice.value = await fetchNoticeById(id)
-  } catch {
-    showToast('加载通知详情失败')
+    const id = route.params.id
+    if (typeof id !== 'string') {
+      throw new DataValidationError('通知 ID 格式无效')
+    }
+    const loadedNotice = await fetchNoticeById(id, controller.signal)
+    if (controller.signal.aborted || sequence !== loadSequence) return
+
+    notice.value = loadedNotice
+    store.cacheNotice(loadedNotice)
+    store.markRead(loadedNotice.id)
+  } catch (error) {
+    if (controller.signal.aborted || sequence !== loadSequence) return
+    loadError.value = getLoadErrorMessage(error)
   } finally {
-    loading.value = false
+    if (loadController === controller) loadController = null
+    if (sequence === loadSequence) loading.value = false
   }
+}
+
+watch(
+  () => route.params.id,
+  () => void loadNotice(),
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  loadSequence += 1
+  loadController?.abort()
+  loadController = null
 })
 
-// 对 cleanContent 中的图片做安全约束
-const safeContent = computed(() => {
-  if (!notice.value?.cleanContent) return ''
-  return notice.value.cleanContent
-    // 移除可能残留的 script 标签
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    // 给所有 img 加内联安全样式
-    .replace(/<img\s/gi, '<img style="max-width:100%;height:auto;" ')
+const safeContentBundle = computed(() => {
+  return notice.value ? sanitizeNoticeContent(notice.value) : { html: '', images: [] }
 })
 
-function copyAttachmentUrl(url: string): void {
-  navigator.clipboard.writeText(url).then(
-    () => showToast('已复制附件下载链接，请在外部浏览器中打开'),
-    () => showToast('复制失败，请手动复制链接'),
-  )
+const safeContent = computed(() => safeContentBundle.value.html)
+const contentImages = computed(() => safeContentBundle.value.images)
+
+async function copyAttachmentUrl(url: string): Promise<void> {
+  const safeUrl = normalizeHttpUrl(url)
+  if (!safeUrl) {
+    snackbar.showError('附件链接无效，无法复制')
+    return
+  }
+
+  if (await copyText(safeUrl)) {
+    snackbar.showSuccess('附件链接已复制')
+  } else {
+    snackbar.showError('复制失败，请检查浏览器剪贴板权限')
+  }
 }
 
 function goBack(): void {
   router.back()
 }
+
+function openImagePreview(src: string): void {
+  const index = contentImages.value.indexOf(src)
+  if (index < 0) return
+  previewIndex.value = index
+  previewImages.value = contentImages.value
+  showImagePreview.value = true
+}
+
+function handleContentClick(event: MouseEvent): void {
+  if (!(event.target instanceof Element)) return
+  const image = event.target.closest('img')
+  if (!image || !(event.currentTarget instanceof HTMLElement)) return
+  if (!event.currentTarget.contains(image)) return
+
+  event.preventDefault()
+  event.stopPropagation()
+  const src = normalizeHttpUrl(image.getAttribute('src'))
+  if (src) openImagePreview(src)
+}
+
+function handleContentKeydown(event: KeyboardEvent): void {
+  if (!['Enter', ' '].includes(event.key) || !(event.target instanceof HTMLImageElement)) return
+  event.preventDefault()
+  event.stopPropagation()
+  const src = normalizeHttpUrl(event.target.getAttribute('src'))
+  if (src) openImagePreview(src)
+}
 </script>
 
 <template>
   <div class="detail-page">
-    <van-nav-bar
-      title="通知详情"
-      left-arrow
-      fixed
-      placeholder
-      @click-left="goBack"
+    <!-- 顶部导航 -->
+    <v-app-bar color="surface" elevation="1">
+      <v-btn icon aria-label="返回上一页" @click="goBack">
+        <v-icon>$arrowLeft</v-icon>
+      </v-btn>
+      <v-app-bar-title>通知详情</v-app-bar-title>
+      <v-spacer />
+      <v-btn v-if="notice" icon aria-label="分享通知" @click="showShare = true">
+        <v-icon>$shareVariant</v-icon>
+      </v-btn>
+    </v-app-bar>
+
+    <!-- 加载状态 -->
+    <SkeletonLoader v-if="loading" type="detail" />
+
+    <!-- 错误状态 -->
+    <v-container v-else-if="loadError" fluid>
+      <v-row justify="center">
+        <v-col :cols="12" :md="8" :lg="6">
+          <v-card class="pa-4 text-center">
+            <v-icon size="48" color="error" class="mb-2">$alertCircleOutline</v-icon>
+            <v-card-title>无法加载通知</v-card-title>
+            <v-card-text>{{ loadError }}</v-card-text>
+            <v-card-actions class="justify-center">
+              <v-btn color="primary" prepend-icon="$refresh" @click="loadNotice"> 重试 </v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-col>
+      </v-row>
+    </v-container>
+
+    <!-- 内容区 -->
+    <v-container v-else-if="notice" fluid>
+      <v-row justify="center">
+        <v-col :cols="12" :md="8" :lg="6">
+          <!-- AI 智能提炼卡片 -->
+          <v-card class="mb-6 ai-card" variant="outlined">
+            <v-card-title class="d-flex align-center ga-2">
+              <v-icon>$robot</v-icon>
+              <span>AI 秘书已为您提炼干货</span>
+            </v-card-title>
+
+            <v-card-text>
+              <v-list bg-color="transparent">
+                <v-list-item prepend-icon="$calendarClock">
+                  <v-list-item-title>截止时间</v-list-item-title>
+                  <v-list-item-subtitle class="text-error font-weight-bold">
+                    {{ notice.deadline || '未提及' }}
+                  </v-list-item-subtitle>
+                </v-list-item>
+
+                <v-list-item prepend-icon="$accountGroup">
+                  <v-list-item-title>面向对象</v-list-item-title>
+                  <v-list-item-subtitle>
+                    {{ notice.targetAudience || '未提及' }}
+                  </v-list-item-subtitle>
+                </v-list-item>
+
+                <v-list-item prepend-icon="$mapMarker">
+                  <v-list-item-title>核心行动/地点</v-list-item-title>
+                  <v-list-item-subtitle>
+                    {{ notice.coreAction || '未提及' }}
+                  </v-list-item-subtitle>
+                </v-list-item>
+              </v-list>
+
+              <v-card-text class="summary-text text-body-1 mt-4" tag="p">
+                {{ notice.aiSummary }}
+              </v-card-text>
+            </v-card-text>
+          </v-card>
+
+          <!-- 原文渲染区 -->
+          <v-card class="mb-6">
+            <v-card-title class="d-flex align-center">
+              <v-icon class="mr-2">$fileDocumentOutline</v-icon>
+              通知原文
+              <v-spacer />
+              <v-btn
+                :href="notice.originUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                size="small"
+                variant="text"
+              >
+                查看来源页面
+              </v-btn>
+            </v-card-title>
+            <v-divider />
+            <v-card-text>
+              <div
+                class="clean-content"
+                @click="handleContentClick"
+                @keydown="handleContentKeydown"
+                v-html="safeContent"
+              />
+            </v-card-text>
+          </v-card>
+
+          <!-- 附件列表 -->
+          <v-card v-if="notice.attachments.length > 0" class="mb-6">
+            <v-card-title>
+              <v-icon class="mr-2">$attachment</v-icon>
+              附件列表
+            </v-card-title>
+            <v-divider />
+            <v-list>
+              <v-list-item
+                v-for="(att, idx) in notice.attachments"
+                :key="idx"
+                :title="att.name"
+                prepend-icon="$fileDownload"
+                @click="copyAttachmentUrl(att.url)"
+              >
+                <template #append>
+                  <v-btn
+                    icon
+                    variant="text"
+                    size="small"
+                    :aria-label="`复制附件链接：${att.name}`"
+                    @click.stop="copyAttachmentUrl(att.url)"
+                  >
+                    <v-icon>$contentCopy</v-icon>
+                    <v-tooltip activator="parent" location="top">复制链接</v-tooltip>
+                  </v-btn>
+                </template>
+              </v-list-item>
+            </v-list>
+          </v-card>
+
+          <v-card v-else flat class="text-center pa-4 bg-transparent">
+            <v-icon size="32" color="grey" class="mb-2">$attachment</v-icon>
+            <v-card-subtitle>暂无附件</v-card-subtitle>
+          </v-card>
+        </v-col>
+      </v-row>
+    </v-container>
+
+    <!-- 分享对话框 -->
+    <ShareDialog v-if="showShare && notice" :notice="notice" @close="showShare = false" />
+
+    <!-- 图片预览 -->
+    <ImagePreview
+      v-if="showImagePreview"
+      :images="previewImages"
+      :initial-index="previewIndex"
+      @close="showImagePreview = false"
     />
-
-    <van-loading v-if="loading" class="loading-wrapper" />
-
-    <template v-if="notice">
-      <!-- AI 智能提炼卡片 -->
-      <div class="ai-summary-card">
-        <div class="ai-summary-header">
-          <span class="ai-icon">🤖</span>
-          <span>AI 秘书已为您提炼干货</span>
-        </div>
-
-        <van-cell-group inset>
-          <van-cell
-            title="📅 截止时间"
-            :value="notice.deadline || '未提及'"
-            value-class="text-danger-bold"
-          />
-          <van-cell
-            title="🎯 面向对象"
-            :value="notice.targetAudience || '未提及'"
-          />
-          <van-cell
-            title="📍 核心行动/地点"
-            :value="notice.coreAction || '未提及'"
-          />
-        </van-cell-group>
-
-        <p class="ai-detail-summary">{{ notice.aiSummary }}</p>
-      </div>
-
-      <!-- 视觉分割 -->
-      <van-divider content-position="left">通知原文</van-divider>
-
-      <!-- 原文渲染区 -->
-      <div
-        class="clean-content"
-        v-html="safeContent"
-      />
-
-      <!-- 附件列表 -->
-      <van-cell-group
-        v-if="notice.attachments.length > 0"
-        title="附件列表"
-        class="attachments-group"
-      >
-        <van-cell
-          v-for="(att, idx) in notice.attachments"
-          :key="idx"
-          :title="att.name"
-          icon="description-o"
-          is-link
-          @click="copyAttachmentUrl(att.url)"
-        />
-      </van-cell-group>
-
-      <div v-else class="no-attachments">
-        <van-divider>暂无附件</van-divider>
-      </div>
-    </template>
   </div>
 </template>
 
 <style scoped>
+.summary-text {
+  line-height: 1.8;
+}
+
 .detail-page {
-  padding-bottom: 60px;
   min-height: 100vh;
-  background: var(--notifai-bg-page);
+  background: rgb(var(--v-theme-background));
 }
 
-.loading-wrapper {
-  display: flex;
-  justify-content: center;
-  padding: 80px 0;
+.ai-card {
+  animation: fadeIn 0.5s ease-out;
 }
 
-/* AI 提炼卡片 */
-.ai-summary-card {
-  margin: 12px;
-  padding: 20px 16px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, var(--notifai-brand) 0%, var(--notifai-brand-2) 100%);
-  color: #fff;
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-.ai-summary-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 16px;
-}
-
-.ai-icon {
-  font-size: 24px;
-}
-
-.ai-summary-card :deep(.van-cell-group) {
-  margin-bottom: 16px;
-}
-
-.ai-summary-card :deep(.van-cell) {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  margin-bottom: 4px;
-  color: #fff;
-}
-
-.ai-summary-card :deep(.van-cell__title) {
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.ai-summary-card :deep(.van-cell__value) {
-  color: #fff;
-}
-
-.ai-summary-card :deep(.text-danger-bold) {
-  color: var(--notifai-danger-soft) !important;
-  font-weight: bold;
-}
-
-.ai-detail-summary {
-  font-size: 14px;
-  line-height: 1.7;
-  color: rgba(255, 255, 255, 0.95);
-  padding: 0 12px;
-}
-
-/* 原文渲染区 */
 .clean-content {
-  margin: 0 12px;
-  padding: 16px;
-  background: var(--notifai-bg-card);
-  border-radius: 10px;
   font-size: 15px;
   line-height: 1.8;
-  color: var(--notifai-text-primary);
+  color: rgb(var(--v-theme-on-surface));
   overflow-wrap: break-word;
 }
 
 .clean-content :deep(img) {
   max-width: 100%;
   height: auto;
+  border-radius: 8px;
+  margin: 8px 0;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.clean-content :deep(img:hover) {
+  transform: scale(1.02);
 }
 
 .clean-content :deep(table) {
   max-width: 100%;
   display: block;
   overflow-x: auto;
+  border-collapse: collapse;
+  margin: 16px 0;
 }
 
-/* 附件 */
-.attachments-group {
-  margin: 12px;
+.clean-content :deep(td),
+.clean-content :deep(th) {
+  border: 1px solid rgb(var(--v-border-color));
+  padding: 8px 12px;
 }
 
-.no-attachments {
-  padding: 24px 0;
+.clean-content :deep(a) {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: none;
+}
+
+.clean-content :deep(a:hover) {
+  text-decoration: underline;
+}
+
+/* ---- Markdown 渲染样式 ---- */
+.clean-content :deep(h1),
+.clean-content :deep(h2),
+.clean-content :deep(h3),
+.clean-content :deep(h4) {
+  margin: 20px 0 10px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.clean-content :deep(h1) {
+  font-size: 22px;
+}
+
+.clean-content :deep(h2) {
+  font-size: 19px;
+}
+
+.clean-content :deep(h3) {
+  font-size: 17px;
+}
+
+.clean-content :deep(h4) {
+  font-size: 15px;
+}
+
+.clean-content :deep(p) {
+  margin: 10px 0;
+}
+
+.clean-content :deep(ul),
+.clean-content :deep(ol) {
+  margin: 10px 0;
+  padding-left: 24px;
+}
+
+.clean-content :deep(li) {
+  margin: 4px 0;
+}
+
+.clean-content :deep(blockquote) {
+  margin: 12px 0;
+  padding: 4px 16px;
+  border-left: 4px solid rgb(var(--v-theme-primary));
+  background: rgba(var(--v-theme-primary), 0.06);
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+
+.clean-content :deep(pre) {
+  margin: 12px 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: rgba(var(--v-theme-on-surface), 0.06);
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.clean-content :deep(code) {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  background: rgba(var(--v-theme-on-surface), 0.08);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 0.92em;
+}
+
+.clean-content :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+
+.clean-content :deep(hr) {
+  border: none;
+  border-top: 1px solid rgb(var(--v-theme-surface-variant));
+  margin: 16px 0;
 }
 </style>

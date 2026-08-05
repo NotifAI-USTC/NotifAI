@@ -1,23 +1,36 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { showToast } from 'vant'
 import { useUserSettingsStore } from '../stores/userSettings'
-import type { DarkMode } from '../stores/userSettings'
 import { fetchNoticeById } from '../utils/request'
 import { calculateRemainingDays } from '../utils/date'
+import type { DarkMode } from '../stores/userSettings'
 import type { NoticeItem } from '../types/notice'
+import {
+  getNotificationPermission,
+  requestNotificationPermission,
+  sendNotification,
+} from '../utils/notification'
+import FolderDialog from '../components/FolderDialog.vue'
+import { hapticMedium } from '../utils/haptics'
+import { useSnackbar } from '../composables/useSnackbar'
 
 const router = useRouter()
 const store = useUserSettingsStore()
+const snackbar = useSnackbar()
+
+const FAVORITE_REQUEST_CONCURRENCY = 4
+const FAVORITE_REQUEST_LIMIT = 100
+const FEEDBACK_EMAIL = 'cuijunxi@mail.ustc.edu.cn'
 
 const starredNotices = ref<NoticeItem[]>([])
+const starredLoading = ref(true)
+const starredLoadError = ref('')
 const showFeedbackPopup = ref(false)
-const feedbackText = ref('')
-
-const iconDangerColor = computed(() =>
-  store.isDark ? '#ff453a' : '#ee0a24',
-)
+const showFolderDialog = ref(false)
+const notificationPermission = ref<NotificationPermission | null>(null)
+let starredRequestId = 0
+let starredRequestController: AbortController | null = null
 
 const darkModeLabels: Record<DarkMode, string> = {
   auto: '跟随系统',
@@ -25,53 +38,103 @@ const darkModeLabels: Record<DarkMode, string> = {
   dark: '深色',
 }
 
-// ---- 拉取已收藏通知的详情 ----
-onMounted(async () => {
-  const ids = store.urgentStarredIds
+const notificationPermissionLabel = computed(() => {
+  if (notificationPermission.value === null) return '当前浏览器不支持网页通知'
+  if (notificationPermission.value === 'granted') {
+    return '仅当前设备已授权；提醒需由打开的页面触发'
+  }
+  if (notificationPermission.value === 'denied') {
+    return '已被浏览器阻止，请在站点设置中修改'
+  }
+  return '尚未授权，不包含后台定时推送'
+})
+
+function refreshNotificationPermission() {
+  notificationPermission.value = getNotificationPermission()
+  store.setNotificationEnabled(notificationPermission.value === 'granted')
+}
+
+async function loadStarredNotices() {
+  const requestId = ++starredRequestId
+  starredRequestController?.abort()
+  const controller = new AbortController()
+  starredRequestController = controller
+  const allIds = [...store.urgentStarredIds]
+  const omittedCount = Math.max(0, allIds.length - FAVORITE_REQUEST_LIMIT)
+  const ids = allIds.slice(-FAVORITE_REQUEST_LIMIT)
   const items: NoticeItem[] = []
-  for (const id of ids) {
-    const cached = store.getCachedNotice(id)
-    if (cached && cached.deadline) {
-      items.push(cached)
-    } else {
+  let nextIndex = 0
+  let failedCount = 0
+  let staleFallbackCount = 0
+
+  starredLoading.value = true
+  starredLoadError.value = ''
+
+  async function worker() {
+    while (nextIndex < ids.length) {
+      const id = ids[nextIndex]
+      nextIndex += 1
+
+      const cached = store.getCachedNotice(id)
       try {
-        const notice = await fetchNoticeById(id)
-        if (notice.deadline) {
-          items.push(notice)
-        }
+        const notice = await fetchNoticeById(id, controller.signal)
+        if (controller.signal.aborted || requestId !== starredRequestId) return
+        store.cacheNotice(notice)
+        if (notice.deadline) items.push(notice)
       } catch {
-        // 跳过拉取失败的通知
+        if (controller.signal.aborted || requestId !== starredRequestId) return
+        if (cached?.deadline) {
+          items.push(cached)
+          staleFallbackCount += 1
+        } else {
+          failedCount += 1
+        }
       }
     }
   }
-  // 按截止时间升序：最近截止的排前面
-  items.sort((a, b) => {
-    if (!a.deadline || !b.deadline) return 0
-    return new Date(a.deadline).getTime() - new Date(b.deadline).getTime()
-  })
-  starredNotices.value = items
+
+  try {
+    const workerCount = Math.min(FAVORITE_REQUEST_CONCURRENCY, ids.length)
+    await Promise.all(Array.from({ length: workerCount }, () => worker()))
+
+    if (requestId !== starredRequestId) return
+
+    items.sort((a, b) => (a.deadline ?? '').localeCompare(b.deadline ?? ''))
+    starredNotices.value = items
+
+    const warnings: string[] = []
+    if (omittedCount > 0) warnings.push(`仅检查最近 ${FAVORITE_REQUEST_LIMIT} 条收藏`)
+    if (staleFallbackCount > 0) {
+      warnings.push(`有 ${staleFallbackCount} 条收藏使用缓存数据`)
+    }
+    if (failedCount > 0) warnings.push(`有 ${failedCount} 条收藏加载失败`)
+    starredLoadError.value = warnings.join('；')
+  } finally {
+    if (starredRequestController === controller) starredRequestController = null
+    if (requestId === starredRequestId) starredLoading.value = false
+  }
+}
+
+onMounted(() => {
+  refreshNotificationPermission()
+  window.addEventListener('focus', refreshNotificationPermission)
+  void loadStarredNotices()
 })
 
-// ---- Android 物理返回键处理 ----
-function onPopupOpen(): void {
-  history.pushState({ popupOpen: true }, '')
-  window.addEventListener('popstate', closePopup)
-}
+watch(
+  () => store.urgentStarredIds.join('\u0000'),
+  () => {
+    void loadStarredNotices()
+  },
+)
 
-function closePopup(): void {
-  showFeedbackPopup.value = false
-  window.removeEventListener('popstate', closePopup)
-}
-
-function onPopupClose(): void {
-  window.removeEventListener('popstate', closePopup)
-}
-
-onUnmounted(() => {
-  window.removeEventListener('popstate', closePopup)
+onBeforeUnmount(() => {
+  starredRequestId += 1
+  starredRequestController?.abort()
+  starredRequestController = null
+  window.removeEventListener('focus', refreshNotificationPermission)
 })
 
-// ---- 剩余天数 ----
 function remainingDays(deadline: string | null): string {
   const d = calculateRemainingDays(deadline)
   if (d === null) return '未知'
@@ -80,239 +143,282 @@ function remainingDays(deadline: string | null): string {
   return `剩 ${d} 天`
 }
 
+function deadlineColor(deadline: string | null): string {
+  const days = calculateRemainingDays(deadline)
+  if (days === null || days < 0) return 'default'
+  return days <= 3 ? 'error' : 'primary'
+}
+
 function goToDetail(id: string): void {
   router.push({ name: 'Detail', params: { id } })
 }
 
-function submitFeedback(): void {
-  if (feedbackText.value.trim()) {
-    showToast('感谢你的反馈！')
-    feedbackText.value = ''
-    closePopup()
+async function enableNotifications() {
+  hapticMedium()
+  const permission = await requestNotificationPermission()
+  notificationPermission.value = permission ?? getNotificationPermission()
+  store.setNotificationEnabled(permission === 'granted')
+
+  if (permission === null) {
+    snackbar.showError('无法请求浏览器通知权限')
   }
+}
+
+function sendTestNotification() {
+  hapticMedium()
+  const notification = sendNotification('NotifAI 测试通知', {
+    body: '当前设备的浏览器通知已可用。',
+    tag: 'notifai-permission-test',
+  })
+
+  if (notification) {
+    snackbar.showSuccess('测试通知已触发')
+  } else {
+    refreshNotificationPermission()
+    snackbar.showError('测试通知发送失败，请检查浏览器权限')
+  }
+}
+
+async function copyFeedbackEmail(): Promise<void> {
+  const { copyText } = await import('../utils/share')
+  if (await copyText(FEEDBACK_EMAIL)) {
+    snackbar.showSuccess('邮箱已复制')
+  } else {
+    snackbar.showError('复制失败，请检查浏览器剪贴板权限')
+  }
+}
+
+function markCachedNoticesRead() {
+  hapticMedium()
+  store.markCachedNoticesRead()
 }
 </script>
 
 <template>
   <div class="user-page">
-    <van-nav-bar title="个人中心" fixed placeholder />
+    <v-app-bar color="surface" elevation="1">
+      <v-app-bar-title>个人中心</v-app-bar-title>
+    </v-app-bar>
 
-    <!-- 用户简况区 -->
-    <div class="user-profile">
-      <van-image
-        round
-        width="80"
-        height="80"
-        src=""
-        class="user-avatar"
-      >
-        <template #error>
-          <div class="avatar-placeholder">USTC</div>
-        </template>
-      </van-image>
-      <p class="user-name">科大新同学</p>
-    </div>
+    <v-container>
+      <!-- 用户简况 -->
+      <v-card class="mb-4">
+        <v-card-text class="text-center pa-6">
+          <v-avatar size="80" color="primary" class="mb-4">
+            <span class="text-h5 text-white font-weight-bold">USTC</span>
+          </v-avatar>
+          <v-card-title class="pa-0">科大新同学</v-card-title>
+          <v-card-subtitle class="pa-0"> 已读 {{ store.readIds.length }} 条通知 </v-card-subtitle>
+        </v-card-text>
+      </v-card>
 
-    <!-- Ddl 追踪列表 -->
-    <van-cell-group inset class="ddl-group">
-      <van-cell
-        title="⏳ 我的 Ddl 倒计时"
-        label="收藏通知的截止倒计时"
-        center
-      >
-        <template #icon>
-          <van-icon name="clock-o" :color="iconDangerColor" size="18" />
-        </template>
-      </van-cell>
+      <!-- DDL 追踪列表 -->
+      <v-card class="mb-4">
+        <v-card-title class="d-flex align-center ga-2">
+          <v-icon color="error">$clockAlert</v-icon>
+          <span>我的 DDL 倒计时</span>
+        </v-card-title>
+        <v-divider />
 
-      <van-cell
-        v-for="item in starredNotices"
-        :key="item.id"
-        :title="item.title"
-        :label="`截止时间: ${item.deadline || '未提及'}`"
-        :value="remainingDays(item.deadline)"
-        value-class="text-highlight"
-        is-link
-        @click="goToDetail(item.id)"
-      />
+        <v-card-text v-if="starredLoading" class="d-flex justify-center pa-6" aria-live="polite">
+          <v-progress-circular indeterminate color="primary" size="28" />
+        </v-card-text>
 
-      <div v-if="starredNotices.length === 0" class="empty-ddl">
-        <p class="text-muted">暂无收藏的 Ddl 通知</p>
-        <p class="text-muted hint">去首页左滑收藏通知吧~</p>
-      </div>
-    </van-cell-group>
+        <template v-else>
+          <v-alert
+            v-if="starredLoadError"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="ma-3 mb-0"
+            role="status"
+          >
+            {{ starredLoadError }}
+            <template #append>
+              <v-btn
+                icon="$refresh"
+                variant="text"
+                size="small"
+                aria-label="重试加载收藏"
+                title="重试加载"
+                @click="loadStarredNotices"
+              />
+            </template>
+          </v-alert>
 
-    <!-- 系统入口 -->
-    <van-cell-group class="settings-group">
-      <van-cell
-        title="偏好与渠道管理"
-        icon="setting-o"
-        is-link
-        to="/subscription"
-      />
-      <van-cell
-        title="用户意见反馈箱"
-        icon="comment-o"
-        is-link
-        @click="showFeedbackPopup = true"
-      />
-    </van-cell-group>
-
-    <!-- 深色模式 -->
-    <van-cell-group title="外观" class="settings-group">
-      <van-cell title="深色模式" icon="closed-eye" center>
-        <template #default>
-          <div class="theme-toggle-row">
-            <van-tag
-              v-for="mode in (['auto', 'light', 'dark'] as DarkMode[])"
-              :key="mode"
-              :type="store.darkMode === mode ? 'primary' : 'default'"
-              size="medium"
-              plain
-              @click="store.setDarkMode(mode)"
+          <v-list v-if="starredNotices.length > 0">
+            <v-list-item
+              v-for="item in starredNotices"
+              :key="item.id"
+              :title="item.title"
+              :subtitle="`截止: ${item.deadline || '未提及'}`"
+              @click="goToDetail(item.id)"
             >
-              {{ darkModeLabels[mode] }}
-            </van-tag>
-          </div>
+              <template #append>
+                <v-chip :color="deadlineColor(item.deadline)" size="small">
+                  {{ remainingDays(item.deadline) }}
+                </v-chip>
+              </template>
+            </v-list-item>
+          </v-list>
+
+          <v-card-text v-else-if="!starredLoadError" class="text-center pa-6">
+            <v-icon size="48" color="grey" class="mb-2">$clockOutline</v-icon>
+            <div class="text-medium-emphasis">暂无收藏的 DDL 通知</div>
+            <div class="text-caption text-medium-emphasis mt-1">去首页收藏通知</div>
+          </v-card-text>
         </template>
-      </van-cell>
-    </van-cell-group>
+      </v-card>
+
+      <!-- 快捷操作 -->
+      <v-card class="mb-4">
+        <v-list>
+          <v-list-item
+            title="将已加载通知标为已读"
+            prepend-icon="$checkAll"
+            @click="markCachedNoticesRead"
+          />
+          <v-list-item
+            title="管理收藏夹"
+            prepend-icon="$folderCog"
+            append-icon="$chevronRight"
+            @click="showFolderDialog = true"
+          />
+        </v-list>
+      </v-card>
+
+      <!-- 通知设置 -->
+      <v-card class="mb-4">
+        <v-card-title>通知设置</v-card-title>
+        <v-divider />
+        <v-list>
+          <v-list-item>
+            <template #prepend>
+              <v-icon>$bell</v-icon>
+            </template>
+            <v-list-item-title>浏览器通知权限</v-list-item-title>
+            <v-list-item-subtitle>
+              {{ notificationPermissionLabel }}
+            </v-list-item-subtitle>
+            <template #append>
+              <v-btn
+                v-if="notificationPermission === 'default'"
+                size="small"
+                color="primary"
+                prepend-icon="$bellPlusOutline"
+                @click="enableNotifications"
+              >
+                授权
+              </v-btn>
+              <div
+                v-else-if="notificationPermission === 'granted'"
+                class="d-flex align-center ga-2"
+              >
+                <v-chip color="success" size="small">本设备已授权</v-chip>
+                <v-btn
+                  icon="$bellRingOutline"
+                  variant="text"
+                  size="small"
+                  aria-label="发送测试通知"
+                  title="发送测试通知"
+                  @click="sendTestNotification"
+                />
+              </div>
+              <v-chip v-else-if="notificationPermission === 'denied'" color="error" size="small">
+                已阻止
+              </v-chip>
+              <v-chip v-else size="small">不支持</v-chip>
+            </template>
+          </v-list-item>
+        </v-list>
+      </v-card>
+
+      <!-- 设置入口 -->
+      <v-card class="mb-4">
+        <v-list>
+          <v-list-item
+            title="意见反馈"
+            prepend-icon="$emailOutline"
+            append-icon="$chevronRight"
+            @click="showFeedbackPopup = true"
+          />
+        </v-list>
+      </v-card>
+
+      <!-- 深色模式 -->
+      <v-card>
+        <v-card-title>外观</v-card-title>
+        <v-divider />
+        <v-card-text>
+          <v-row align="center">
+            <v-col>深色模式</v-col>
+            <v-col cols="auto">
+              <v-chip-group
+                :model-value="store.darkMode"
+                @update:model-value="store.setDarkMode($event as DarkMode)"
+                mandatory
+              >
+                <v-chip
+                  v-for="mode in ['auto', 'light', 'dark'] as DarkMode[]"
+                  :key="mode"
+                  :value="mode"
+                  filter
+                  variant="elevated"
+                >
+                  {{ darkModeLabels[mode] }}
+                </v-chip>
+              </v-chip-group>
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
+    </v-container>
 
     <!-- 反馈弹窗 -->
-    <van-popup
-      v-model:show="showFeedbackPopup"
-      position="bottom"
-      :style="{ height: '40%', borderRadius: '16px 16px 0 0' }"
-      @open="onPopupOpen"
-      @closed="onPopupClose"
-    >
-      <div class="feedback-popup">
-        <h3>意见反馈</h3>
-        <van-field
-          v-model="feedbackText"
-          type="textarea"
-          rows="5"
-          placeholder="请告诉我们你的想法或建议..."
-          autosize
-        />
-        <van-button
-          type="primary"
-          round
-          block
-          :disabled="!feedbackText.trim()"
-          @click="submitFeedback"
-        >
-          提交反馈
-        </van-button>
-      </div>
-    </van-popup>
+    <v-dialog v-model="showFeedbackPopup" max-width="400">
+      <v-card>
+        <v-card-title class="text-center">
+          <v-icon class="mr-1">$emailOutline</v-icon>
+          意见反馈
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="text-center pa-6">
+          <div class="text-body-2 text-medium-emphasis mb-2">欢迎通过邮件反馈你的想法或建议</div>
+          <a
+            :href="`mailto:${FEEDBACK_EMAIL}`"
+            class="feedback-email text-h6 font-weight-bold text-primary text-decoration-none"
+          >
+            {{ FEEDBACK_EMAIL }}
+          </a>
+        </v-card-text>
+        <v-card-actions class="justify-center pa-4">
+          <v-btn
+            color="primary"
+            variant="tonal"
+            prepend-icon="$contentCopy"
+            @click="copyFeedbackEmail"
+          >
+            复制邮箱
+          </v-btn>
+          <v-btn color="primary" :href="`mailto:${FEEDBACK_EMAIL}`" prepend-icon="$emailOutline">
+            发邮件
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- 收藏夹管理对话框 -->
+    <FolderDialog v-if="showFolderDialog" mode="manage" @close="showFolderDialog = false" />
   </div>
 </template>
 
 <style scoped>
 .user-page {
-  padding-bottom: 60px;
   min-height: 100vh;
-  background: var(--notifai-bg-page);
+  background: rgb(var(--v-theme-background));
 }
 
-/* 用户简况 */
-.user-profile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 32px 0 24px;
-}
-
-.user-avatar {
-  border: 3px solid var(--notifai-border);
-}
-
-.avatar-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, var(--notifai-brand), var(--notifai-brand-2));
-  color: #fff;
-  font-weight: 700;
-  font-size: 16px;
-}
-
-.user-name {
-  margin-top: 12px;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--notifai-text-primary);
-}
-
-/* Ddl 列表 */
-.ddl-group {
-  margin: 12px;
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.ddl-group :deep(.text-highlight) {
-  color: var(--notifai-danger);
-  font-weight: 700;
-  font-size: 16px;
-}
-
-.empty-ddl {
-  padding: 32px 16px;
-  text-align: center;
-  background: var(--notifai-bg-card);
-}
-
-.empty-ddl .hint {
-  margin-top: 8px;
-  font-size: 12px;
-}
-
-/* 设置入口 */
-.settings-group {
-  margin: 12px;
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-/* 反馈弹窗 */
-.feedback-popup {
-  padding: 24px 16px;
-}
-
-.feedback-popup h3 {
-  text-align: center;
-  margin: 0 0 16px;
-  font-size: 17px;
-  color: var(--notifai-text-primary);
-}
-
-.feedback-popup :deep(.van-field) {
-  background: var(--notifai-bg-page);
-  border-radius: 8px;
-  margin-bottom: 16px;
-  padding: 10px;
-}
-
-.text-muted {
-  color: var(--notifai-text-muted);
-  font-size: 13px;
-}
-
-.theme-toggle-row {
-  display: flex;
-  gap: 8px;
-}
-
-.theme-toggle-row .van-tag {
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.theme-toggle-row .van-tag:active {
-  opacity: 0.7;
+.feedback-email {
+  word-break: break-all;
 }
 </style>

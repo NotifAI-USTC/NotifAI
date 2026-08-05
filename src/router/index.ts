@@ -26,11 +26,32 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../views/User.vue'),
     meta: { title: '个人中心' },
   },
+  {
+    path: '/calendar',
+    name: 'Calendar',
+    component: () => import('../views/Calendar.vue'),
+    meta: { title: '通知日历' },
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/',
+  },
 ]
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes,
+  scrollBehavior(_to, _from, savedPosition) {
+    if (savedPosition) {
+      return savedPosition
+    }
+    return { top: 0 }
+  },
+})
+
+router.afterEach((to) => {
+  const title = typeof to.meta.title === 'string' ? to.meta.title : '校园通知'
+  document.title = `${title} | NotifAI-USTC`
 })
 
 export default router

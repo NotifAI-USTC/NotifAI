@@ -1,53 +1,72 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useUserSettingsStore } from '../stores/userSettings'
+import { useRouter } from 'vue-router'
 import type { NoticeItem } from '../types/notice'
-import { isUrgent, formatRemaining } from '../utils/date'
+import { formatRemaining, isUrgent } from '../utils/date'
 
 const props = defineProps<{
   notices: NoticeItem[]
 }>()
 
-const store = useUserSettingsStore()
+const router = useRouter()
 
+/** 3 天内截止的紧急通知，按截止日期从近到远排序 */
 const urgentNotices = computed(() =>
-  props.notices.filter((n) => isUrgent(n.deadline)),
+  props.notices
+    .filter((notice) => isUrgent(notice.deadline))
+    .sort((a, b) => (a.deadline ?? '').localeCompare(b.deadline ?? '')),
 )
 
-const scrollText = computed(() => {
-  if (urgentNotices.value.length === 0) return ''
-  return urgentNotices.value
-    .map(
-      (n) =>
-        `🔥 ${n.source} 《${n.title}》 ${formatRemaining(n.deadline)}！`,
-    )
-    .join('    ')
-})
-
-const barColor = computed(() =>
-  store.isDark ? '#ff8a7a' : '#ee0a24',
-)
-
-const barBackground = computed(() =>
-  store.isDark ? '#2c1f14' : '#fff7f0',
-)
+function openNotice(id: string): void {
+  void router.push({ name: 'Detail', params: { id } })
+}
 </script>
 
 <template>
-  <van-notice-bar
-    v-if="scrollText"
-    :text="scrollText"
-    scrollable
-    left-icon="volume-o"
-    :color="barColor"
-    :background="barBackground"
-    class="ddl-notice-bar"
-  />
+  <v-alert
+    v-if="urgentNotices.length > 0"
+    type="warning"
+    variant="tonal"
+    density="compact"
+    icon="$clockAlert"
+    class="ddl-notice-bar ma-2"
+  >
+    <div class="d-flex align-center ga-2">
+      <span class="ddl-notice-bar__label text-caption font-weight-bold text-medium-emphasis">
+        紧急 DDL
+      </span>
+
+      <v-slide-group class="ddl-notice-bar__slider" show-arrows mandatory>
+        <v-slide-group-item v-for="notice in urgentNotices" :key="notice.id">
+          <v-chip
+            class="ma-1"
+            size="small"
+            :color="isUrgent(notice.deadline, 0) ? 'error' : 'warning'"
+            variant="flat"
+            :aria-label="`查看紧急通知：${notice.title}，${formatRemaining(notice.deadline)}`"
+            @click="openNotice(notice.id)"
+          >
+            <v-icon start size="small">$clockAlert</v-icon>
+            {{ notice.source }}《{{ notice.title }}》{{ formatRemaining(notice.deadline) }}
+          </v-chip>
+        </v-slide-group-item>
+      </v-slide-group>
+    </div>
+  </v-alert>
 </template>
 
 <style scoped>
 .ddl-notice-bar {
-  margin: 8px 12px;
-  border-radius: 8px;
+  margin-inline: 8px;
+}
+
+.ddl-notice-bar__label {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ddl-notice-bar__slider {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 </style>
