@@ -1,74 +1,70 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Project
 
-## Project overview
+NotifAI-USTC is a Vue 3 and Vuetify frontend for browsing USTC campus notices. It presents server-provided AI summaries and deadlines while keeping user preferences in LocalStorage. The backend, crawler, AI pipeline, feedback receiver, and push service are outside this repository.
 
-**NotifAI-USTC** — a mobile-first campus notification AI dashboard for USTC (University of Science and Technology of China). Vue 3 + Vant UI frontend. Students browse school notices enriched with AI summaries, Ddl tracking, and personalized subscription filters. No login — all user preferences live in LocalStorage.
-
-**`plan.md` is the authoritative spec.** Read it first before writing any code. It defines the full UI tree, Vant component mappings, data contracts, and engineering constraints.
+`README.md` is the authoritative product and engineering contract, including the backend API contract and data boundaries.
 
 ## Commands
 
 ```bash
-npm run dev       # Start Vite dev server (HMR)
-npm run build     # Type-check (vue-tsc) then production build
-npm run preview   # Preview production build locally
+npm run dev
+npm run lint
+npm run type-check
+npm run test
+npm run test:e2e
+npm run build
+npm run check
 ```
 
-No linter or test runner is configured yet.
+Lint is read-only by default. Use `npm run lint:fix` and `npm run format` only when edits are intended.
 
-## Tech stack
+## Stack
 
-| Concern | Choice | Notes |
-|---|---|---|
-| Framework | Vue 3 | `<script setup>` composition API only |
-| Language | TypeScript 6 | Strict mode; `noUnusedLocals`, `noUnusedParameters` on |
-| Build | Vite 8 | `@vitejs/plugin-vue` |
-| UI | Vant 4 | Mobile-first component library |
-| Routing | Vue Router (not yet installed) | **Must use hash mode** (`createWebHashHistory`) for Capacitor compatibility |
-| State | Pinia (not yet installed) | With LocalStorage persistence for user prefs |
-| HTTP | Axios (not yet installed) | Unified interceptors, read base URL from `import.meta.env.VITE_API_BASE_URL` |
-
-## Current project state
-
-The repo is a fresh Vite scaffold — only the default Vue + Vite boilerplate exists (`src/App.vue`, `src/components/HelloWorld.vue`, `src/style.css`, scaffold assets). No router, store, API layer, or Vant setup has been done. The four core views (Home, Detail, Subscription, User) and supporting modules (router, stores, utils) still need to be built per `plan.md`.
+- Vue 3 Composition API with `<script setup>`
+- TypeScript strict mode
+- Vuetify 3 with Vite auto-import
+- Vue Router using `createWebHashHistory`
+- Pinia with validated, versioned LocalStorage persistence
+- Axios with runtime validation at the API boundary
+- Vitest, Vue Test Utils, and Playwright
 
 ## Architecture
 
-### Target directory layout (from plan.md)
-
-```
+```text
 src/
-├── assets/          # Static assets, global styles
-├── components/      # Reusable components (NoticeCard, etc.)
-├── router/          # index.ts — hash mode, four routes
-├── stores/          # Pinia stores (userSettings with LocalStorage sync)
-├── utils/           # request.ts (Axios wrapper), date.ts (deadline helpers)
-├── views/           # Home.vue, Detail.vue, Subscription.vue, User.vue
-├── App.vue          # Root with Tabbar navigation
-└── main.ts          # Entry — createApp, register Vant + router + Pinia
+├── components/   reusable business UI
+├── composables/  shared browser and UI state
+├── mock/         development-only notice data
+├── plugins/      Vuetify setup
+├── router/       hash routes and document titles
+├── stores/       preferences, folders, and notice cache
+├── types/        API and domain contracts
+├── utils/        requests, validation, dates, sharing
+└── views/        application pages
 ```
 
-### Data flow
+The server owns notices, source classification, summaries, and extracted fields. The client owns only local preferences and a non-authoritative in-memory notice cache.
 
-- **Server** owns all notice data: crawled content, AI summaries, classification tags, structured three-element metadata (deadline, target audience, core action).
-- **Client** stores only user preferences in LocalStorage: subscribed departments, blacklist keywords, read/starred notice IDs. No auth token, no user accounts.
-- **API response shape** is defined as `NoticeItem` in `plan.md` — every field is typed; `deadline` and `attachments` can be null/empty.
+## Required Invariants
 
-### Routing (must use hash mode)
+1. Keep hash routing for static and Capacitor-compatible deployment.
+2. Read the API base from `VITE_API_BASE_URL`; reject credentials, query strings, and fragments. Mock data requires `VITE_USE_MOCK=true` and must never run in production.
+3. Validate every API and LocalStorage payload at runtime before use.
+4. Treat `cleanContent`, URLs, route params, and clipboard operations as untrusted boundaries.
+5. Never allow `on*` attributes, scripts, forms, iframe, arbitrary inline styles, or untrusted active media through notice HTML.
+6. Parse date-only values as local calendar dates. Do not pass `YYYY-MM-DD` directly to `new Date()`.
+7. Preserve stale data during request failures and show an explicit retry state. Do not convert errors into empty results.
+8. Cancel or supersede stale list/detail requests before committing their results.
+9. Do not claim push delivery, feedback submission, or all-record operations unless the full backend/browser path exists.
+10. All core actions must work with keyboard and screen readers; icon-only buttons need accessible names.
 
-| Path | View | Purpose |
-|---|---|---|
-| `/` | Home | Notice feed with tabs, Ddl notice-bar, swipe actions |
-| `/detail/:id` | Detail | AI summary card + original content + attachments |
-| `/subscription` | Subscription | Department toggles + keyword blacklist |
-| `/user` | User | Ddl countdown tracker + settings entry points |
+## Environment
 
-## Critical constraints
+```dotenv
+VITE_API_BASE_URL=http://localhost:3000/api
+VITE_USE_MOCK=false
+```
 
-1. **Hash mode router** (`createWebHashHistory`) — required for Capacitor `file://` protocol. Never use HTML5 history mode.
-2. **All API calls** must read the base URL from `import.meta.env.VITE_API_BASE_URL`. Never hardcode server IPs, student IDs, or API keys.
-3. **Null-safe rendering** — when `deadline`, `targetAudience`, or any optional field is null/empty, display "未提及" or "未知"; never guess or fabricate defaults.
-4. **Image safety** — all `<img>` in rendered notice content must have `max-width: 100%; height: auto;` to prevent layout breakage from oversized school-site images.
-5. **Android back-button** — `<van-popup>` overlays must intercept physical back to close the popup, not exit the app.
+`VITE_*` values are public browser configuration, never secrets. Production servers should supply CSP, HSTS, CORS, and cache headers.
