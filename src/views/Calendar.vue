@@ -12,7 +12,8 @@ import {
   parseLocalDate,
   shiftLocalMonth,
 } from '../utils/date'
-import { normalizeNoticeSource } from '../types/notice'
+import { getSourceColor } from '../types/notice'
+import { getContrastTextColor } from '../utils/color'
 import type { NoticeItem } from '../types/notice'
 import { useWindowSize } from '../composables/useWindowSize'
 import { isOffsetPageInconsistent } from '../utils/pagination'
@@ -44,46 +45,6 @@ const calendarDate = ref(getLocalToday())
 const selectedDate = ref<string | null>(null)
 let loadRequestId = 0
 let loadController: AbortController | null = null
-
-// 来源颜色映射
-const SOURCE_COLORS: Record<string, string> = {
-  教务处: '#4a6cf7',
-  本科生院: '#6366f1',
-  学工部: '#8b5cf6',
-  校团委: '#ec4899',
-  科研部: '#06b6d4',
-  国际合作与交流部: '#14b8a6',
-  图书馆: '#f59e0b',
-  计算机学院: '#10b981',
-  大数据学院: '#f97316',
-  物理学院: '#a855f7',
-  数学科学学院: '#3b82f6',
-  化学与材料科学学院: '#ef4444',
-  生命科学与医学部: '#84cc16',
-  信息科学技术学院: '#0ea5e9',
-  地球与空间科学学院: '#78716c',
-}
-
-function getSourceColor(source: string): string {
-  const normalizedSource = normalizeNoticeSource(source)
-  return Object.hasOwn(SOURCE_COLORS, normalizedSource)
-    ? SOURCE_COLORS[normalizedSource]
-    : '#6b7280'
-}
-
-function getContrastTextColor(background: string): '#000000' | '#ffffff' {
-  const channels = background
-    .slice(1)
-    .match(/.{2}/g)
-    ?.map((channel) => Number.parseInt(channel, 16) / 255)
-  if (!channels || channels.length !== 3 || channels.some(Number.isNaN)) return '#ffffff'
-
-  const [red, green, blue] = channels.map((channel) =>
-    channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
-  )
-  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
-  return luminance > 0.179 ? '#000000' : '#ffffff'
-}
 
 function getMonthRange(dateStr: string): { start: string; end: string } | null {
   const date = parseLocalDate(dateStr)

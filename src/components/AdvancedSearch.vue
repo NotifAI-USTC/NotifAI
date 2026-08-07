@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { DEPARTMENTS } from '../types/notice'
+import {
+  clearSearchHistory,
+  loadSearchHistory,
+  recordSearchHistory,
+} from '../utils/searchHistory'
 
 const emit = defineEmits<{
   search: [filters: SearchFilters]
@@ -50,32 +55,11 @@ const sources = computed(() => {
   return DEPARTMENTS.map((d) => d.name)
 })
 
-// 搜索历史
-const searchHistory = ref<string[]>([])
-try {
-  const saved = localStorage.getItem('notifai-search-history')
-  if (saved) {
-    const parsed: unknown = JSON.parse(saved)
-    searchHistory.value = Array.isArray(parsed)
-      ? parsed
-          .filter((item): item is string => typeof item === 'string' && item.length <= 200)
-          .slice(0, 10)
-      : []
-  }
-} catch {
-  searchHistory.value = []
-}
+// 搜索历史（带校验的 LocalStorage 存储）
+const searchHistory = ref<string[]>(loadSearchHistory())
 
 function saveSearchHistory(keyword: string) {
-  if (!keyword.trim()) return
-  const history = searchHistory.value.filter((h) => h !== keyword)
-  history.unshift(keyword)
-  searchHistory.value = history.slice(0, 10)
-  try {
-    localStorage.setItem('notifai-search-history', JSON.stringify(searchHistory.value))
-  } catch {
-    // Search remains usable when storage is unavailable.
-  }
+  searchHistory.value = recordSearchHistory(keyword)
 }
 
 function applyHistory(keyword: string) {
@@ -83,12 +67,8 @@ function applyHistory(keyword: string) {
 }
 
 function clearHistory() {
+  clearSearchHistory()
   searchHistory.value = []
-  try {
-    localStorage.removeItem('notifai-search-history')
-  } catch {
-    // Search remains usable when storage is unavailable.
-  }
 }
 
 function addTag() {

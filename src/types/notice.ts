@@ -56,3 +56,33 @@ export const DEPARTMENTS: Department[] = [
   { id: 'gx', name: '信息科学技术学院', group: '二级学院' },
   { id: 'dx', name: '地球与空间科学学院', group: '二级学院' },
 ]
+
+/** 来源展示颜色（与部门表保持同一处维护，避免多处漂移） */
+export const SOURCE_COLORS: Readonly<Record<string, string>> = {
+  教务处: '#4a6cf7',
+  本科生院: '#6366f1',
+  学工部: '#8b5cf6',
+  校团委: '#ec4899',
+  科研部: '#06b6d4',
+  国际合作与交流部: '#14b8a6',
+  图书馆: '#f59e0b',
+  后勤保障处: '#f97316',
+  保卫处: '#64748b',
+  就业指导中心: '#10b981',
+  计算机学院: '#10b981',
+  大数据学院: '#f97316',
+  物理学院: '#a855f7',
+  数学科学学院: '#3b82f6',
+  化学与材料科学学院: '#ef4444',
+  生命科学与医学部: '#84cc16',
+  信息科学技术学院: '#0ea5e9',
+  地球与空间科学学院: '#78716c',
+}
+
+export const DEFAULT_SOURCE_COLOR = '#6b7280'
+
+/** 获取通知来源的展示颜色，未知来源回退到默认灰色。 */
+export function getSourceColor(source: string): string {
+  const normalized = normalizeNoticeSource(source)
+  return Object.hasOwn(SOURCE_COLORS, normalized) ? SOURCE_COLORS[normalized] : DEFAULT_SOURCE_COLOR
+}
