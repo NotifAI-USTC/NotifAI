@@ -19,20 +19,20 @@ const router = useRouter()
 const store = useUserSettingsStore()
 const snackbar = useSnackbar()
 
-const FAVORITE_REQUEST_CONCURRENCY = 4
-const FAVORITE_REQUEST_LIMIT = 100
+const IMPORTANT_REQUEST_CONCURRENCY = 4
+const IMPORTANT_REQUEST_LIMIT = 100
 const FEEDBACK_EMAIL = 'cuijunxi@mail.ustc.edu.cn'
 
-const starredNotices = ref<NoticeItem[]>([])
-const starredLoading = ref(true)
-const starredLoadError = ref('')
+const importantNotices = ref<NoticeItem[]>([])
+const importantLoading = ref(true)
+const importantLoadError = ref('')
 const showFeedbackPopup = ref(false)
 const showFolderDialog = ref(false)
 const showClearReadConfirm = ref(false)
 const importInput = ref<HTMLInputElement | null>(null)
 const notificationPermission = ref<NotificationPermission | null>(null)
-let starredRequestId = 0
-let starredRequestController: AbortController | null = null
+let importantRequestId = 0
+let importantRequestController: AbortController | null = null
 
 const darkModeLabels: Record<DarkMode, string> = {
   auto: '跟随系统',
@@ -56,21 +56,21 @@ function refreshNotificationPermission() {
   store.setNotificationEnabled(notificationPermission.value === 'granted')
 }
 
-async function loadStarredNotices() {
-  const requestId = ++starredRequestId
-  starredRequestController?.abort()
+async function loadImportantNotices() {
+  const requestId = ++importantRequestId
+  importantRequestController?.abort()
   const controller = new AbortController()
-  starredRequestController = controller
-  const allIds = [...store.urgentStarredIds]
-  const omittedCount = Math.max(0, allIds.length - FAVORITE_REQUEST_LIMIT)
-  const ids = allIds.slice(-FAVORITE_REQUEST_LIMIT)
+  importantRequestController = controller
+  const allIds = [...store.importantIds]
+  const omittedCount = Math.max(0, allIds.length - IMPORTANT_REQUEST_LIMIT)
+  const ids = allIds.slice(-IMPORTANT_REQUEST_LIMIT)
   const items: NoticeItem[] = []
   let nextIndex = 0
   let failedCount = 0
   let staleFallbackCount = 0
 
-  starredLoading.value = true
-  starredLoadError.value = ''
+  importantLoading.value = true
+  importantLoadError.value = ''
 
   async function worker() {
     while (nextIndex < ids.length) {
@@ -80,11 +80,11 @@ async function loadStarredNotices() {
       const cached = store.getCachedNotice(id)
       try {
         const notice = await fetchNoticeById(id, controller.signal)
-        if (controller.signal.aborted || requestId !== starredRequestId) return
+        if (controller.signal.aborted || requestId !== importantRequestId) return
         store.cacheNotice(notice)
         if (notice.deadline) items.push(notice)
       } catch {
-        if (controller.signal.aborted || requestId !== starredRequestId) return
+        if (controller.signal.aborted || requestId !== importantRequestId) return
         if (cached?.deadline) {
           items.push(cached)
           staleFallbackCount += 1
@@ -96,24 +96,24 @@ async function loadStarredNotices() {
   }
 
   try {
-    const workerCount = Math.min(FAVORITE_REQUEST_CONCURRENCY, ids.length)
+    const workerCount = Math.min(IMPORTANT_REQUEST_CONCURRENCY, ids.length)
     await Promise.all(Array.from({ length: workerCount }, () => worker()))
 
-    if (requestId !== starredRequestId) return
+    if (requestId !== importantRequestId) return
 
     items.sort((a, b) => (a.deadline ?? '').localeCompare(b.deadline ?? ''))
-    starredNotices.value = items
+    importantNotices.value = items
 
     const warnings: string[] = []
-    if (omittedCount > 0) warnings.push(`仅检查最近 ${FAVORITE_REQUEST_LIMIT} 条收藏`)
+    if (omittedCount > 0) warnings.push(`仅检查最近 ${IMPORTANT_REQUEST_LIMIT} 条重要通知`)
     if (staleFallbackCount > 0) {
-      warnings.push(`有 ${staleFallbackCount} 条收藏使用缓存数据`)
+      warnings.push(`有 ${staleFallbackCount} 条重要通知使用缓存数据`)
     }
-    if (failedCount > 0) warnings.push(`有 ${failedCount} 条收藏加载失败`)
-    starredLoadError.value = warnings.join('；')
+    if (failedCount > 0) warnings.push(`有 ${failedCount} 条重要通知加载失败`)
+    importantLoadError.value = warnings.join('；')
   } finally {
-    if (starredRequestController === controller) starredRequestController = null
-    if (requestId === starredRequestId) starredLoading.value = false
+    if (importantRequestController === controller) importantRequestController = null
+    if (requestId === importantRequestId) importantLoading.value = false
   }
 }
 
@@ -159,20 +159,20 @@ function handleClearReadHistory() {
 onMounted(() => {
   refreshNotificationPermission()
   window.addEventListener('focus', refreshNotificationPermission)
-  void loadStarredNotices()
+  void loadImportantNotices()
 })
 
 watch(
-  () => store.urgentStarredIds.join('\u0000'),
+  () => store.importantIds.join('\u0000'),
   () => {
-    void loadStarredNotices()
+    void loadImportantNotices()
   },
 )
 
 onBeforeUnmount(() => {
-  starredRequestId += 1
-  starredRequestController?.abort()
-  starredRequestController = null
+  importantRequestId += 1
+  importantRequestController?.abort()
+  importantRequestController = null
   window.removeEventListener('focus', refreshNotificationPermission)
 })
 
@@ -262,35 +262,35 @@ function markCachedNoticesRead() {
         </v-card-title>
         <v-divider />
 
-        <v-card-text v-if="starredLoading" class="d-flex justify-center pa-6" aria-live="polite">
+        <v-card-text v-if="importantLoading" class="d-flex justify-center pa-6" aria-live="polite">
           <v-progress-circular indeterminate color="primary" size="28" />
         </v-card-text>
 
         <template v-else>
           <v-alert
-            v-if="starredLoadError"
+            v-if="importantLoadError"
             type="warning"
             variant="tonal"
             density="compact"
             class="ma-3 mb-0"
             role="status"
           >
-            {{ starredLoadError }}
+            {{ importantLoadError }}
             <template #append>
               <v-btn
                 icon="$refresh"
                 variant="text"
                 size="small"
-                aria-label="重试加载收藏"
+                aria-label="重试加载重要通知"
                 title="重试加载"
-                @click="loadStarredNotices"
+                @click="loadImportantNotices"
               />
             </template>
           </v-alert>
 
-          <v-list v-if="starredNotices.length > 0">
+          <v-list v-if="importantNotices.length > 0">
             <v-list-item
-              v-for="item in starredNotices"
+              v-for="item in importantNotices"
               :key="item.id"
               :title="item.title"
               :subtitle="`截止: ${item.deadline || '未提及'}`"
@@ -304,10 +304,10 @@ function markCachedNoticesRead() {
             </v-list-item>
           </v-list>
 
-          <v-card-text v-else-if="!starredLoadError" class="text-center pa-6">
+          <v-card-text v-else-if="!importantLoadError" class="text-center pa-6">
             <v-icon size="48" color="grey" class="mb-2">$clockOutline</v-icon>
-            <div class="text-medium-emphasis">暂无收藏的 DDL 通知</div>
-            <div class="text-caption text-medium-emphasis mt-1">去首页收藏通知</div>
+            <div class="text-medium-emphasis">暂无重要的 DDL 通知</div>
+            <div class="text-caption text-medium-emphasis mt-1">去首页将通知标记为重要</div>
           </v-card-text>
         </template>
       </v-card>

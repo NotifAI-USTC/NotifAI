@@ -19,6 +19,7 @@ const tabs = [
   { name: 'Home', path: '/', icon: '$home', label: '首页' },
   { name: 'Calendar', path: '/calendar', icon: '$calendar', label: '日历' },
   { name: 'Subscription', path: '/subscription', icon: '$tagMultiple', label: '订阅' },
+  { name: 'Favorites', path: '/favorites', icon: '$star', label: '收藏' },
   { name: 'User', path: '/user', icon: '$account', label: '我的' },
 ]
 
@@ -55,8 +56,8 @@ watch(
 
 <template>
   <v-app>
-    <!-- 桌面端：侧边导航栏 -->
-    <v-navigation-drawer v-if="!isMobile" permanent rail>
+    <!-- 桌面端：侧边导航栏（悬停展开显示文字） -->
+    <v-navigation-drawer v-if="!isMobile" permanent rail expand-on-hover>
       <v-list nav density="compact">
         <v-list-item
           v-for="tab in tabs"

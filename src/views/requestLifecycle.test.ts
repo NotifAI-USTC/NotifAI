@@ -9,6 +9,7 @@ interface MockSettingsStore {
   customTags: Record<string, string[]>
   starredIds: string[]
   urgentStarredIds: string[]
+  importantIds: string[]
   darkMode: string
   readIds: string[]
   isRead: () => boolean
@@ -54,6 +55,7 @@ vi.mock('../stores/userSettings', async () => {
     customTags: Object.create(null) as Record<string, string[]>,
     starredIds: ['notice-1'],
     urgentStarredIds: ['notice-1'],
+    importantIds: ['notice-1'],
     darkMode: 'auto',
     readIds: [] as string[],
     isRead: () => false,
@@ -228,7 +230,7 @@ describe('view request lifecycle', () => {
     expect(wrapper.text()).toContain('无法加载当前范围通知')
   })
 
-  it('refreshes a starred DDL even when a cached deadline is available', async () => {
+  it('refreshes an important DDL even when a cached deadline is available', async () => {
     const cachedNotice = makeNotice({ title: '缓存中的通知', deadline: '2026-08-10' })
     const refreshedNotice = makeNotice({ title: '刷新后的通知', deadline: '2026-08-20' })
     mocks.getCachedNotice.mockReturnValue(cachedNotice)
@@ -243,7 +245,7 @@ describe('view request lifecycle', () => {
     expect(wrapper.html()).toContain('刷新后的通知')
   })
 
-  it('falls back to a cached starred DDL and warns when refresh fails', async () => {
+  it('falls back to a cached important DDL and warns when refresh fails', async () => {
     const cachedNotice = makeNotice({ title: '缓存中的通知', deadline: '2026-08-10' })
     mocks.getCachedNotice.mockReturnValue(cachedNotice)
     mocks.fetchNoticeById.mockRejectedValue(new Error('network unavailable'))

@@ -15,6 +15,7 @@ const PAGES = [
   { route: '/#/', name: '首页' },
   { route: '/#/calendar', name: '通知日历' },
   { route: '/#/subscription', name: '订阅与屏蔽' },
+  { route: '/#/favorites', name: '我的收藏' },
   { route: '/#/user', name: '个人中心' },
 ] as const
 

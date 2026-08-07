@@ -33,6 +33,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '通知日历' },
   },
   {
+    path: '/favorites',
+    name: 'Favorites',
+    component: () => import('../views/Favorites.vue'),
+    meta: { title: '我的收藏' },
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },
