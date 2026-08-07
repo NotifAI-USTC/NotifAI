@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue'
+import QRCode from 'qrcode'
 import type { NoticeItem } from '../types/notice'
+import { buildNoticeUrl } from '../utils/appUrl'
 import {
   copyNoticeContent,
   copyNoticeLink,
@@ -78,6 +80,48 @@ function handleCopyContent(): Promise<void> {
 function handleCopyShareText(): Promise<void> {
   return runCopy(() => copyText(generateShareText(props.notice)), '分享文本已复制到剪贴板')
 }
+
+const showQr = ref(false)
+const qrDataUrl = ref('')
+const qrError = ref('')
+
+function noticeUrl(): string {
+  return buildNoticeUrl(props.notice.id)
+}
+
+async function handleShowQr(): Promise<void> {
+  if (showQr.value) {
+    showQr.value = false
+    return
+  }
+  if (actionPending.value) return
+  actionPending.value = true
+  qrError.value = ''
+  try {
+    qrDataUrl.value = await QRCode.toDataURL(noticeUrl(), {
+      width: 320,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+    })
+    showQr.value = true
+  } catch {
+    qrError.value = '二维码生成失败，请重试'
+  } finally {
+    actionPending.value = false
+  }
+}
+
+function handleSaveQr(): void {
+  const anchor = document.createElement('a')
+  anchor.href = qrDataUrl.value
+  anchor.download = `notifai-qr-${props.notice.id}.png`
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  snackbarText.value = '二维码图片已保存'
+  snackbarColor.value = 'success'
+  showSnackbar.value = true
+}
 </script>
 
 <template>
@@ -129,7 +173,31 @@ function handleCopyShareText(): Promise<void> {
             :disabled="actionPending"
             @click="handleCopyShareText"
           />
+          <v-list-item
+            prepend-icon="$qrcode"
+            title="二维码分享"
+            subtitle="生成二维码，扫码打开通知"
+            :disabled="actionPending"
+            @click="handleShowQr"
+          />
         </v-list>
+
+        <!-- 二维码 -->
+        <div v-if="qrError" class="text-error mt-2">{{ qrError }}</div>
+        <div v-if="showQr" class="qr-block">
+          <img :src="qrDataUrl" alt="通知分享二维码" class="qr-image" />
+          <div class="text-caption text-medium-emphasis qr-link">{{ noticeUrl() }}</div>
+          <v-btn
+            size="small"
+            color="primary"
+            variant="tonal"
+            prepend-icon="$fileDownload"
+            class="mt-2"
+            @click="handleSaveQr"
+          >
+            保存二维码图片
+          </v-btn>
+        </div>
       </v-card-text>
     </v-card>
 
@@ -146,5 +214,27 @@ function handleCopyShareText(): Promise<void> {
   background: rgb(var(--v-theme-surface-variant));
   color: rgb(var(--v-theme-on-surface-variant));
   border-radius: 8px;
+}
+
+.qr-block {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.qr-image {
+  width: 200px;
+  height: 200px;
+  image-rendering: pixelated;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--v-theme-surface-variant));
+}
+
+.qr-link {
+  max-width: 100%;
+  word-break: break-all;
+  text-align: center;
+  margin-top: 8px;
 }
 </style>

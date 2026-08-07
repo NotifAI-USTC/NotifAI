@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   copyNoticeLink: vi.fn(),
   copyNoticeContent: vi.fn(),
   copyText: vi.fn(),
+  qrToDataURL: vi.fn(),
 }))
 
 vi.mock('../utils/share', () => ({
@@ -16,6 +17,14 @@ vi.mock('../utils/share', () => ({
   copyText: mocks.copyText,
   generateShareText: () => 'share text',
   isShareSupported: () => true,
+}))
+
+vi.mock('qrcode', () => ({
+  default: { toDataURL: mocks.qrToDataURL },
+}))
+
+vi.mock('../utils/appUrl', () => ({
+  buildNoticeUrl: (id: string) => `https://notifai.example/#/detail/${id}`,
 }))
 
 import ShareDialog from './ShareDialog.vue'
@@ -93,5 +102,32 @@ describe('ShareDialog', () => {
 
     expect(wrapper.emitted('close')).toBeUndefined()
     expect(wrapper.text()).toContain('复制失败')
+  })
+
+  it('generates a QR code for the notice URL and reveals it', async () => {
+    mocks.qrToDataURL.mockResolvedValue('data:image/png;base64,FAKE')
+    const wrapper = mountDialog()
+
+    await wrapper.find('[title="二维码分享"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.qrToDataURL).toHaveBeenCalledWith(
+      'https://notifai.example/#/detail/notice-1',
+      expect.objectContaining({ width: 320 }),
+    )
+    const img = wrapper.find('.qr-image')
+    expect(img.exists()).toBe(true)
+    expect(img.attributes('src')).toBe('data:image/png;base64,FAKE')
+    expect(wrapper.text()).toContain('https://notifai.example/#/detail/notice-1')
+  })
+
+  it('reports a QR generation failure', async () => {
+    mocks.qrToDataURL.mockRejectedValue(new Error('boom'))
+    const wrapper = mountDialog()
+
+    await wrapper.find('[title="二维码分享"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('二维码生成失败')
   })
 })
