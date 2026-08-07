@@ -86,3 +86,39 @@ export function getSourceColor(source: string): string {
   const normalized = normalizeNoticeSource(source)
   return Object.hasOwn(SOURCE_COLORS, normalized) ? SOURCE_COLORS[normalized] : DEFAULT_SOURCE_COLOR
 }
+
+/** 日历轻量视图条目（GET /notices/calendar） */
+export interface CalendarItem {
+  id: string
+  title: string
+  source: string
+  publishDate: string
+  deadline: string | null
+}
+
+/** 日历轻量视图 API 响应 */
+export interface CalendarListResponse {
+  items: CalendarItem[]
+}
+
+/** 批量详情 API 响应（POST /notices/batch） */
+export interface NoticeBatchResponse {
+  items: NoticeItem[]
+  missing: string[]
+}
+
+/** 来源列表条目（GET /sources） */
+export interface SourceItem {
+  name: string
+  group: string
+  noticeCount: number
+}
+
+/** 聚合统计 API 响应（GET /stats） */
+export interface StatsResponse {
+  total: number
+  sourceCount: number
+  last7DaysDdl: number
+  last24hNew: number
+  lastCrawlAt: string | null
+}

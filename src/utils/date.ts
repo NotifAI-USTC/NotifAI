@@ -106,3 +106,40 @@ export function formatPublishDate(dateStr: string): string {
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}年${m}月${day}日`
 }
+
+/** 计算本地日期所属的 ISO 周序号（1-53）。 */
+export function getIsoWeekNumber(dateStr: string): number | null {
+  const date = parseLocalDate(dateStr)
+  if (!date) return null
+
+  // ISO 8601：周四所在的周为当前周
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const dayNr = (date.getDay() + 6) % 7 // 周一=0 ... 周日=6
+  target.setDate(target.getDate() - dayNr + 3) // 移到本周周四
+
+  const firstThursday = target.valueOf()
+  target.setMonth(0, 1)
+  if (target.getDay() !== 4) {
+    target.setMonth(0, 1 + ((4 - target.getDay() + 7) % 7))
+  }
+  return 1 + Math.ceil((firstThursday - target.valueOf()) / (7 * 24 * 60 * 60 * 1000))
+}
+
+/** 计算本地日期所属的 ISO 周年（可能与日历年不同）。 */
+export function getIsoWeekYear(dateStr: string): number | null {
+  const date = parseLocalDate(dateStr)
+  if (!date) return null
+
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const dayNr = (date.getDay() + 6) % 7
+  target.setDate(target.getDate() - dayNr + 3) // 本周周四的年份即 ISO 周年
+  return target.getFullYear()
+}
+
+/** 返回本地日期所属的 ISO 周字符串，如 "2026-W32"。无效日期返回 null。 */
+export function getIsoWeek(dateStr: string): string | null {
+  const year = getIsoWeekYear(dateStr)
+  const week = getIsoWeekNumber(dateStr)
+  if (year === null || week === null) return null
+  return `${year}-W${String(week).padStart(2, '0')}`
+}

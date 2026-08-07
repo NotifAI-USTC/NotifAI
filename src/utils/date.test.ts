@@ -4,6 +4,7 @@ import {
   formatLocalDate,
   formatPublishDate,
   formatRemaining,
+  getIsoWeek,
   getLocalToday,
   isUrgent,
   parseLocalDate,
@@ -84,5 +85,28 @@ describe('shiftLocalDays', () => {
   it('rejects invalid input', () => {
     expect(shiftLocalDays('invalid', 1)).toBeNull()
     expect(shiftLocalDays('2026-08-07', 1.5)).toBeNull()
+  })
+})
+
+
+describe('getIsoWeek', () => {
+  it('returns ISO week strings for known dates', () => {
+    expect(getIsoWeek('2026-01-01')).toBe('2026-W01')
+    expect(getIsoWeek('2026-08-03')).toBe('2026-W32') // 周一
+    expect(getIsoWeek('2026-08-07')).toBe('2026-W32') // 周五
+    expect(getIsoWeek('2026-08-09')).toBe('2026-W32') // 周日
+    expect(getIsoWeek('2026-08-10')).toBe('2026-W33') // 下周一
+  })
+
+  it('handles ISO year boundaries', () => {
+    // 2025-12-29（周一）属于 2026 年第 1 周
+    expect(getIsoWeek('2025-12-29')).toBe('2026-W01')
+    // 2027-01-01（周五）属于 2026 年第 53 周
+    expect(getIsoWeek('2027-01-01')).toBe('2026-W53')
+  })
+
+  it('returns null for invalid dates', () => {
+    expect(getIsoWeek('not-a-date')).toBeNull()
+    expect(getIsoWeek('')).toBeNull()
   })
 })

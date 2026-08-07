@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
-import { fetchNoticeById } from '../utils/request'
+import { fetchNoticesByIds } from '../utils/request'
 import { calculateRemainingDays, getLocalToday } from '../utils/date'
 import type { DarkMode } from '../stores/userSettings'
 import type { NoticeItem } from '../types/notice'
@@ -19,8 +19,8 @@ const router = useRouter()
 const store = useUserSettingsStore()
 const snackbar = useSnackbar()
 
-const IMPORTANT_REQUEST_CONCURRENCY = 4
-const IMPORTANT_REQUEST_LIMIT = 100
+const IMPORTANT_BATCH_SIZE = 500
+const IMPORTANT_REQUEST_LIMIT = 500
 const FEEDBACK_EMAIL = 'cuijunxi@mail.ustc.edu.cn'
 
 const importantNotices = ref<NoticeItem[]>([])
@@ -65,41 +65,48 @@ async function loadImportantNotices() {
   const omittedCount = Math.max(0, allIds.length - IMPORTANT_REQUEST_LIMIT)
   const ids = allIds.slice(-IMPORTANT_REQUEST_LIMIT)
   const items: NoticeItem[] = []
-  let nextIndex = 0
   let failedCount = 0
   let staleFallbackCount = 0
 
   importantLoading.value = true
   importantLoadError.value = ''
 
-  async function worker() {
-    while (nextIndex < ids.length) {
-      const id = ids[nextIndex]
-      nextIndex += 1
-
-      const cached = store.getCachedNotice(id)
+  try {
+    // 分批调用批量详情接口（每批 ≤ 500），替代原来的 N+1 逐条请求
+    for (let start = 0; start < ids.length; start += IMPORTANT_BATCH_SIZE) {
+      if (controller.signal.aborted || requestId !== importantRequestId) return
+      const chunk = ids.slice(start, start + IMPORTANT_BATCH_SIZE)
       try {
-        const notice = await fetchNoticeById(id, controller.signal)
+        const result = await fetchNoticesByIds(chunk, controller.signal)
         if (controller.signal.aborted || requestId !== importantRequestId) return
-        store.cacheNotice(notice)
-        if (notice.deadline) items.push(notice)
+        for (const notice of result.items) {
+          store.cacheNotice(notice)
+          if (notice.deadline) items.push(notice)
+        }
+        // 后端缺失的 ID 回退到本地缓存
+        for (const missingId of result.missing) {
+          const cached = store.getCachedNotice(missingId)
+          if (cached?.deadline) {
+            items.push(cached)
+            staleFallbackCount += 1
+          } else {
+            failedCount += 1
+          }
+        }
       } catch {
         if (controller.signal.aborted || requestId !== importantRequestId) return
-        if (cached?.deadline) {
-          items.push(cached)
-          staleFallbackCount += 1
-        } else {
-          failedCount += 1
+        // 整批请求失败时逐条回退到缓存
+        for (const id of chunk) {
+          const cached = store.getCachedNotice(id)
+          if (cached?.deadline) {
+            items.push(cached)
+            staleFallbackCount += 1
+          } else {
+            failedCount += 1
+          }
         }
       }
     }
-  }
-
-  try {
-    const workerCount = Math.min(IMPORTANT_REQUEST_CONCURRENCY, ids.length)
-    await Promise.all(Array.from({ length: workerCount }, () => worker()))
-
-    if (requestId !== importantRequestId) return
 
     items.sort((a, b) => (a.deadline ?? '').localeCompare(b.deadline ?? ''))
     importantNotices.value = items
@@ -111,6 +118,9 @@ async function loadImportantNotices() {
     }
     if (failedCount > 0) warnings.push(`有 ${failedCount} 条重要通知加载失败`)
     importantLoadError.value = warnings.join('；')
+  } catch (error) {
+    if (controller.signal.aborted || requestId !== importantRequestId) return
+    importantLoadError.value = error instanceof Error ? error.message : '重要通知加载失败'
   } finally {
     if (importantRequestController === controller) importantRequestController = null
     if (requestId === importantRequestId) importantLoading.value = false

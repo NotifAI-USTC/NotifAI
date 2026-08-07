@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { useUserSettingsStore } from '../stores/userSettings'
-import { ApiConfigurationError, fetchNotices } from '../utils/request'
+import { ApiConfigurationError, fetchCalendarNotices, type FetchCalendarParams } from '../utils/request'
 import {
   formatLocalDate,
   formatPublishDate,
   formatRemaining,
+  getIsoWeek,
   getLocalToday,
   isUrgent,
   parseLocalDate,
@@ -15,17 +15,13 @@ import {
 } from '../utils/date'
 import { getSourceColor } from '../types/notice'
 import { getContrastTextColor } from '../utils/color'
-import type { NoticeItem } from '../types/notice'
+import type { CalendarItem } from '../types/notice'
 import { useWindowSize } from '../composables/useWindowSize'
-import { isOffsetPageInconsistent } from '../utils/pagination'
 import { buildMonthIcs, downloadIcs } from '../utils/ics'
 
 const router = useRouter()
-const store = useUserSettingsStore()
 const { isMobile } = useWindowSize()
-const CALENDAR_PAGE_SIZE = 200
 const MAX_CALENDAR_ITEMS = 500
-const MAX_CALENDAR_PAGES = Math.ceil(MAX_CALENDAR_ITEMS / CALENDAR_PAGE_SIZE)
 
 interface CalendarEvent {
   name: string
@@ -37,7 +33,7 @@ interface CalendarEvent {
   noticeId: string
   source: string
   type: 'publish' | 'deadline'
-  notice: NoticeItem
+  notice: CalendarItem
 }
 
 interface CalendarCell {
@@ -61,7 +57,7 @@ interface WeekDay {
 const MAX_EVENTS_PER_CELL = 3
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
 
-const notices = ref<NoticeItem[]>([])
+const notices = ref<CalendarItem[]>([])
 const loading = ref(true)
 const loadError = ref('')
 const calendarDate = ref(getLocalToday())
@@ -116,7 +112,7 @@ const visibleLabel = computed(() => {
   return `${start.getFullYear()}年${start.getMonth() + 1}月`
 })
 
-function noticeTouchesRange(notice: NoticeItem, start: string, end: string): boolean {
+function noticeTouchesRange(notice: CalendarItem, start: string, end: string): boolean {
   const publishInRange = notice.publishDate >= start && notice.publishDate <= end
   const deadlineInRange = Boolean(
     notice.deadline && notice.deadline >= start && notice.deadline <= end,
@@ -138,7 +134,7 @@ function switchView(mode: 'month' | 'week'): void {
   selectedDate.value = null
 }
 
-// 将 NoticeItem 转换为 CalendarEvent
+// 将 CalendarItem 转换为 CalendarEvent
 const calendarEvents = computed<CalendarEvent[]>(() => {
   const events: CalendarEvent[] = []
   const range = visibleRange.value
@@ -203,7 +199,7 @@ const selectedDateEvents = computed(() => {
 // 去重后的选中日期通知
 const selectedDateNotices = computed(() => {
   const seen = new Set<string>()
-  const result: NoticeItem[] = []
+  const result: CalendarItem[] = []
   for (const event of selectedDateEvents.value) {
     if (!seen.has(event.noticeId)) {
       seen.add(event.noticeId)
@@ -354,60 +350,27 @@ async function loadVisibleRange() {
   loadError.value = ''
 
   try {
-    const loaded = new Map<string, NoticeItem>()
-    let expectedTotal: number | null = null
-    let page = 1
-
-    while (expectedTotal === null || loaded.size < expectedTotal) {
-      if (page > MAX_CALENDAR_PAGES) {
-        throw new Error('通知分页超过日历加载上限')
-      }
-      const res = await fetchNotices(
-        {
-          rangeFrom: range.start,
-          rangeTo: range.end,
-          page,
-          pageSize: CALENDAR_PAGE_SIZE,
-        },
-        controller.signal,
-      )
-      if (requestId !== loadRequestId) return
-
-      if (expectedTotal === null) {
-        expectedTotal = res.total
-        if (expectedTotal > MAX_CALENDAR_ITEMS) {
-          throw new Error('通知数量超过日历加载上限')
-        }
-      } else if (res.total !== expectedTotal) {
-        throw new Error('通知列表在加载期间发生了变化')
-      }
-      if (
-        isOffsetPageInconsistent({
-          itemCount: res.items.length,
-          page,
-          pageSize: CALENDAR_PAGE_SIZE,
-          total: res.total,
-        })
-      ) {
-        throw new Error('通知分页返回数量与总数不一致')
-      }
-
-      const previousSize = loaded.size
-      for (const notice of res.items) loaded.set(notice.id, notice)
-      if (loaded.size === previousSize && loaded.size < expectedTotal) {
-        throw new Error('通知分页返回了重复数据')
-      }
-      if (res.items.length === 0 && loaded.size < expectedTotal) {
-        throw new Error('通知分页提前结束')
-      }
-      page += 1
+    // 使用轻量日历接口（GET /notices/calendar），一次请求获取整个月/周
+    let params: FetchCalendarParams
+    if (viewMode.value === 'week') {
+      const week = getIsoWeek(calendarDate.value)
+      if (!week) throw new Error('日历周无效')
+      params = { week }
+    } else {
+      params = { month: range.start.slice(0, 7) }
     }
 
-    const rangeNotices = Array.from(loaded.values()).filter((notice) =>
+    const items = await fetchCalendarNotices(params, controller.signal)
+    if (requestId !== loadRequestId) return
+
+    if (items.length > MAX_CALENDAR_ITEMS) {
+      throw new Error('通知数量超过日历加载上限')
+    }
+    // 后端按发布日/截止日命中范围返回，这里再做一次防御性过滤
+    const rangeNotices = items.filter((notice) =>
       noticeTouchesRange(notice, range.start, range.end),
     )
     notices.value = rangeNotices
-    store.cacheNotices(rangeNotices)
   } catch (error) {
     if (controller.signal.aborted || requestId !== loadRequestId) return
     notices.value = []

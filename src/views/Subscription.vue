@@ -1,10 +1,45 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useUserSettingsStore } from '../stores/userSettings'
+import { fetchSources } from '../utils/request'
 import { DEPARTMENTS } from '../types/notice'
+import type { SourceItem } from '../types/notice'
 
 const store = useUserSettingsStore()
 const newKeyword = ref('')
+
+const sources = ref<SourceItem[] | null>(null)
+const loading = ref(true)
+const loadError = ref('')
+
+/** 分组来源：优先使用后端 GET /sources；失败时回退到静态部门表 */
+const groupedSources = computed(() => {
+  const groups = new Map<string, SourceItem[]>()
+  const list =
+    sources.value ??
+    DEPARTMENTS.map((d) => ({ name: d.name, group: d.group, noticeCount: 0 }))
+  for (const item of list) {
+    const group = item.group || '其他'
+    const arr = groups.get(group) ?? []
+    arr.push(item)
+    groups.set(group, arr)
+  }
+  return [...groups.entries()].map(([group, items]) => ({ group, items }))
+})
+
+async function loadSources(): Promise<void> {
+  loading.value = true
+  loadError.value = ''
+  try {
+    sources.value = await fetchSources()
+  } catch (error) {
+    sources.value = null
+    loadError.value =
+      error instanceof Error ? error.message : '来源列表加载失败，已展示内置部门'
+  } finally {
+    loading.value = false
+  }
+}
 
 function onAddKeyword(): void {
   if (newKeyword.value.trim()) {
@@ -13,11 +48,9 @@ function onAddKeyword(): void {
   }
 }
 
-function groupedDepts(key: string) {
-  return DEPARTMENTS.filter((d) => d.group === key)
-}
-
-const deptGroups = ['校级部门', '二级学院']
+onMounted(() => {
+  void loadSources()
+})
 </script>
 
 <template>
@@ -28,14 +61,43 @@ const deptGroups = ['校级部门', '二级学院']
     </v-app-bar>
 
     <v-container>
+      <!-- 来源加载提示 -->
+      <v-progress-circular
+        v-if="loading"
+        indeterminate
+        color="primary"
+        class="d-block mx-auto my-8"
+        aria-label="正在加载来源列表"
+      />
+
+      <v-alert v-else-if="loadError" type="warning" variant="tonal" class="mb-4" role="status">
+        {{ loadError }}
+        <template #append>
+          <v-btn
+            prepend-icon="$refresh"
+            variant="text"
+            size="small"
+            aria-label="重试加载来源列表"
+            @click="loadSources"
+          >
+            重试
+          </v-btn>
+        </template>
+      </v-alert>
+
       <!-- 部门分组列表 -->
-      <v-card v-for="group in deptGroups" :key="group" class="mb-4">
+      <v-card v-for="group in groupedSources" :key="group.group" class="mb-4">
         <v-card-title class="text-subtitle-1 font-weight-bold">
-          {{ group }}
+          {{ group.group }}
         </v-card-title>
         <v-divider />
         <v-list>
-          <v-list-item v-for="dept in groupedDepts(group)" :key="dept.id" :title="dept.name">
+          <v-list-item
+            v-for="dept in group.items"
+            :key="dept.name"
+            :title="dept.name"
+            :subtitle="dept.noticeCount > 0 ? `共 ${dept.noticeCount} 条通知` : undefined"
+          >
             <template #append>
               <v-switch
                 :model-value="store.isSubscribed(dept.name)"

@@ -1,4 +1,6 @@
+import { DEPARTMENTS } from '../types/notice'
 import type { NoticeItem, NoticeListResponse } from '../types/notice'
+import { getLocalToday } from '../utils/date'
 
 // 获取今天和未来几天的日期
 function getDate(daysFromNow: number): string {
@@ -1006,6 +1008,7 @@ export function mockFetchNotices(params: {
   rangeFrom?: string
   rangeTo?: string
   hasDeadline?: boolean
+  since?: string
   page?: number
   pageSize?: number
 }): NoticeListResponse {
@@ -1018,11 +1021,18 @@ export function mockFetchNotices(params: {
     rangeFrom,
     rangeTo,
     hasDeadline,
+    since,
     page = 1,
     pageSize = 15,
   } = params
 
   let filtered = mockNotices
+
+  if (since) {
+    // 模拟增量查询：仅返回发布日期 >= since 当天的新通知
+    const sinceDate = since.slice(0, 10)
+    filtered = filtered.filter((notice) => notice.publishDate >= sinceDate)
+  }
 
   if (keyword) {
     const query = keyword.toLocaleLowerCase()
@@ -1065,4 +1075,124 @@ export function mockFetchNotices(params: {
 /** 模拟获取单条通知详情的 API */
 export function mockFetchNoticeById(id: string): NoticeItem | undefined {
   return mockNotices.find((n) => n.id === id)
+}
+
+/** 模拟批量获取通知详情（POST /notices/batch） */
+export function mockFetchNoticesByIds(ids: string[]): {
+  items: NoticeItem[]
+  missing: string[]
+} {
+  const found = mockNotices.filter((notice) => ids.includes(notice.id))
+  const foundIds = new Set(found.map((n) => n.id))
+  const missing = ids.filter((id) => !foundIds.has(id))
+  const items = [...found].sort(
+    (a, b) => b.publishDate.localeCompare(a.publishDate) || a.id.localeCompare(b.id),
+  )
+  return { items, missing }
+}
+
+/** 将 ISO 周 YYYY-Www 解析为该周周一（本地日期）。 */
+function isoWeekStart(year: number, week: number): Date | null {
+  if (week < 1 || week > 53) return null
+  // ISO 周：1 月 4 日必在第 1 周
+  const jan4 = new Date(year, 0, 4)
+  const jan4Weekday = (jan4.getDay() + 6) % 7 // 周一=0 ... 周日=6
+  const firstMonday = new Date(year, 0, 1 + ((7 - jan4Weekday) % 7 || 7))
+  // 注意：(7 - jan4Weekday) % 7 为 0 时表示 jan4 恰好是周一，firstMonday = 1 月 1 日
+  if ((7 - jan4Weekday) % 7 === 0) {
+    firstMonday.setDate(1)
+  }
+  const start = new Date(firstMonday)
+  start.setDate(firstMonday.getDate() + (week - 1) * 7)
+  return start
+}
+
+/** 模拟获取日历轻量视图（GET /notices/calendar） */
+export function mockFetchCalendarNotices(params: {
+  month?: string
+  week?: string
+}): { items: Array<{ id: string; title: string; source: string; publishDate: string; deadline: string | null }> } {
+  let start: Date
+  let end: Date
+
+  if (params.month) {
+    const match = /^(\d{4})-(\d{2})$/.exec(params.month)
+    if (!match) return { items: [] }
+    const year = Number(match[1])
+    const month = Number(match[2])
+    start = new Date(year, month - 1, 1)
+    end = new Date(year, month, 0)
+  } else if (params.week) {
+    const match = /^(\d{4})-W(\d{2})$/.exec(params.week)
+    if (!match) return { items: [] }
+    const weekStart = isoWeekStart(Number(match[1]), Number(match[2]))
+    if (!weekStart) return { items: [] }
+    start = weekStart
+    end = new Date(start)
+    end.setDate(start.getDate() + 6)
+  } else {
+    return { items: [] }
+  }
+
+  const startStr = formatLocalDate(start)
+  const endStr = formatLocalDate(end)
+
+  const items = mockNotices
+    .filter((notice) => {
+      const dates = [notice.publishDate, notice.deadline].filter(
+        (date): date is string => date !== null,
+      )
+      return dates.some((date) => date >= startStr && date <= endStr)
+    })
+    .map((notice) => ({
+      id: notice.id,
+      title: notice.title,
+      source: notice.source,
+      publishDate: notice.publishDate,
+      deadline: notice.deadline,
+    }))
+    .sort((a, b) => b.publishDate.localeCompare(a.publishDate) || a.id.localeCompare(b.id))
+
+  return { items }
+}
+
+/** 模拟获取来源列表（GET /sources） */
+export function mockFetchSources(): Array<{ name: string; group: string; noticeCount: number }> {
+  const countBySource = new Map<string, number>()
+  for (const notice of mockNotices) {
+    countBySource.set(notice.source, (countBySource.get(notice.source) ?? 0) + 1)
+  }
+  const sources = [...countBySource.entries()].map(([name, noticeCount]) => {
+    const dept = DEPARTMENTS.find((d) => d.name === name)
+    return { name, group: dept?.group ?? '其他', noticeCount }
+  })
+  return sources.sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+}
+
+/** 模拟获取聚合统计（GET /stats） */
+export function mockFetchStats(): {
+  total: number
+  sourceCount: number
+  last7DaysDdl: number
+  last24hNew: number
+  lastCrawlAt: string | null
+} {
+  const today = getLocalToday()
+  const sevenDaysLater = getDate(7)
+  const yesterday = getPastDate(1)
+
+  const total = mockNotices.length
+  const sourceCount = new Set(mockNotices.map((n) => n.source)).size
+  const last7DaysDdl = mockNotices.filter(
+    (n) => n.deadline && n.deadline >= today && n.deadline <= sevenDaysLater,
+  ).length
+  const last24hNew = mockNotices.filter((n) => n.publishDate >= yesterday).length
+
+  return {
+    total,
+    sourceCount,
+    last7DaysDdl,
+    last24hNew,
+    lastCrawlAt: new Date().toISOString(),
+  }
 }

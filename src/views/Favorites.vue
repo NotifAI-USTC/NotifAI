@@ -2,14 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
-import { fetchNoticeById } from '../utils/request'
+import { fetchNoticesByIds } from '../utils/request'
 import type { NoticeItem } from '../types/notice'
 import NoticeCard from '../components/NoticeCard.vue'
 import SkeletonLoader from '../components/SkeletonLoader.vue'
 import { useWindowSize } from '../composables/useWindowSize'
 
-const REQUEST_CONCURRENCY = 4
-const REQUEST_LIMIT = 300
+const BATCH_SIZE = 500
+const REQUEST_LIMIT = 1000
 
 const router = useRouter()
 const store = useUserSettingsStore()
@@ -45,39 +45,48 @@ async function loadFavorites(): Promise<void> {
   const omittedCount = Math.max(0, allIds.length - REQUEST_LIMIT)
   const ids = allIds.slice(-REQUEST_LIMIT)
   const items: NoticeItem[] = []
-  let nextIndex = 0
   let failedCount = 0
   let staleFallbackCount = 0
 
   loading.value = true
   loadError.value = ''
 
-  async function worker(): Promise<void> {
-    while (nextIndex < ids.length) {
-      const id = ids[nextIndex]
-      nextIndex += 1
-      const cached = store.getCachedNotice(id)
+  try {
+    // 分批调用批量详情接口（每批 ≤ 500），替代原来的 N+1 逐条请求
+    for (let start = 0; start < ids.length; start += BATCH_SIZE) {
+      if (ctrl.signal.aborted || rid !== requestId) return
+      const chunk = ids.slice(start, start + BATCH_SIZE)
       try {
-        const notice = await fetchNoticeById(id, ctrl.signal)
+        const result = await fetchNoticesByIds(chunk, ctrl.signal)
         if (ctrl.signal.aborted || rid !== requestId) return
-        store.cacheNotice(notice)
-        items.push(notice)
+        for (const notice of result.items) {
+          store.cacheNotice(notice)
+          items.push(notice)
+        }
+        // 后端缺失的 ID 回退到本地缓存
+        for (const missingId of result.missing) {
+          const cached = store.getCachedNotice(missingId)
+          if (cached) {
+            items.push(cached)
+            staleFallbackCount += 1
+          } else {
+            failedCount += 1
+          }
+        }
       } catch {
         if (ctrl.signal.aborted || rid !== requestId) return
-        if (cached) {
-          items.push(cached)
-          staleFallbackCount += 1
-        } else {
-          failedCount += 1
+        // 整批请求失败时逐条回退到缓存，保持与旧实现一致的重试韧性
+        for (const id of chunk) {
+          const cached = store.getCachedNotice(id)
+          if (cached) {
+            items.push(cached)
+            staleFallbackCount += 1
+          } else {
+            failedCount += 1
+          }
         }
       }
     }
-  }
-
-  try {
-    const workerCount = Math.min(REQUEST_CONCURRENCY, ids.length)
-    await Promise.all(Array.from({ length: workerCount }, () => worker()))
-    if (rid !== requestId) return
 
     // 与首页一致：按发布日期倒序，同日按 ID 稳定排序
     items.sort(
@@ -90,6 +99,9 @@ async function loadFavorites(): Promise<void> {
     if (staleFallbackCount > 0) warnings.push(`有 ${staleFallbackCount} 条收藏使用缓存数据`)
     if (failedCount > 0) warnings.push(`有 ${failedCount} 条收藏加载失败`)
     loadError.value = warnings.join('；')
+  } catch (error) {
+    if (ctrl.signal.aborted || rid !== requestId) return
+    loadError.value = error instanceof Error ? error.message : '收藏加载失败'
   } finally {
     if (controller === ctrl) controller = null
     if (rid === requestId) loading.value = false

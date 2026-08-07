@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { DEPARTMENTS } from '../types/notice'
-import { calculateRemainingDays } from '../utils/date'
+import { calculateRemainingDays, getIsoWeek, getLocalToday } from '../utils/date'
 import { parseNoticeItem } from '../utils/validation'
-import { mockFetchNotices, mockNotices } from './notices'
+import {
+  mockFetchCalendarNotices,
+  mockFetchNotices,
+  mockFetchNoticesByIds,
+  mockFetchSources,
+  mockFetchStats,
+  mockNotices,
+} from './notices'
 
 describe('mock notice API', () => {
   it('provides valid, unique notices from every subscribable department', () => {
@@ -94,5 +101,69 @@ describe('mock notice API', () => {
     expect(response.items.length).toBeGreaterThan(0)
     expect(response.items.every((notice) => notice.source === target.source)).toBe(true)
     expect(response.items.every((notice) => notice.publishDate === target.publishDate)).toBe(true)
+  })
+})
+
+
+describe('mock new endpoints', () => {
+  it('batch returns matching items (newest first) and reports missing ids', () => {
+    const ids = mockNotices.slice(0, 5).map((notice) => notice.id)
+    const result = mockFetchNoticesByIds([...ids, 'does-not-exist'])
+
+    expect(result.items.map((notice) => notice.id)).toEqual(
+      [...ids].sort(
+        (a, b) =>
+          mockNotices.find((n) => n.id === b)!.publishDate.localeCompare(
+            mockNotices.find((n) => n.id === a)!.publishDate,
+          ) || a.localeCompare(b),
+      ),
+    )
+    expect(result.missing).toEqual(['does-not-exist'])
+    // 自动去重
+    const dedup = mockFetchNoticesByIds([ids[0], ids[0]])
+    expect(dedup.items).toHaveLength(1)
+  })
+
+  it('calendar month returns only items touching that month', () => {
+    const month = getLocalToday().slice(0, 7)
+    const result = mockFetchCalendarNotices({ month })
+
+    for (const item of result.items) {
+      const touches = item.publishDate.slice(0, 7) === month || item.deadline?.slice(0, 7) === month
+      expect(touches).toBe(true)
+    }
+    // 与范围查询结果一致
+    const rangeResult = mockFetchNotices({
+      rangeFrom: `${month}-01`,
+      rangeTo: `${month}-31`,
+      pageSize: 1000,
+    })
+    expect(new Set(result.items.map((item) => item.id))).toEqual(
+      new Set(rangeResult.items.map((item) => item.id)),
+    )
+  })
+
+  it('calendar week returns items touching that ISO week', () => {
+    const week = getIsoWeek(getLocalToday())!
+    const result = mockFetchCalendarNotices({ week })
+    expect(result.items.length).toBeGreaterThan(0)
+    for (const item of result.items) {
+      expect(item.publishDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    }
+  })
+
+  it('sources covers every department with a positive count', () => {
+    const sources = mockFetchSources()
+    expect(new Set(sources.map((source) => source.name))).toEqual(
+      new Set(mockNotices.map((notice) => notice.source)),
+    )
+    expect(sources.every((source) => source.noticeCount > 0)).toBe(true)
+  })
+
+  it('stats match the mock dataset', () => {
+    const stats = mockFetchStats()
+    expect(stats.total).toBe(mockNotices.length)
+    expect(stats.sourceCount).toBe(new Set(mockNotices.map((notice) => notice.source)).size)
+    expect(typeof stats.lastCrawlAt).toBe('string')
   })
 })

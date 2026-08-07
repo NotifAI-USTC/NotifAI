@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { DEPARTMENTS } from '../types/notice'
+import { fetchSources } from '../utils/request'
+import type { SourceItem } from '../types/notice'
 import {
   clearSearchHistory,
   loadSearchHistory,
@@ -50,9 +52,31 @@ const filters = ref<SearchFilters>(
 
 const newTag = ref('')
 
-// 获取所有来源
+const sourceItems = ref<SourceItem[] | null>(null)
+
+/** 来源下拉项：优先使用后端 GET /sources（含分组），加载中/失败时回退到内置部门表 */
 const sources = computed(() => {
-  return DEPARTMENTS.map((d) => d.name)
+  if (sourceItems.value) {
+    return sourceItems.value.map((item) => ({
+      title: item.name,
+      value: item.name,
+      group: item.group || '其他',
+    }))
+  }
+  return DEPARTMENTS.map((d) => ({ title: d.name, value: d.name, group: d.group }))
+})
+
+async function loadSources(): Promise<void> {
+  try {
+    sourceItems.value = await fetchSources()
+  } catch {
+    // 来源列表失败时回退到内置部门表，不阻塞搜索
+    sourceItems.value = null
+  }
+}
+
+onMounted(() => {
+  void loadSources()
 })
 
 // 搜索历史（带校验的 LocalStorage 存储）

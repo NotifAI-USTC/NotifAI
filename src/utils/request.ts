@@ -1,12 +1,23 @@
 import axios from 'axios'
-import type { NoticeItem, NoticeListResponse } from '../types/notice'
+import type {
+  CalendarItem,
+  NoticeBatchResponse,
+  NoticeItem,
+  NoticeListResponse,
+  SourceItem,
+  StatsResponse,
+} from '../types/notice'
 import { useSnackbar } from '../composables/useSnackbar'
 import {
   DataValidationError,
   assertDateOnly,
   assertNoticeId,
+  parseCalendarListResponse,
+  parseNoticeBatchResponse,
   parseNoticeItem,
   parseNoticeListResponse,
+  parseSourceListResponse,
+  parseStatsResponse,
 } from './validation'
 import { isValidApiBaseUrl } from './apiBaseUrl'
 
@@ -98,14 +109,35 @@ export interface FetchNoticesParams {
   rangeFrom?: string
   rangeTo?: string
   hasDeadline?: boolean
+  /** ISO8601 增量查询：仅返回 first_seen >= since 的通知 */
+  since?: string
   page?: number
   pageSize?: number
+}
+
+/** GET /notices/calendar 查询参数（month 与 week 二选一） */
+export interface FetchCalendarParams {
+  /** 月份 YYYY-MM，如 2026-08 */
+  month?: string
+  /** 周 YYYY-Www，如 2026-W32 */
+  week?: string
 }
 
 function validateOptionalText(value: unknown, name: string, maxLength = 200): string | undefined {
   if (value === undefined) return undefined
   if (typeof value !== 'string' || value.length === 0 || value.length > maxLength) {
     throw new DataValidationError(`${name} 必须是长度为 1 到 ${maxLength} 的字符串`)
+  }
+  return value
+}
+
+function validateOptionalIsoTime(value: unknown, name: string): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value.length === 0 || value.length > 100) {
+    throw new DataValidationError(`${name} 必须是 ISO8601 时间字符串`)
+  }
+  if (Number.isNaN(Date.parse(value))) {
+    throw new DataValidationError(`${name} 必须是合法的 ISO8601 时间字符串`)
   }
   return value
 }
@@ -166,6 +198,7 @@ export async function fetchNotices(
   if (params.hasDeadline !== undefined && typeof params.hasDeadline !== 'boolean') {
     throw new DataValidationError('hasDeadline 必须是布尔值')
   }
+  const since = validateOptionalIsoTime(params.since, 'since')
 
   const validatedParams: FetchNoticesParams = {
     keyword,
@@ -176,6 +209,7 @@ export async function fetchNotices(
     rangeFrom,
     rangeTo,
     hasDeadline: params.hasDeadline,
+    since,
     page,
     pageSize,
   }
@@ -215,4 +249,99 @@ export async function fetchNoticeById(id: string, signal?: AbortSignal): Promise
     suppressGlobalError: true,
   })
   return parseNoticeItem(res.data)
+}
+
+
+const MAX_BATCH_IDS = 500
+
+/** 批量获取通知详情（POST /notices/batch），最多 500 个 ID。 */
+export async function fetchNoticesByIds(
+  ids: string[],
+  signal?: AbortSignal,
+): Promise<NoticeBatchResponse> {
+  const useMock = shouldUseMock()
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_BATCH_IDS) {
+    throw new DataValidationError(`ids 必须是 1 到 ${MAX_BATCH_IDS} 项的数组`)
+  }
+  const uniqueIds = [...new Set(ids.map((id) => assertNoticeId(id, 'ids 元素')))]
+  if (import.meta.env.DEV && useMock) {
+    const { mockFetchNoticesByIds } = await import('../mock/notices')
+    await waitForMockDelay(200 + Math.random() * 300, signal)
+    return parseNoticeBatchResponse(mockFetchNoticesByIds(uniqueIds))
+  }
+  const res = await request.post<unknown>(
+    '/notices/batch',
+    { ids: uniqueIds },
+    {
+      maxContentLength: MAX_NOTICE_LIST_RESPONSE_BYTES,
+      signal,
+      suppressGlobalError: true,
+    },
+  )
+  return parseNoticeBatchResponse(res.data)
+}
+
+/** 获取日历轻量视图（GET /notices/calendar），month 与 week 二选一。 */
+export async function fetchCalendarNotices(
+  params: FetchCalendarParams = {},
+  signal?: AbortSignal,
+): Promise<CalendarItem[]> {
+  const useMock = shouldUseMock()
+  const month = validateOptionalText(params.month, 'month', 20)
+  const week = validateOptionalText(params.week, 'week', 20)
+  if (Boolean(month) === Boolean(week)) {
+    throw new DataValidationError('month 与 week 必须二选一')
+  }
+  if (month && !/^\d{4}-\d{2}$/.test(month)) {
+    throw new DataValidationError('month 必须是 YYYY-MM 格式')
+  }
+  if (week && !/^\d{4}-W\d{2}$/.test(week)) {
+    throw new DataValidationError('week 必须是 YYYY-Www 格式')
+  }
+  const query = month ? { month } : { week }
+
+  if (import.meta.env.DEV && useMock) {
+    const { mockFetchCalendarNotices } = await import('../mock/notices')
+    await waitForMockDelay(200 + Math.random() * 300, signal)
+    return parseCalendarListResponse(mockFetchCalendarNotices(query))
+  }
+  const res = await request.get<unknown>('/notices/calendar', {
+    params: query,
+    maxContentLength: MAX_NOTICE_LIST_RESPONSE_BYTES,
+    signal,
+    suppressGlobalError: true,
+  })
+  return parseCalendarListResponse(res.data)
+}
+
+/** 获取来源列表（GET /sources）。 */
+export async function fetchSources(signal?: AbortSignal): Promise<SourceItem[]> {
+  const useMock = shouldUseMock()
+  if (import.meta.env.DEV && useMock) {
+    const { mockFetchSources } = await import('../mock/notices')
+    await waitForMockDelay(150 + Math.random() * 250, signal)
+    return parseSourceListResponse(mockFetchSources())
+  }
+  const res = await request.get<unknown>('/sources', {
+    maxContentLength: MAX_NOTICE_LIST_RESPONSE_BYTES,
+    signal,
+    suppressGlobalError: true,
+  })
+  return parseSourceListResponse(res.data)
+}
+
+/** 获取聚合统计（GET /stats）。 */
+export async function fetchStats(signal?: AbortSignal): Promise<StatsResponse> {
+  const useMock = shouldUseMock()
+  if (import.meta.env.DEV && useMock) {
+    const { mockFetchStats } = await import('../mock/notices')
+    await waitForMockDelay(150 + Math.random() * 250, signal)
+    return parseStatsResponse(mockFetchStats())
+  }
+  const res = await request.get<unknown>('/stats', {
+    maxContentLength: MAX_NOTICE_LIST_RESPONSE_BYTES,
+    signal,
+    suppressGlobalError: true,
+  })
+  return parseStatsResponse(res.data)
 }

@@ -1,4 +1,11 @@
-import type { NoticeItem, NoticeListResponse } from '../types/notice'
+import type {
+  CalendarItem,
+  NoticeBatchResponse,
+  NoticeItem,
+  NoticeListResponse,
+  SourceItem,
+  StatsResponse,
+} from '../types/notice'
 
 const LIMITS = {
   id: 128,
@@ -244,4 +251,138 @@ export function parseNoticeListResponse(value: unknown): NoticeListResponse {
     items,
     total: record.total,
   }
+}
+
+/**
+ * 解析日历轻量条目。
+ *
+ * 与完整 NoticeItem 不同，CalendarItem 只要求 id/title/source/publishDate/deadline，
+ * 用于日历渲染（GET /notices/calendar）。
+ */
+export function parseCalendarItem(value: unknown, path = 'calendarItem'): CalendarItem {
+  const record = expectRecord(value, path)
+  return {
+    id: assertNoticeId(record.id, `${path}.id`),
+    title: expectString(record.title, `${path}.title`, LIMITS.title),
+    source: expectString(record.source, `${path}.source`, LIMITS.source),
+    publishDate: expectDate(record.publishDate, `${path}.publishDate`),
+    deadline: record.deadline == null ? null : expectDate(record.deadline, `${path}.deadline`),
+  }
+}
+
+/** 解析日历轻量列表响应，单条非法记录跳过并告警。 */
+export function parseCalendarListResponse(value: unknown): CalendarItem[] {
+  const record = expectRecord(value, 'response')
+  if (!Array.isArray(record.items)) {
+    throw new DataValidationError('response.items 必须是数组')
+  }
+  if (record.items.length > LIMITS.notices) {
+    throw new DataValidationError(`response.items 长度不能超过 ${LIMITS.notices}`)
+  }
+
+  const items: CalendarItem[] = []
+  const seenIds = new Set<string>()
+  record.items.forEach((item, index) => {
+    let parsed: CalendarItem
+    try {
+      parsed = parseCalendarItem(item, `response.items[${index}]`)
+    } catch (error) {
+      console.warn(
+        `[NotifAI] 跳过第 ${index + 1} 条非法日历数据:`,
+        error instanceof Error ? error.message : String(error),
+      )
+      return
+    }
+    if (seenIds.has(parsed.id)) {
+      throw new DataValidationError(`response.items[${index}] 存在重复通知 ID: ${parsed.id}`)
+    }
+    seenIds.add(parsed.id)
+    items.push(parsed)
+  })
+  return items
+}
+
+/** 解析批量详情响应（POST /notices/batch）。 */
+export function parseNoticeBatchResponse(value: unknown): NoticeBatchResponse {
+  const record = expectRecord(value, 'response')
+  if (!Array.isArray(record.items)) {
+    throw new DataValidationError('response.items 必须是数组')
+  }
+  if (record.items.length > LIMITS.notices) {
+    throw new DataValidationError(`response.items 长度不能超过 ${LIMITS.notices}`)
+  }
+
+  const items: NoticeItem[] = []
+  record.items.forEach((item, index) => {
+    try {
+      items.push(parseNoticeItem(item, `response.items[${index}]`))
+    } catch (error) {
+      console.warn(
+        `[NotifAI] 批量详情跳过第 ${index + 1} 条非法通知数据:`,
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  })
+
+  const missing: string[] = []
+  if (record.missing !== undefined && record.missing !== null) {
+    if (!Array.isArray(record.missing) || record.missing.length > LIMITS.notices) {
+      throw new DataValidationError(`response.missing 必须是至多 ${LIMITS.notices} 项的数组`)
+    }
+    const seenMissing = new Set<string>()
+    record.missing.forEach((id, index) => {
+      const validId = assertNoticeId(id, `response.missing[${index}]`)
+      if (seenMissing.has(validId)) {
+        throw new DataValidationError(`response.missing[${index}] 存在重复 ID`)
+      }
+      seenMissing.add(validId)
+    })
+    missing.push(...seenMissing)
+  }
+
+  return { items, missing }
+}
+
+/** 解析来源列表响应（GET /sources）。 */
+export function parseSourceListResponse(value: unknown): SourceItem[] {
+  if (!Array.isArray(value) || value.length > LIMITS.notices) {
+    throw new DataValidationError('sources 必须是数组')
+  }
+  return value.map((item, index) => {
+    const record = expectRecord(item, `sources[${index}]`)
+    const name = expectString(record.name, `sources[${index}].name`, LIMITS.source)
+    const group = expectString(record.group, `sources[${index}].group`, LIMITS.source)
+    const noticeCount = record.noticeCount
+    if (typeof noticeCount !== 'number' || !Number.isInteger(noticeCount) || noticeCount < 0) {
+      throw new DataValidationError(`sources[${index}].noticeCount 必须是非负整数`)
+    }
+    return { name, group, noticeCount }
+  })
+}
+
+/** 解析聚合统计响应（GET /stats）。 */
+export function parseStatsResponse(value: unknown): StatsResponse {
+  const record = expectRecord(value, 'stats')
+  const nonNegativeInt = (field: string, fallback: number): number => {
+    const raw = record[field]
+    if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 0) return fallback
+    return raw
+  }
+
+  const total = nonNegativeInt('total', 0)
+  const sourceCount = nonNegativeInt('sourceCount', 0)
+  const last7DaysDdl = nonNegativeInt('last7DaysDdl', 0)
+  const last24hNew = nonNegativeInt('last24hNew', 0)
+
+  let lastCrawlAt: string | null = null
+  if (record.lastCrawlAt != null) {
+    if (typeof record.lastCrawlAt !== 'string' || record.lastCrawlAt.length > 100) {
+      throw new DataValidationError('stats.lastCrawlAt 必须是字符串')
+    }
+    if (!Number.isNaN(Date.parse(record.lastCrawlAt))) {
+      lastCrawlAt = record.lastCrawlAt
+    }
+  }
+
+  return { total, sourceCount, last7DaysDdl, last24hNew, lastCrawlAt }
 }

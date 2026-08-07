@@ -127,11 +127,29 @@ interface NoticeItem {
 | `dateFrom` / `dateTo`   | 发布日期范围，格式为 `YYYY-MM-DD`      |
 | `rangeFrom` / `rangeTo` | 日历范围；发布日或截止日任一命中即返回 |
 | `hasDeadline`           | 是否具有截止日期                       |
+| `since`                 | ISO8601 增量查询：仅返回 `first_seen >= since` 的通知，用于「有新通知」轮询 |
 | `page` / `pageSize`     | 从 1 开始的分页，`pageSize` 最大 1000  |
 
 `GET /notices/:id` 返回完整 `NoticeItem`。`aiSummary`、`targetAudience`、`coreAction`、`cleanContent` 和 `attachments` 为可选字段，缺失时前端按空值处理；日期使用本地日历日字符串；`originUrl` 只接受 `ustc.edu.cn` 或其子域的无凭据 HTTPS 地址，附件 URL 接受无凭据的 HTTP(S) 地址。详细边界见 `src/utils/validation.ts`。
 
-分页结果必须使用稳定排序。除最后一页外，每页必须返回请求的 `pageSize` 条记录，同一轮分页的 `total` 必须保持一致；如果数据源无法提供稳定快照，应改用 cursor 分页，避免插入或删除造成 offset 位移漏项。日历最多加载可见月份的 500 条通知。
+分页结果必须使用稳定排序。除最后一页外，每页必须返回请求的 `pageSize` 条记录，同一轮分页的 `total` 必须保持一致；如果数据源无法提供稳定快照，应改用 cursor 分页，避免插入或删除造成 offset 位移漏项。
+
+### 扩展端点
+
+以下端点已由前端使用：
+
+| 端点                                   | 用途                                               |
+| -------------------------------------- | -------------------------------------------------- |
+| `POST /notices/batch`                  | 批量详情：收藏页与个人中心 DDL，替代 N+1 逐条请求，最多 500 个 ID |
+| `GET /notices/calendar`                | 日历轻量视图：`month=YYYY-MM` 或 `week=YYYY-Www`，返回精简字段，替代分页循环 |
+| `GET /sources`                         | 来源列表：订阅页与首页来源下拉动态化，含分组与通知数 |
+| `GET /stats`                           | 聚合统计：首页统计条与数据新鲜度提示                |
+
+- 批量详情请求体为 `{ "ids": string[] }`，响应 `{ "items": NoticeItem[], "missing": string[] }`，`items` 按发布日期倒序，重复 ID 自动去重。
+- 日历轻量条目仅含 `id` / `title` / `source` / `publishDate` / `deadline`，发布日或截止日命中即返回，上限 500 条。
+- 来源条目为 `{ name, group, noticeCount }`，`group` 如「校级部门」「二级学院」「其他」。
+- 统计响应为 `{ total, sourceCount, last7DaysDdl, last24hNew, lastCrawlAt }`，`lastCrawlAt` 可为 `null`。
+- 首页使用 `since` 每 60 秒轮询一次，有新通知时显示「有 N 条新通知，点击刷新」提示条。
 
 ## 目录
 

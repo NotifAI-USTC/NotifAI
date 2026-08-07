@@ -29,6 +29,9 @@ interface MockSettingsStore {
 const mocks = vi.hoisted(() => ({
   fetchNotices: vi.fn(),
   fetchNoticeById: vi.fn(),
+  fetchNoticesByIds: vi.fn(),
+  fetchCalendarNotices: vi.fn(),
+  fetchStats: vi.fn(),
   push: vi.fn(),
   cacheNotices: vi.fn(),
   cacheNotice: vi.fn(),
@@ -40,6 +43,9 @@ vi.mock('../utils/request', () => ({
   ApiConfigurationError: class ApiConfigurationError extends Error {},
   fetchNotices: mocks.fetchNotices,
   fetchNoticeById: mocks.fetchNoticeById,
+  fetchNoticesByIds: mocks.fetchNoticesByIds,
+  fetchCalendarNotices: mocks.fetchCalendarNotices,
+  fetchStats: mocks.fetchStats,
 }))
 
 vi.mock('vue-router', () => ({
@@ -106,6 +112,19 @@ function makeNotice(overrides: Partial<NoticeItem> = {}): NoticeItem {
   }
 }
 
+function makeCalendarItem(
+  overrides: Partial<{ id: string; title: string; source: string; publishDate: string; deadline: string | null }> = {},
+): { id: string; title: string; source: string; publishDate: string; deadline: string | null } {
+  return {
+    id: 'notice-1',
+    title: '测试通知',
+    source: '教务处',
+    publishDate: '2026-07-30',
+    deadline: '2026-08-10',
+    ...overrides,
+  }
+}
+
 const stubs = {
   AdvancedSearch: true,
   DdlNoticeBar: true,
@@ -128,18 +147,25 @@ describe('view request lifecycle', () => {
   })
 
   it.each([
-    ['Home', Home, 'list'],
-    ['Calendar', Calendar, 'list'],
-    ['User', User, 'detail'],
+    ['Home', Home, 'notices'],
+    ['Calendar', Calendar, 'calendar'],
+    ['User', User, 'batch'],
   ] as const)('aborts the pending %s request on unmount', async (_name, component, requestKind) => {
     let signal: AbortSignal | undefined
-    if (requestKind === 'list') {
+    if (requestKind === 'notices') {
       mocks.fetchNotices.mockImplementation((_params: unknown, requestSignal?: AbortSignal) => {
         signal = requestSignal
         return pendingPromise()
       })
+    } else if (requestKind === 'calendar') {
+      mocks.fetchCalendarNotices.mockImplementation(
+        (_params: unknown, requestSignal?: AbortSignal) => {
+          signal = requestSignal
+          return pendingPromise()
+        },
+      )
     } else {
-      mocks.fetchNoticeById.mockImplementation((_id: string, requestSignal?: AbortSignal) => {
+      mocks.fetchNoticesByIds.mockImplementation((_ids: unknown, requestSignal?: AbortSignal) => {
         signal = requestSignal
         return pendingPromise()
       })
@@ -157,14 +183,16 @@ describe('view request lifecycle', () => {
     expect(signal?.aborted).toBe(true)
   })
 
-  it('stops calendar pagination when the reported month exceeds its safety limit', async () => {
-    mocks.fetchNotices.mockResolvedValue({ items: [], total: 501 })
+  it('stops calendar loading when a range exceeds its safety limit', async () => {
+    mocks.fetchCalendarNotices.mockResolvedValue(
+      Array.from({ length: 501 }, (_, index) => makeCalendarItem({ id: `notice-${index}` })),
+    )
 
     const wrapper = shallowMount(Calendar, { global: { stubs } })
     wrappers.push(wrapper)
     await flushPromises()
 
-    expect(mocks.fetchNotices).toHaveBeenCalledOnce()
+    expect(mocks.fetchCalendarNotices).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('无法加载当前范围通知')
   })
 
@@ -219,14 +247,14 @@ describe('view request lifecycle', () => {
     expect(wrapper.text()).toContain('更多通知加载失败')
   })
 
-  it('rejects a short calendar page that claims more results remain', async () => {
-    mocks.fetchNotices.mockResolvedValue({ items: [makeNotice()], total: 500 })
+  it('shows an error when the calendar request fails', async () => {
+    mocks.fetchCalendarNotices.mockRejectedValue(new Error('network unavailable'))
 
     const wrapper = shallowMount(Calendar, { global: { stubs } })
     wrappers.push(wrapper)
     await flushPromises()
 
-    expect(mocks.fetchNotices).toHaveBeenCalledOnce()
+    expect(mocks.fetchCalendarNotices).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('无法加载当前范围通知')
   })
 
@@ -234,13 +262,13 @@ describe('view request lifecycle', () => {
     const cachedNotice = makeNotice({ title: '缓存中的通知', deadline: '2026-08-10' })
     const refreshedNotice = makeNotice({ title: '刷新后的通知', deadline: '2026-08-20' })
     mocks.getCachedNotice.mockReturnValue(cachedNotice)
-    mocks.fetchNoticeById.mockResolvedValue(refreshedNotice)
+    mocks.fetchNoticesByIds.mockResolvedValue({ items: [refreshedNotice], missing: [] })
 
     const wrapper = shallowMount(User, { global: { stubs } })
     wrappers.push(wrapper)
     await flushPromises()
 
-    expect(mocks.fetchNoticeById).toHaveBeenCalledWith('notice-1', expect.any(AbortSignal))
+    expect(mocks.fetchNoticesByIds).toHaveBeenCalledWith(['notice-1'], expect.any(AbortSignal))
     expect(mocks.cacheNotice).toHaveBeenCalledWith(refreshedNotice)
     expect(wrapper.html()).toContain('刷新后的通知')
   })
@@ -248,7 +276,7 @@ describe('view request lifecycle', () => {
   it('falls back to a cached important DDL and warns when refresh fails', async () => {
     const cachedNotice = makeNotice({ title: '缓存中的通知', deadline: '2026-08-10' })
     mocks.getCachedNotice.mockReturnValue(cachedNotice)
-    mocks.fetchNoticeById.mockRejectedValue(new Error('network unavailable'))
+    mocks.fetchNoticesByIds.mockRejectedValue(new Error('network unavailable'))
 
     const wrapper = shallowMount(User, { global: { stubs } })
     wrappers.push(wrapper)

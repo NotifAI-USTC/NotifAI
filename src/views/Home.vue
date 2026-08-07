@@ -2,9 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
-import { ApiConfigurationError, fetchNotices } from '../utils/request'
+import { ApiConfigurationError, fetchNotices, fetchStats } from '../utils/request'
 import type { FetchNoticesParams } from '../utils/request'
-import type { NoticeItem } from '../types/notice'
+import type { NoticeItem, StatsResponse } from '../types/notice'
 import { normalizeNoticeSource } from '../types/notice'
 import NoticeCard from '../components/NoticeCard.vue'
 import DdlNoticeBar from '../components/DdlNoticeBar.vue'
@@ -18,6 +18,8 @@ import { calculateRemainingDays } from '../utils/date'
 const PAGE_SIZE = 15
 const MAX_PAGES_PER_BATCH = 5
 const PULL_THRESHOLD = 72
+const NEW_NOTICE_POLL_MS = 60_000
+const LAST_SEEN_KEY = 'notifai.lastSeenAt'
 
 interface QueryContext {
   keyword: string
@@ -68,6 +70,12 @@ let loadedQueryKey = ''
 let pullStartY: number | null = null
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let requestController: AbortController | null = null
+let statsController: AbortController | null = null
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+const serverStats = ref<StatsResponse | null>(null)
+const newNoticeCount = ref(0)
+const lastSeenAt = ref<string | null>(readLastSeenAt())
 
 function triStateBoolean(value: TriStateFilter): boolean | undefined {
   if (value === 'yes') return true
@@ -257,6 +265,8 @@ async function loadInitial(): Promise<void> {
     scanPaused.value = result.scanPaused
     loadedTotal.value = result.total
     loadedQueryKey = queryKey
+    void loadServerStats()
+    markNoticesSeen()
   } catch (error) {
     if (error instanceof ApiConfigurationError) {
       requestError.value = error.message
@@ -315,12 +325,18 @@ async function refresh(): Promise<void> {
   refreshing.value = true
   requestError.value = ''
   loadedQueryKey = ''
+  newNoticeCount.value = 0
 
   try {
     await loadInitial()
   } finally {
     refreshing.value = false
   }
+}
+
+function refreshWithNewNotices(): void {
+  markNoticesSeen()
+  refresh()
 }
 
 function retryRequest(): void {
@@ -404,8 +420,8 @@ const filteredNotices = computed(() => {
   return notices.value
 })
 
-/** 基于已加载数据的轻量统计（诚实标注口径）。 */
-const stats = computed(() => {
+/** 基于已加载数据的轻量统计（本地兜底，诚实标注口径）。 */
+const localStats = computed(() => {
   const loaded = filteredNotices.value
   const sources = new Set(loaded.map((notice) => normalizeNoticeSource(notice.source))).size
   let ddlSoon = 0
@@ -416,6 +432,68 @@ const stats = computed(() => {
   }
   return { loaded: loaded.length, total: loadedTotal.value, sources, ddlSoon }
 })
+
+/** 展示统计：优先使用后端 GET /stats 的全局数据，失败时回退到本地统计。 */
+const displayStats = computed(() => {
+  const local = localStats.value
+  if (!serverStats.value) return local
+  return {
+    loaded: local.loaded,
+    total: serverStats.value.total,
+    sources: serverStats.value.sourceCount,
+    ddlSoon: serverStats.value.last7DaysDdl,
+  }
+})
+
+function readLastSeenAt(): string | null {
+  try {
+    const raw = window.localStorage.getItem(LAST_SEEN_KEY)
+    if (raw && !Number.isNaN(Date.parse(raw))) return raw
+  } catch {
+    /* 忽略存储异常 */
+  }
+  return null
+}
+
+function writeLastSeenAt(value: string): void {
+  try {
+    window.localStorage.setItem(LAST_SEEN_KEY, value)
+  } catch {
+    /* 忽略存储异常 */
+  }
+}
+
+/** 记录“已看到最新”的时间戳，并清除新通知提示。 */
+function markNoticesSeen(): void {
+  lastSeenAt.value = new Date().toISOString()
+  writeLastSeenAt(lastSeenAt.value)
+  newNoticeCount.value = 0
+}
+
+/** 拉取全局统计，失败时静默保留本地兜底。 */
+async function loadServerStats(): Promise<void> {
+  statsController?.abort()
+  const controller = new AbortController()
+  statsController = controller
+  try {
+    serverStats.value = await fetchStats(controller.signal)
+  } catch {
+    // 统计失败不影响通知流，保留本地统计兜底
+  } finally {
+    if (statsController === controller) statsController = null
+  }
+}
+
+/** 增量轮询：用 since 查询是否有新通知。 */
+async function checkNewNotices(): Promise<void> {
+  if (!lastSeenAt.value) return
+  try {
+    const res = await fetchNotices({ since: lastSeenAt.value, pageSize: 1 })
+    if (res.total > 0) newNoticeCount.value = res.total
+  } catch {
+    // 静默失败，避免打扰用户
+  }
+}
 
 watch(
   () => store.subscriptionMode,
@@ -446,11 +524,17 @@ watch(
 
 onMounted(() => {
   initialLoading.value = true
-  loadInitial()
+  if (!lastSeenAt.value) markNoticesSeen()
+  void loadInitial()
+  pollTimer = setInterval(() => {
+    void checkNewNotices()
+  }, NEW_NOTICE_POLL_MS)
 })
 
 onBeforeUnmount(() => {
   requestController?.abort()
+  statsController?.abort()
+  if (pollTimer) clearInterval(pollTimer)
   if (searchTimer) clearTimeout(searchTimer)
 })
 </script>
@@ -485,29 +569,45 @@ onBeforeUnmount(() => {
     <!-- 紧急 DDL 提示条：仅在实际数据加载完成后显示 -->
     <DdlNoticeBar v-if="!initialLoading && filteredNotices.length > 0" :notices="filteredNotices" />
 
+    <!-- 有新通知提示（since 增量轮询） -->
+    <v-btn
+      v-if="newNoticeCount > 0"
+      block
+      color="primary"
+      variant="tonal"
+      class="mx-4 mt-2 new-notice-btn"
+      role="status"
+      aria-label="有新通知，点击刷新"
+      @click="refreshWithNewNotices"
+    >
+      <v-icon start size="16">$bellRing</v-icon>
+      有 {{ newNoticeCount }} 条新通知，点击刷新
+      <v-icon end size="16">$refresh</v-icon>
+    </v-btn>
+
     <!-- 已加载数据统计概览 -->
     <div
-      v-if="!initialLoading && !requestError && stats.loaded > 0"
+      v-if="!initialLoading && !requestError && displayStats.loaded > 0"
       class="d-flex flex-wrap align-center ga-2 px-4 pt-2"
       role="status"
       aria-label="通知统计概览"
     >
       <v-chip size="x-small" variant="tonal" class="stats-chip">
         <v-icon start size="14">$fileDocumentOutline</v-icon>
-        共 {{ stats.total }} 条 · 已加载 {{ stats.loaded }}
+        共 {{ displayStats.total }} 条 · 已加载 {{ displayStats.loaded }}
       </v-chip>
       <v-chip size="x-small" variant="tonal" class="stats-chip">
         <v-icon start size="14">$accountGroup</v-icon>
-        {{ stats.sources }} 个来源
+        {{ displayStats.sources }} 个来源
       </v-chip>
       <v-chip
         size="x-small"
         variant="tonal"
-        :color="stats.ddlSoon > 0 ? 'error' : 'default'"
+        :color="displayStats.ddlSoon > 0 ? 'error' : 'default'"
         class="stats-chip"
       >
         <v-icon start size="14">$clockAlert</v-icon>
-        近 7 天 DDL {{ stats.ddlSoon }} 个
+        近 7 天 DDL {{ displayStats.ddlSoon }} 个
       </v-chip>
     </div>
 
