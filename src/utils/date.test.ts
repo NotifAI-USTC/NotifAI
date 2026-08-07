@@ -3,7 +3,9 @@ import {
   calculateRemainingDays,
   formatLocalDate,
   formatPublishDate,
+  formatRemaining,
   getLocalToday,
+  isUrgent,
   parseLocalDate,
   shiftLocalMonth,
 } from './date'
@@ -46,5 +48,26 @@ describe('local calendar date helpers', () => {
     expect(getLocalToday(localDate)).toBe('2026-07-31')
     expect(formatPublishDate('2026-07-31')).toBe('2026年07月31日')
     expect(formatPublishDate('invalid')).toBe('未知日期')
+  })
+})
+
+describe('isUrgent and formatRemaining with injectable now', () => {
+  const now = new Date(2026, 7, 5) // 2026-08-05
+
+  it('classifies urgency within the configured window', () => {
+    expect(isUrgent('2026-08-05', 3, now)).toBe(true) // 今天
+    expect(isUrgent('2026-08-08', 3, now)).toBe(true) // 第 3 天
+    expect(isUrgent('2026-08-09', 3, now)).toBe(false) // 第 4 天
+    expect(isUrgent('2026-08-04', 3, now)).toBe(false) // 已过期
+    expect(isUrgent(null, 3, now)).toBe(false)
+    expect(isUrgent('2026-08-08', 0, now)).toBe(false) // 当天窗口
+    expect(isUrgent('2026-08-05', 0, now)).toBe(true)
+  })
+
+  it('formats remaining text deterministically', () => {
+    expect(formatRemaining('2026-08-05', now)).toBe('今天截止')
+    expect(formatRemaining('2026-08-06', now)).toBe('剩 1 天')
+    expect(formatRemaining('2026-08-04', now)).toBe('已过期')
+    expect(formatRemaining(null, now)).toBe('未提及')
   })
 })

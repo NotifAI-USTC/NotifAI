@@ -68,8 +68,8 @@ export function calculateRemainingDays(deadline: string | null, now = new Date()
  * 格式化剩余天数显示
  * @returns "剩 X 天" / "今天截止" / "已过期" / "未提及"
  */
-export function formatRemaining(deadline: string | null): string {
-  const days = calculateRemainingDays(deadline)
+export function formatRemaining(deadline: string | null, now = new Date()): string {
+  const days = calculateRemainingDays(deadline, now)
   if (days === null) return '未提及'
   if (days < 0) return '已过期'
   if (days === 0) return '今天截止'
@@ -77,10 +77,11 @@ export function formatRemaining(deadline: string | null): string {
 }
 
 /**
- * 判断截止日期是否紧急（指定天数内）
+ * 判断截止日期是否紧急（指定天数内）。
+ * now 可注入用于确定性测试。
  */
-export function isUrgent(deadline: string | null, days = 3): boolean {
-  const remaining = calculateRemainingDays(deadline)
+export function isUrgent(deadline: string | null, days = 3, now = new Date()): boolean {
+  const remaining = calculateRemainingDays(deadline, now)
   if (remaining === null) return false
   return remaining >= 0 && remaining <= days
 }

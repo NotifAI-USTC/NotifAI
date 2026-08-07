@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NoticeItem } from '../types/notice'
 import DdlNoticeBar from './DdlNoticeBar.vue'
 
@@ -40,6 +40,16 @@ function makeNotice(overrides: Partial<NoticeItem> = {}): NoticeItem {
 }
 
 describe('DdlNoticeBar', () => {
+  // 固定"今天"为 2026-08-05，使截止日期判定确定且不随真实时间漂移
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 7, 5))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('renders nothing when there are no urgent notices', () => {
     const wrapper = mountBar([
       makeNotice({ id: 'far', deadline: '2026-12-31' }),

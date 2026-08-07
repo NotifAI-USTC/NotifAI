@@ -30,6 +30,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
       - name: Build
         # 生产构建必须提供 VITE_API_BASE_URL（vite.config.ts 会拒绝空值）。
         # 优先读取仓库变量 VITE_API_BASE_URL，未配置时回退到当前线上后端。
