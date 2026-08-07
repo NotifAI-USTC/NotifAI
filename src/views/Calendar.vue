@@ -354,6 +354,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="calendar-page">
+    <h1 class="sr-only">通知日历</h1>
     <v-app-bar color="surface" elevation="1">
       <v-app-bar-title>通知日历</v-app-bar-title>
       <v-spacer />
@@ -652,7 +653,7 @@ onBeforeUnmount(() => {
 }
 
 .month-grid__cell--outside {
-  background: rgba(var(--v-theme-surface-variant), 0.3);
+  background: rgba(var(--v-theme-surface-variant), 0.45);
 }
 
 .month-grid__cell--selected {
@@ -683,8 +684,9 @@ onBeforeUnmount(() => {
 }
 
 .month-grid__cell--outside .month-grid__date {
-  color: rgb(var(--v-theme-on-surface-variant));
-  opacity: 0.6;
+  color: rgb(var(--v-theme-on-surface));
+  opacity: 1;
+  background: transparent;
 }
 
 .month-grid__events {
@@ -698,12 +700,15 @@ onBeforeUnmount(() => {
 .month-grid__more {
   border: none;
   background: transparent;
-  color: rgb(var(--v-theme-primary));
+  color: rgb(var(--v-theme-on-surface-variant));
   font-size: 11px;
+  font-weight: 600;
   text-align: left;
   padding: 0 4px;
   cursor: pointer;
   font-family: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* ---- 事件条 ---- */

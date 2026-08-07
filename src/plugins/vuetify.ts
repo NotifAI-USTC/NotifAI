@@ -149,6 +149,9 @@ export default createVuetify({
           error: '#b42318',
           background: '#f5f5f5',
           surface: '#ffffff',
+          // 显式定义次级文本/浅色底，避免 Vuetify 自动生成反转的对比色
+          'surface-variant': '#e7e0ec',
+          'on-surface-variant': '#49454f',
         },
       },
       dark: {
@@ -159,6 +162,8 @@ export default createVuetify({
           error: '#ff8a80',
           background: '#0d0d0d',
           surface: '#1c1c1e',
+          'surface-variant': '#444746',
+          'on-surface-variant': '#cac4d0',
         },
       },
     },

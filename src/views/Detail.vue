@@ -131,6 +131,7 @@ function handleContentKeydown(event: KeyboardEvent): void {
 
 <template>
   <div class="detail-page">
+    <h1 class="sr-only">通知详情</h1>
     <!-- 顶部导航 -->
     <v-app-bar color="surface" elevation="1">
       <v-btn icon aria-label="返回上一页" @click="goBack">
@@ -222,11 +223,16 @@ function handleContentKeydown(event: KeyboardEvent): void {
             <v-divider />
             <v-card-text>
               <div
+                v-if="safeContent"
                 class="clean-content"
                 @click="handleContentClick"
                 @keydown="handleContentKeydown"
                 v-html="safeContent"
               />
+              <div v-else class="text-center text-medium-emphasis pa-4">
+                <v-icon size="32" color="grey" class="mb-2">$fileDocumentOutline</v-icon>
+                <div>暂无原文内容，可前往官网查看</div>
+              </div>
             </v-card-text>
           </v-card>
 

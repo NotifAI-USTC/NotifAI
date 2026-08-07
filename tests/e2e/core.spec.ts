@@ -25,7 +25,7 @@ test('loads the notice feed and opens a detail without runtime or layout errors'
 
   await firstNotice.click()
   await expect(page).toHaveURL(/#\/detail\/[A-Za-z0-9_-]+$/)
-  await expect(page.getByText('通知详情', { exact: true })).toBeVisible()
+  await expect(page.locator('.v-app-bar-title', { hasText: '通知详情' })).toBeVisible()
   await expect(page.getByText('AI 秘书已为您提炼干货', { exact: true })).toBeVisible()
   expect(consoleErrors).toEqual([])
 })
@@ -49,13 +49,13 @@ test('persists a favorite and supports calendar and theme workflows', async ({ p
   await expect(persistedCard.getByRole('button', { name: '取消收藏通知' })).toBeVisible()
 
   await page.goto('/#/user')
-  await expect(page.getByText('个人中心', { exact: true })).toBeVisible()
+  await expect(page.locator('.v-app-bar-title', { hasText: '个人中心' })).toBeVisible()
   await expect(page.getByText('将已加载通知标为已读', { exact: true })).toBeVisible()
   await page.getByText('深色', { exact: true }).click()
   await expect(page.locator('.v-application')).toHaveClass(/v-theme--dark/)
 
   await page.goto('/#/calendar')
-  await expect(page.getByText('通知日历', { exact: true })).toBeVisible()
+  await expect(page.locator('.v-app-bar-title', { hasText: '通知日历' })).toBeVisible()
   await expect(page.getByRole('heading', { level: 2 })).toContainText(/\d{4}年\d{1,2}月/)
   await expect(page.getByText('无法加载当月通知')).toHaveCount(0)
 })

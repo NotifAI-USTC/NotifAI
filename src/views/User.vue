@@ -237,6 +237,7 @@ function markCachedNoticesRead() {
 
 <template>
   <div class="user-page">
+    <h1 class="sr-only">个人中心</h1>
     <v-app-bar color="surface" elevation="1">
       <v-app-bar-title>个人中心</v-app-bar-title>
     </v-app-bar>

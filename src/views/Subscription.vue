@@ -22,6 +22,7 @@ const deptGroups = ['校级部门', '二级学院']
 
 <template>
   <div class="subscription-page">
+    <h1 class="sr-only">订阅与屏蔽</h1>
     <v-app-bar color="surface" elevation="1">
       <v-app-bar-title>订阅与屏蔽</v-app-bar-title>
     </v-app-bar>

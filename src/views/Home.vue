@@ -457,6 +457,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="home-page">
+    <h1 class="sr-only">通知看板</h1>
     <!-- 搜索栏 -->
     <v-toolbar density="compact" color="surface">
       <v-text-field
@@ -473,6 +474,8 @@ onBeforeUnmount(() => {
       <v-btn
         icon
         :color="showAdvancedSearch ? 'primary' : 'default'"
+        :aria-label="showAdvancedSearch ? '关闭高级搜索' : '打开高级搜索'"
+        title="高级搜索"
         @click="showAdvancedSearch = !showAdvancedSearch"
       >
         <v-icon>$filterVariant</v-icon>
