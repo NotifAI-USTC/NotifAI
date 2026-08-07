@@ -1320,3 +1320,78 @@ describe('user settings store', () => {
     expect(cached).toHaveProperty('attachments')
   })
 })
+
+
+describe('settings export / import and read history', () => {
+  let store: ReturnType<typeof useUserSettingsStore> | null = null
+
+  beforeEach(() => {
+    window.localStorage.clear()
+    installMatchMedia()
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    store?.$dispose()
+    store = null
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('exports a versioned JSON payload and imports it back', () => {
+    store = useUserSettingsStore()
+    store.toggleStar('notice-1')
+    store.addKeyword('考研')
+    store.addCustomTag('notice-1', '重要')
+
+    const exported = store.exportSettings()
+    const parsed = JSON.parse(exported)
+    expect(parsed.schemaVersion).toBe(USER_SETTINGS_SCHEMA_VERSION)
+    expect(parsed.starredIds).toContain('notice-1')
+    expect(parsed.blacklistKeywords).toContain('考研')
+    expect(parsed.customTags['notice-1']).toContain('重要')
+
+    // 导入到全新 store，验证恢复
+    store?.$dispose()
+    store = useUserSettingsStore()
+    const result = store.importSettings(exported)
+    expect(result.ok).toBe(true)
+    expect(store.isStarred('notice-1')).toBe(true)
+    expect(store.blacklistKeywords).toContain('考研')
+    expect(store.customTags['notice-1']).toContain('重要')
+    const persisted = JSON.parse(
+      window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY) ?? '{}',
+    )
+    expect(persisted.starredIds).toContain('notice-1')
+  })
+
+  it('rejects malformed and future-schema imports', () => {
+    store = useUserSettingsStore()
+    const bad = store.importSettings('{not-json')
+    expect(bad.ok).toBe(false)
+
+    const future = JSON.stringify({
+      schemaVersion: USER_SETTINGS_SCHEMA_VERSION + 1,
+      starredIds: ['notice-1'],
+    })
+    const futureResult = store.importSettings(future)
+    expect(futureResult.ok).toBe(false)
+  })
+
+  it('clears read history and survives a reload', () => {
+    store = useUserSettingsStore()
+    store.markRead('notice-1')
+    store.markRead('notice-2')
+    expect(store.readIds).toHaveLength(2)
+    expect(store.persistImmediate()).toBe(true)
+
+    store.clearReadHistory()
+    expect(store.readIds).toHaveLength(0)
+    expect(store.persistImmediate()).toBe(true)
+
+    // 重新加载后仍保持已清空状态（缺失字段按空数组规范化）
+    store?.$dispose()
+    store = useUserSettingsStore()
+    expect(store.readIds).toEqual([])
+  })
+})

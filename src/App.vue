@@ -5,12 +5,14 @@ import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from './stores/userSettings'
 import { useWindowSize } from './composables/useWindowSize'
 import { useSnackbar } from './composables/useSnackbar'
+import { useForegroundDdlReminder } from './composables/useForegroundDdlReminder'
 
 const router = useRouter()
 const store = useUserSettingsStore()
 const theme = useTheme()
 const { isMobile } = useWindowSize()
 const snackbar = useSnackbar()
+useForegroundDdlReminder()
 
 const activeTab = ref('Home')
 const tabs = [

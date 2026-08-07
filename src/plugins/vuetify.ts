@@ -62,6 +62,7 @@ import {
   mdiTagOffOutline,
   mdiTagPlus,
   mdiTextBox,
+  mdiTrayArrowUp,
   mdiTrophy,
 } from '@mdi/js'
 
@@ -130,6 +131,7 @@ export default createVuetify({
       tagOffOutline: mdiTagOffOutline,
       tagPlus: mdiTagPlus,
       textBox: mdiTextBox,
+      trayArrowUp: mdiTrayArrowUp,
       trophy: mdiTrophy,
     },
     sets: {

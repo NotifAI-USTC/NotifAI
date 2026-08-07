@@ -1124,6 +1124,72 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     persist()
   }
 
+  /** 导出全部用户偏好为 JSON 字符串（含版本号，便于重新导入）。 */
+  function exportSettings(): string {
+    const payload: Record<string, unknown> = {
+      schemaVersion: USER_SETTINGS_SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
+      subscriptionMode: subscriptionMode.value,
+      subscribedDepts: [...subscribedDepts.value],
+      blacklistKeywords: [...blacklistKeywords.value],
+      starredIds: [...starredIds.value],
+      starredFolderMap: Object.assign({}, starredFolderMap.value),
+      readIds: [...readIds.value],
+      pinnedIds: [...pinnedIds.value],
+      importantIds: [...importantIds.value],
+      customTags: Object.fromEntries(
+        Object.entries(customTags.value).map(([id, tags]) => [id, [...tags]]),
+      ),
+      darkMode: darkMode.value,
+      folders: folders.value.map((folder) => ({ ...folder })),
+      notificationEnabled: notificationEnabled.value,
+    }
+    return JSON.stringify(payload, null, 2)
+  }
+
+  /** 导入偏好 JSON：校验后作为新的本地基线快照写入并应用。 */
+  function importSettings(json: string): { ok: boolean; message: string } {
+    try {
+      const parsed = parseSettingsValue(json)
+      if (parsed.readOnly) return { ok: false, message: FUTURE_SCHEMA_ERROR }
+      if (storageReadOnly || typeof window === 'undefined') {
+        return { ok: false, message: FUTURE_SCHEMA_ERROR }
+      }
+      const settings = parsed.settings
+      window.localStorage.setItem(USER_SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+      applySettings(settings)
+      // 重置本地同步状态，使导入内容成为新的基线
+      localSequence = syncSequence(settings.syncClock, syncClientId)
+      lastSyncedSettings = cloneStoredSettings(settings)
+      stableViewSettings = cloneStoredSettings(settings)
+      currentSyncClock = Object.assign(
+        Object.create(null) as Record<string, number>,
+        settings.syncClock,
+      )
+      currentSyncWriter = settings.syncWriter
+      localJournal = createSettingsJournal(syncClientId)
+      localJournalNeedsWrite = false
+      persistedLocalJournalKey = null
+      persistedLocalJournalRaw = null
+      supersededLocalJournalKeys.clear()
+      unflushedBaseline = null
+      needsMigration = false
+      return { ok: true, message: parsed.needsMigration ? '已导入并迁移到当前版本' : '偏好设置已导入' }
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : '偏好导入失败',
+      }
+    }
+  }
+
+  /** 清空全部已读记录。 */
+  function clearReadHistory(): void {
+    if (readIds.value.length === 0) return
+    readIds.value = []
+    persist()
+  }
+
   /** 缓存通知数据供跨页面使用 */
   function cacheNotice(notice: NoticeItem): void {
     noticeCache.value.delete(notice.id)
@@ -1194,6 +1260,9 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     markCachedNoticesRead,
     setDarkMode,
     setNotificationEnabled,
+    exportSettings,
+    importSettings,
+    clearReadHistory,
     persistImmediate,
     cacheNotice,
     cacheNotices,

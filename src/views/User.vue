@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
 import { fetchNoticeById } from '../utils/request'
-import { calculateRemainingDays } from '../utils/date'
+import { calculateRemainingDays, getLocalToday } from '../utils/date'
 import type { DarkMode } from '../stores/userSettings'
 import type { NoticeItem } from '../types/notice'
 import {
@@ -28,6 +28,8 @@ const starredLoading = ref(true)
 const starredLoadError = ref('')
 const showFeedbackPopup = ref(false)
 const showFolderDialog = ref(false)
+const showClearReadConfirm = ref(false)
+const importInput = ref<HTMLInputElement | null>(null)
 const notificationPermission = ref<NotificationPermission | null>(null)
 let starredRequestId = 0
 let starredRequestController: AbortController | null = null
@@ -113,6 +115,45 @@ async function loadStarredNotices() {
     if (starredRequestController === controller) starredRequestController = null
     if (requestId === starredRequestId) starredLoading.value = false
   }
+}
+
+function handleExportSettings() {
+  const json = store.exportSettings()
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `notifai-preferences-${getLocalToday()}.json`
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+  snackbar.showSuccess('偏好设置已导出')
+}
+
+function handleImportFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    const json = typeof reader.result === 'string' ? reader.result : ''
+    const result = store.importSettings(json)
+    if (result.ok) {
+      snackbar.showSuccess(result.message)
+    } else {
+      snackbar.showError(result.message)
+    }
+    input.value = ''
+  }
+  reader.onerror = () => snackbar.showError('读取文件失败')
+  reader.readAsText(file)
+}
+
+function handleClearReadHistory() {
+  store.clearReadHistory()
+  showClearReadConfirm.value = false
+  snackbar.showSuccess('已清空已读记录')
 }
 
 onMounted(() => {
@@ -279,6 +320,21 @@ function markCachedNoticesRead() {
             @click="markCachedNoticesRead"
           />
           <v-list-item
+            title="清空已读记录"
+            prepend-icon="$delete"
+            @click="showClearReadConfirm = true"
+          />
+          <v-list-item
+            title="导出偏好设置"
+            prepend-icon="$contentSaveOutline"
+            @click="handleExportSettings"
+          />
+          <v-list-item
+            title="导入偏好设置"
+            prepend-icon="$trayArrowUp"
+            @click="importInput?.click()"
+          />
+          <v-list-item
             title="管理收藏夹"
             prepend-icon="$folderCog"
             append-icon="$chevronRight"
@@ -286,6 +342,16 @@ function markCachedNoticesRead() {
           />
         </v-list>
       </v-card>
+
+      <!-- 隐藏的文件选择器（导入偏好） -->
+      <input
+        ref="importInput"
+        type="file"
+        accept="application/json,.json"
+        class="d-none"
+        aria-label="选择偏好设置 JSON 文件"
+        @change="handleImportFile"
+      />
 
       <!-- 通知设置 -->
       <v-card class="mb-4">
@@ -373,6 +439,28 @@ function markCachedNoticesRead() {
         </v-card-text>
       </v-card>
     </v-container>
+
+    <!-- 清空已读确认 -->
+    <v-dialog v-model="showClearReadConfirm" max-width="400">
+      <v-card>
+        <v-card-title class="text-center">
+          <v-icon class="mr-1">$delete</v-icon>
+          清空已读记录
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="text-center pa-6">
+          <div class="text-body-2 text-medium-emphasis">
+            将清除全部已读标记，此操作不可撤销。确定继续吗？
+          </div>
+        </v-card-text>
+        <v-card-actions class="justify-center pa-4">
+          <v-btn variant="tonal" @click="showClearReadConfirm = false">取消</v-btn>
+          <v-btn color="error" prepend-icon="$delete" @click="handleClearReadHistory">
+            清空
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- 反馈弹窗 -->
     <v-dialog v-model="showFeedbackPopup" max-width="400">
