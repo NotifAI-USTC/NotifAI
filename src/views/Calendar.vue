@@ -10,6 +10,7 @@ import {
   getLocalToday,
   isUrgent,
   parseLocalDate,
+  shiftLocalDays,
   shiftLocalMonth,
 } from '../utils/date'
 import { getSourceColor } from '../types/notice'
@@ -48,6 +49,15 @@ interface CalendarCell {
   events: CalendarEvent[]
 }
 
+interface WeekDay {
+  dateStr: string
+  dayNumber: number
+  weekdayLabel: string
+  isToday: boolean
+  isSelected: boolean
+  events: CalendarEvent[]
+}
+
 const MAX_EVENTS_PER_CELL = 3
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
 
@@ -59,6 +69,8 @@ const selectedDate = ref<string | null>(null)
 let loadRequestId = 0
 let loadController: AbortController | null = null
 
+const viewMode = ref<'month' | 'week'>('month')
+
 function getMonthRange(dateStr: string): { start: string; end: string } | null {
   const date = parseLocalDate(dateStr)
   if (!date) return null
@@ -69,13 +81,39 @@ function getMonthRange(dateStr: string): { start: string; end: string } | null {
   }
 }
 
-const visibleMonthKey = computed(() => calendarDate.value.substring(0, 7))
-const visibleMonthRange = computed(() => getMonthRange(calendarDate.value))
+/** 返回 dateStr 所在周的周一 ~ 周日（周一开头）。 */
+function getWeekRange(dateStr: string): { start: string; end: string } | null {
+  const date = parseLocalDate(dateStr)
+  if (!date) return null
+  const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7))
+  const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6)
+  return {
+    start: formatLocalDate(monday),
+    end: formatLocalDate(sunday),
+  }
+}
 
-const visibleMonthLabel = computed(() => {
-  const date = parseLocalDate(calendarDate.value)
-  if (!date) return ''
-  return `${date.getFullYear()}年${date.getMonth() + 1}月`
+const visibleRange = computed(() =>
+  viewMode.value === 'week'
+    ? getWeekRange(calendarDate.value)
+    : getMonthRange(calendarDate.value),
+)
+const visibleRangeKey = computed(() => {
+  const range = visibleRange.value
+  return range ? `${viewMode.value}:${range.start}` : ''
+})
+
+const visibleLabel = computed(() => {
+  const range = visibleRange.value
+  if (!range) return ''
+  const start = parseLocalDate(range.start)
+  const end = parseLocalDate(range.end)
+  if (!start || !end) return ''
+  if (viewMode.value === 'week') {
+    const endShort = `${end.getMonth() + 1}月${end.getDate()}日`
+    return `${formatPublishDate(range.start)} - ${endShort}`
+  }
+  return `${start.getFullYear()}年${start.getMonth() + 1}月`
 })
 
 function noticeTouchesRange(notice: NoticeItem, start: string, end: string): boolean {
@@ -86,15 +124,24 @@ function noticeTouchesRange(notice: NoticeItem, start: string, end: string): boo
   return publishInRange || deadlineInRange
 }
 
-function navigateMonth(delta: number) {
-  const nextDate = shiftLocalMonth(calendarDate.value, delta)
+function navigate(delta: number): void {
+  const nextDate =
+    viewMode.value === 'week'
+      ? shiftLocalDays(calendarDate.value, delta * 7)
+      : shiftLocalMonth(calendarDate.value, delta)
   if (nextDate) calendarDate.value = nextDate
+}
+
+function switchView(mode: 'month' | 'week'): void {
+  if (viewMode.value === mode) return
+  viewMode.value = mode
+  selectedDate.value = null
 }
 
 // 将 NoticeItem 转换为 CalendarEvent
 const calendarEvents = computed<CalendarEvent[]>(() => {
   const events: CalendarEvent[] = []
-  const range = visibleMonthRange.value
+  const range = visibleRange.value
   if (!range) return events
 
   for (const notice of notices.value) {
@@ -179,7 +226,7 @@ const todayStr = computed(() => getLocalToday())
 
 /** 42 格（6 周）月网格，周一开头，覆盖所有月份布局。 */
 const monthGrid = computed<CalendarCell[][]>(() => {
-  const range = visibleMonthRange.value
+  const range = visibleRange.value
   if (!range) return []
   const first = parseLocalDate(range.start)
   if (!first) return []
@@ -221,6 +268,41 @@ const monthGrid = computed<CalendarCell[][]>(() => {
   return weeks
 })
 
+/** 当前周的 7 天数据（周一开头）。 */
+const weekGrid = computed<WeekDay[]>(() => {
+  const range = visibleRange.value
+  if (!range) return []
+  const start = parseLocalDate(range.start)
+  if (!start) return []
+
+  const eventsByDate = new Map<string, CalendarEvent[]>()
+  for (const event of calendarEvents.value) {
+    const list = eventsByDate.get(event.start) ?? []
+    list.push(event)
+    eventsByDate.set(event.start, list)
+  }
+
+  const days: WeekDay[] = []
+  for (let index = 0; index < 7; index += 1) {
+    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + index)
+    const dateStr = formatLocalDate(date)
+    days.push({
+      dateStr,
+      dayNumber: date.getDate(),
+      weekdayLabel: WEEKDAY_LABELS[index],
+      isToday: dateStr === todayStr.value,
+      isSelected: dateStr === selectedDate.value,
+      events: eventsByDate.get(dateStr) ?? [],
+    })
+  }
+  return days
+})
+
+function dayAriaLabel(day: WeekDay): string {
+  const eventSummary = day.events.length > 0 ? `，${day.events.length} 项通知` : ''
+  return `${formatPublishDate(day.dateStr)}${eventSummary}`
+}
+
 function cellAriaLabel(cell: CalendarCell): string {
   const eventSummary = cell.events.length > 0 ? `，${cell.events.length} 项通知` : ''
   return `${formatPublishDate(cell.dateStr)}${eventSummary}`
@@ -243,7 +325,8 @@ function handleExportIcs(): void {
     title: `${event.type === 'deadline' ? '截止' : '发布'} · ${event.name}`,
     description: `来源: ${event.source}\n${event.type === 'deadline' ? '截止日期' : '发布日期'}: ${event.start}`,
   }))
-  downloadIcs(`notifai-calendar-${visibleMonthKey.value}.ics`, buildMonthIcs(events))
+  const rangeKey = visibleRange.value?.start ?? getLocalToday()
+  downloadIcs(`notifai-calendar-${rangeKey}.ics`, buildMonthIcs(events))
 }
 
 function eventAriaLabel(rawEvent: unknown): string {
@@ -252,8 +335,8 @@ function eventAriaLabel(rawEvent: unknown): string {
   return `${formatPublishDate(event.start)}${type}：${event.name}`
 }
 
-async function loadVisibleMonth() {
-  const range = getMonthRange(calendarDate.value)
+async function loadVisibleRange() {
+  const range = visibleRange.value
   if (!range) {
     loadRequestId += 1
     loadController?.abort()
@@ -277,7 +360,7 @@ async function loadVisibleMonth() {
 
     while (expectedTotal === null || loaded.size < expectedTotal) {
       if (page > MAX_CALENDAR_PAGES) {
-        throw new Error('当月通知分页超过日历加载上限')
+        throw new Error('通知分页超过日历加载上限')
       }
       const res = await fetchNotices(
         {
@@ -293,7 +376,7 @@ async function loadVisibleMonth() {
       if (expectedTotal === null) {
         expectedTotal = res.total
         if (expectedTotal > MAX_CALENDAR_ITEMS) {
-          throw new Error('当月通知数量超过日历加载上限')
+          throw new Error('通知数量超过日历加载上限')
         }
       } else if (res.total !== expectedTotal) {
         throw new Error('通知列表在加载期间发生了变化')
@@ -320,16 +403,16 @@ async function loadVisibleMonth() {
       page += 1
     }
 
-    const monthNotices = Array.from(loaded.values()).filter((notice) =>
+    const rangeNotices = Array.from(loaded.values()).filter((notice) =>
       noticeTouchesRange(notice, range.start, range.end),
     )
-    notices.value = monthNotices
-    store.cacheNotices(monthNotices)
+    notices.value = rangeNotices
+    store.cacheNotices(rangeNotices)
   } catch (error) {
     if (controller.signal.aborted || requestId !== loadRequestId) return
     notices.value = []
     loadError.value =
-      error instanceof ApiConfigurationError ? error.message : '无法加载当月通知，请检查网络后重试'
+      error instanceof ApiConfigurationError ? error.message : '无法加载当前范围通知，请检查网络后重试'
   } finally {
     if (loadController === controller) loadController = null
     if (requestId === loadRequestId) loading.value = false
@@ -337,10 +420,10 @@ async function loadVisibleMonth() {
 }
 
 watch(
-  visibleMonthKey,
+  visibleRangeKey,
   () => {
     selectedDate.value = null
-    void loadVisibleMonth()
+    void loadVisibleRange()
   },
   { immediate: true },
 )
@@ -387,7 +470,7 @@ onBeforeUnmount(() => {
     <v-alert v-else-if="loadError" type="error" variant="tonal" class="ma-3" role="alert">
       {{ loadError }}
       <template #append>
-        <v-btn prepend-icon="$refresh" variant="text" @click="loadVisibleMonth"> 重试 </v-btn>
+        <v-btn prepend-icon="$refresh" variant="text" @click="loadVisibleRange"> 重试 </v-btn>
       </template>
     </v-alert>
 
@@ -400,25 +483,39 @@ onBeforeUnmount(() => {
             icon
             variant="text"
             size="small"
-            aria-label="上一个月"
-            title="上一个月"
-            @click="navigateMonth(-1)"
+            :aria-label="viewMode === 'week' ? '上一周' : '上一个月'"
+            :title="viewMode === 'week' ? '上一周' : '上一个月'"
+            @click="navigate(-1)"
           >
             <v-icon>$chevronLeft</v-icon>
           </v-btn>
-          <h2 class="header-title">{{ visibleMonthLabel }}</h2>
+          <div class="calendar-header__center">
+            <h2 class="header-title">{{ visibleLabel }}</h2>
+            <v-btn-toggle
+              :model-value="viewMode"
+              mandatory
+              density="compact"
+              variant="tonal"
+              aria-label="日历视图切换"
+              @update:model-value="switchView($event as 'month' | 'week')"
+            >
+              <v-btn value="month">月</v-btn>
+              <v-btn value="week">周</v-btn>
+            </v-btn-toggle>
+          </div>
           <v-btn
             icon
             variant="text"
             size="small"
-            aria-label="下一个月"
-            title="下一个月"
-            @click="navigateMonth(1)"
+            :aria-label="viewMode === 'week' ? '下一周' : '下一个月'"
+            :title="viewMode === 'week' ? '下一周' : '下一个月'"
+            @click="navigate(1)"
           >
             <v-icon>$chevronRight</v-icon>
           </v-btn>
         </div>
 
+        <template v-if="viewMode === 'month'">
         <!-- 自研月网格（替代弃用的 v-calendar） -->
         <div v-if="!isMobile" class="month-grid" role="grid" aria-label="月份日历">
           <div class="month-grid__head" role="row">
@@ -515,6 +612,112 @@ onBeforeUnmount(() => {
             <span>当月暂无通知</span>
           </div>
         </div>
+        </template>
+
+        <!-- 周视图 -->
+        <template v-else>
+          <div v-if="!isMobile" class="week-grid" role="grid" aria-label="周历">
+            <div
+              v-for="day in weekGrid"
+              :key="day.dateStr"
+              class="week-grid__day"
+              :class="{
+                'week-grid__day--today': day.isToday,
+                'week-grid__day--selected': day.isSelected,
+              }"
+              role="gridcell"
+              :aria-label="dayAriaLabel(day)"
+              :aria-selected="day.isSelected"
+              tabindex="0"
+              @click="handleDayClick(day.dateStr)"
+              @keydown.enter.prevent="handleDayClick(day.dateStr)"
+              @keydown.space.prevent="handleDayClick(day.dateStr)"
+            >
+              <div class="week-grid__date">
+                <span class="week-grid__weekday">{{ day.weekdayLabel }}</span>
+                <span
+                  class="week-grid__daynum"
+                  :class="{ 'week-grid__daynum--today': day.isToday }"
+                >
+                  {{ day.dayNumber }}
+                </span>
+              </div>
+              <div class="week-grid__events">
+                <template v-if="day.events.length > 0">
+                  <button
+                    v-for="event in day.events"
+                    :key="`${event.type}-${event.noticeId}`"
+                    type="button"
+                    class="event-chip"
+                    :class="{ 'event-chip--deadline': event.type === 'deadline' }"
+                    :style="{ backgroundColor: event.color, color: event.textColor }"
+                    :aria-label="eventAriaLabel(event)"
+                    :title="event.name"
+                    @click.stop="goToDetail(event.noticeId)"
+                  >
+                    <v-icon v-if="event.type === 'deadline'" size="10" class="mr-1">
+                      $clockAlert
+                    </v-icon>
+                    <span class="event-text">{{ event.name }}</span>
+                  </button>
+                </template>
+                <div v-else class="week-grid__empty">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="week-agenda" aria-label="本周议程">
+            <div v-for="day in weekGrid" :key="day.dateStr" class="week-agenda__day">
+              <div
+                class="week-agenda__header"
+                :class="{ 'week-agenda__header--today': day.isToday }"
+                role="button"
+                tabindex="0"
+                :aria-label="`选择 ${formatPublishDate(day.dateStr)}`"
+                @click="handleDayClick(day.dateStr)"
+                @keydown.enter.prevent="handleDayClick(day.dateStr)"
+                @keydown.space.prevent="handleDayClick(day.dateStr)"
+              >
+                <span class="week-agenda__weekday">{{ day.weekdayLabel }}</span>
+                <span class="week-agenda__date">{{ formatPublishDate(day.dateStr) }}</span>
+                <v-chip
+                  v-if="day.events.length > 0"
+                  size="x-small"
+                  color="primary"
+                  variant="tonal"
+                >
+                  {{ day.events.length }} 项
+                </v-chip>
+              </div>
+              <div v-if="day.events.length > 0" class="week-agenda__events">
+                <div
+                  v-for="event in day.events"
+                  :key="`${event.type}-${event.noticeId}`"
+                  class="week-agenda__event"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="eventAriaLabel(event)"
+                  @click="goToDetail(event.noticeId)"
+                  @keydown.enter.prevent="goToDetail(event.noticeId)"
+                  @keydown.space.prevent="goToDetail(event.noticeId)"
+                >
+                  <v-icon size="14" :color="event.color">
+                    {{ event.type === 'deadline' ? '$clockAlert' : '$bullhornOutline' }}
+                  </v-icon>
+                  <span class="week-agenda__event-title">{{ event.name }}</span>
+                  <v-chip
+                    size="x-small"
+                    :color="event.type === 'deadline' ? 'warning' : 'primary'"
+                    variant="tonal"
+                  >
+                    {{ event.type === 'deadline' ? '截止' : '发布' }}
+                  </v-chip>
+                </div>
+              </div>
+              <div v-else class="week-agenda__empty">暂无通知</div>
+            </div>
+          </div>
+        </template>
       </div>
 
       <!-- 图例 -->
@@ -747,10 +950,18 @@ onBeforeUnmount(() => {
 .calendar-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
+  justify-content: space-between;
+  gap: 8px;
   padding: 12px 16px;
   background: rgb(var(--v-theme-surface));
+}
+
+.calendar-header__center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .header-title {
@@ -763,6 +974,152 @@ onBeforeUnmount(() => {
 
 .mobile-agenda {
   display: block;
+}
+
+/* ---- 周视图：桌面 7 列 ---- */
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.week-grid__day {
+  min-height: 320px;
+  border-right: 1px solid rgb(var(--v-theme-surface-variant));
+  border-bottom: 1px solid rgb(var(--v-theme-surface-variant));
+  padding: 4px;
+  cursor: pointer;
+  outline: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.week-grid__day:nth-child(7n) {
+  border-right: none;
+}
+
+.week-grid__day--selected {
+  background: rgba(var(--v-theme-primary), 0.1);
+  box-shadow: inset 0 0 0 2px rgb(var(--v-theme-primary));
+}
+
+.week-grid__day:focus-visible {
+  box-shadow: inset 0 0 0 2px rgb(var(--v-theme-primary));
+}
+
+.week-grid__date {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgb(var(--v-theme-surface-variant));
+  margin-bottom: 4px;
+}
+
+.week-grid__weekday {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+
+.week-grid__daynum {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgb(var(--v-theme-on-surface));
+  border-radius: 50%;
+}
+
+.week-grid__daynum--today {
+  background: rgb(var(--v-theme-primary));
+  color: rgb(var(--v-theme-on-primary));
+}
+
+.week-grid__events {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.week-grid__empty {
+  color: rgb(var(--v-theme-on-surface-variant));
+  font-size: 12px;
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* ---- 周视图：移动端按天分组列表 ---- */
+.week-agenda {
+  display: block;
+}
+
+.week-agenda__day {
+  border-bottom: 1px solid rgb(var(--v-theme-surface-variant));
+  padding: 8px 12px;
+}
+
+.week-agenda__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.week-agenda__header--today .week-agenda__date {
+  color: rgb(var(--v-theme-primary));
+  font-weight: 700;
+}
+
+.week-agenda__weekday {
+  width: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+
+.week-agenda__date {
+  font-size: 13px;
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.week-agenda__events {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.week-agenda__event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(var(--v-theme-surface-variant), 0.4);
+}
+
+.week-agenda__event-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: rgb(var(--v-theme-on-surface));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-agenda__empty {
+  color: rgb(var(--v-theme-on-surface-variant));
+  font-size: 12px;
+  padding: 6px 8px;
 }
 
 .mobile-agenda-empty {

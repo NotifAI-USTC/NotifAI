@@ -163,7 +163,7 @@ describe('view request lifecycle', () => {
     await flushPromises()
 
     expect(mocks.fetchNotices).toHaveBeenCalledOnce()
-    expect(wrapper.text()).toContain('无法加载当月通知')
+    expect(wrapper.text()).toContain('无法加载当前范围通知')
   })
 
   it('rejects a short Home page that claims more results remain', async () => {
@@ -225,7 +225,7 @@ describe('view request lifecycle', () => {
     await flushPromises()
 
     expect(mocks.fetchNotices).toHaveBeenCalledOnce()
-    expect(wrapper.text()).toContain('无法加载当月通知')
+    expect(wrapper.text()).toContain('无法加载当前范围通知')
   })
 
   it('refreshes a starred DDL even when a cached deadline is available', async () => {

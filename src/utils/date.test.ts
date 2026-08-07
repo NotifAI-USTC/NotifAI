@@ -7,6 +7,7 @@ import {
   getLocalToday,
   isUrgent,
   parseLocalDate,
+  shiftLocalDays,
   shiftLocalMonth,
 } from './date'
 
@@ -69,5 +70,19 @@ describe('isUrgent and formatRemaining with injectable now', () => {
     expect(formatRemaining('2026-08-06', now)).toBe('剩 1 天')
     expect(formatRemaining('2026-08-04', now)).toBe('已过期')
     expect(formatRemaining(null, now)).toBe('未提及')
+  })
+})
+
+describe('shiftLocalDays', () => {
+  it('moves across month and year boundaries on the local calendar', () => {
+    expect(shiftLocalDays('2026-08-07', 1)).toBe('2026-08-08')
+    expect(shiftLocalDays('2026-08-31', 1)).toBe('2026-09-01')
+    expect(shiftLocalDays('2026-01-01', -1)).toBe('2025-12-31')
+    expect(shiftLocalDays('2026-03-01', -1)).toBe('2026-02-28')
+  })
+
+  it('rejects invalid input', () => {
+    expect(shiftLocalDays('invalid', 1)).toBeNull()
+    expect(shiftLocalDays('2026-08-07', 1.5)).toBeNull()
   })
 })

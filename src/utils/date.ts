@@ -44,6 +44,14 @@ export function shiftLocalMonth(dateStr: string, delta: number): string | null {
   return formatLocalDate(new Date(date.getFullYear(), date.getMonth() + delta, 1))
 }
 
+/** 按天切换日历，返回加减 delta 天后的本地日期。 */
+export function shiftLocalDays(dateStr: string, delta: number): string | null {
+  const date = parseLocalDate(dateStr)
+  if (!date || !Number.isSafeInteger(delta)) return null
+
+  return formatLocalDate(new Date(date.getFullYear(), date.getMonth(), date.getDate() + delta))
+}
+
 function calendarDayNumber(date: Date): number {
   const utcDate = new Date(0)
   utcDate.setUTCFullYear(date.getFullYear(), date.getMonth(), date.getDate())
