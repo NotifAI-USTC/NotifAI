@@ -17,6 +17,7 @@ import { getContrastTextColor } from '../utils/color'
 import type { NoticeItem } from '../types/notice'
 import { useWindowSize } from '../composables/useWindowSize'
 import { isOffsetPageInconsistent } from '../utils/pagination'
+import { buildMonthIcs, downloadIcs } from '../utils/ics'
 
 const router = useRouter()
 const store = useUserSettingsStore()
@@ -235,6 +236,16 @@ function goToDetail(id: string) {
   void router.push({ name: 'Detail', params: { id } })
 }
 
+function handleExportIcs(): void {
+  const events = calendarEvents.value.map((event) => ({
+    uid: `${event.noticeId}-${event.type}-${event.start}`,
+    start: event.start,
+    title: `${event.type === 'deadline' ? '截止' : '发布'} · ${event.name}`,
+    description: `来源: ${event.source}\n${event.type === 'deadline' ? '截止日期' : '发布日期'}: ${event.start}`,
+  }))
+  downloadIcs(`notifai-calendar-${visibleMonthKey.value}.ics`, buildMonthIcs(events))
+}
+
 function eventAriaLabel(rawEvent: unknown): string {
   const event = rawEvent as CalendarEvent
   const type = event.type === 'deadline' ? '截止' : '发布'
@@ -348,6 +359,17 @@ onBeforeUnmount(() => {
       <v-spacer />
       <v-btn size="small" variant="tonal" prepend-icon="$calendarToday" @click="goToToday">
         回到今天
+      </v-btn>
+      <v-btn
+        size="small"
+        variant="tonal"
+        prepend-icon="$fileDownload"
+        class="ml-2"
+        :disabled="calendarEvents.length === 0"
+        aria-label="导出当月日历"
+        @click="handleExportIcs"
+      >
+        导出 ICS
       </v-btn>
     </v-app-bar>
 

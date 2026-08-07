@@ -13,6 +13,7 @@ import AdvancedSearch from '../components/AdvancedSearch.vue'
 import type { SearchFilters, TriStateFilter } from '../components/AdvancedSearch.vue'
 import { useWindowSize } from '../composables/useWindowSize'
 import { isOffsetPageExhausted, isOffsetPageInconsistent } from '../utils/pagination'
+import { calculateRemainingDays } from '../utils/date'
 
 const PAGE_SIZE = 15
 const MAX_PAGES_PER_BATCH = 5
@@ -403,6 +404,19 @@ const filteredNotices = computed(() => {
   return notices.value
 })
 
+/** 基于已加载数据的轻量统计（诚实标注口径）。 */
+const stats = computed(() => {
+  const loaded = filteredNotices.value
+  const sources = new Set(loaded.map((notice) => normalizeNoticeSource(notice.source))).size
+  let ddlSoon = 0
+  for (const notice of loaded) {
+    if (!notice.deadline) continue
+    const days = calculateRemainingDays(notice.deadline)
+    if (days !== null && days >= 0 && days <= 7) ddlSoon += 1
+  }
+  return { loaded: loaded.length, total: loadedTotal.value, sources, ddlSoon }
+})
+
 watch(
   () => store.subscriptionMode,
   () => {
@@ -467,6 +481,32 @@ onBeforeUnmount(() => {
 
     <!-- 紧急 DDL 提示条：仅在实际数据加载完成后显示 -->
     <DdlNoticeBar v-if="!initialLoading && filteredNotices.length > 0" :notices="filteredNotices" />
+
+    <!-- 已加载数据统计概览 -->
+    <div
+      v-if="!initialLoading && !requestError && stats.loaded > 0"
+      class="d-flex flex-wrap align-center ga-2 px-4 pt-2"
+      role="status"
+      aria-label="通知统计概览"
+    >
+      <v-chip size="x-small" variant="tonal" class="stats-chip">
+        <v-icon start size="14">$fileDocumentOutline</v-icon>
+        共 {{ stats.total }} 条 · 已加载 {{ stats.loaded }}
+      </v-chip>
+      <v-chip size="x-small" variant="tonal" class="stats-chip">
+        <v-icon start size="14">$accountGroup</v-icon>
+        {{ stats.sources }} 个来源
+      </v-chip>
+      <v-chip
+        size="x-small"
+        variant="tonal"
+        :color="stats.ddlSoon > 0 ? 'error' : 'default'"
+        class="stats-chip"
+      >
+        <v-icon start size="14">$clockAlert</v-icon>
+        近 7 天 DDL {{ stats.ddlSoon }} 个
+      </v-chip>
+    </div>
 
     <!-- 高级搜索提示 -->
     <v-alert
