@@ -38,6 +38,18 @@ interface CalendarEvent {
   notice: NoticeItem
 }
 
+interface CalendarCell {
+  dateStr: string
+  dayNumber: number
+  inMonth: boolean
+  isToday: boolean
+  isSelected: boolean
+  events: CalendarEvent[]
+}
+
+const MAX_EVENTS_PER_CELL = 3
+const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
+
 const notices = ref<NoticeItem[]>([])
 const loading = ref(true)
 const loadError = ref('')
@@ -158,10 +170,59 @@ const selectedDateLabel = computed(() => {
   return formatPublishDate(selectedDate.value)
 })
 
-// VCalendar 日期点击
-function handleDayClick(_event: Event, timestamp: { date: string }) {
-  const dateStr = timestamp.date
+function handleDayClick(dateStr: string): void {
   selectedDate.value = selectedDate.value === dateStr ? null : dateStr
+}
+
+const todayStr = computed(() => getLocalToday())
+
+/** 42 格（6 周）月网格，周一开头，覆盖所有月份布局。 */
+const monthGrid = computed<CalendarCell[][]>(() => {
+  const range = visibleMonthRange.value
+  if (!range) return []
+  const first = parseLocalDate(range.start)
+  if (!first) return []
+
+  const year = first.getFullYear()
+  const month = first.getMonth()
+  const leadingOffset = (first.getDay() + 6) % 7 // 周一=0 ... 周日=6
+
+  const eventsByDate = new Map<string, CalendarEvent[]>()
+  for (const event of calendarEvents.value) {
+    const list = eventsByDate.get(event.start) ?? []
+    list.push(event)
+    eventsByDate.set(event.start, list)
+  }
+
+  const cells: CalendarCell[] = []
+  const startDate = new Date(year, month, 1 - leadingOffset)
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(
+      startDate.getFullYear(),
+      startDate.getMonth(),
+      startDate.getDate() + index,
+    )
+    const dateStr = formatLocalDate(date)
+    cells.push({
+      dateStr,
+      dayNumber: date.getDate(),
+      inMonth: date.getMonth() === month && date.getFullYear() === year,
+      isToday: dateStr === todayStr.value,
+      isSelected: dateStr === selectedDate.value,
+      events: eventsByDate.get(dateStr) ?? [],
+    })
+  }
+
+  const weeks: CalendarCell[][] = []
+  for (let index = 0; index < 42; index += 7) {
+    weeks.push(cells.slice(index, index + 7))
+  }
+  return weeks
+})
+
+function cellAriaLabel(cell: CalendarCell): string {
+  const eventSummary = cell.events.length > 0 ? `，${cell.events.length} 项通知` : ''
+  return `${formatPublishDate(cell.dateStr)}${eventSummary}`
 }
 
 function goToToday() {
@@ -335,37 +396,70 @@ onBeforeUnmount(() => {
           </v-btn>
         </div>
 
-        <v-calendar
-          v-if="!isMobile"
-          class="desktop-calendar"
-          v-model="calendarDate"
-          type="month"
-          :events="calendarEvents"
-          event-start="start"
-          event-end="end"
-          event-color="color"
-          :weekdays="[1, 2, 3, 4, 5, 6, 0]"
-          locale="zh-CN"
-          :event-more="true"
-          :event-more-text="'还有 {0} 项'"
-          @click:date="handleDayClick"
-        >
-          <!-- 自定义事件显示 -->
-          <template #event="{ event }">
-            <button
-              type="button"
-              class="event-chip"
-              :class="{ 'event-chip--deadline': event.type === 'deadline' }"
-              :style="{ backgroundColor: event.color, color: event.textColor }"
-              :aria-label="eventAriaLabel(event)"
-              :title="event.name"
-              @click.stop="goToDetail(event.noticeId)"
+        <!-- 自研月网格（替代弃用的 v-calendar） -->
+        <div v-if="!isMobile" class="month-grid" role="grid" aria-label="月份日历">
+          <div class="month-grid__head" role="row">
+            <div
+              v-for="label in WEEKDAY_LABELS"
+              :key="label"
+              class="month-grid__weekday"
+              role="columnheader"
             >
-              <v-icon v-if="event.type === 'deadline'" size="10" class="mr-1"> $clockAlert </v-icon>
-              <span class="event-text">{{ event.name }}</span>
-            </button>
-          </template>
-        </v-calendar>
+              {{ label }}
+            </div>
+          </div>
+          <div v-for="(week, weekIndex) in monthGrid" :key="weekIndex" class="month-grid__row" role="row">
+            <div
+              v-for="cell in week"
+              :key="cell.dateStr"
+              class="month-grid__cell"
+              :class="{
+                'month-grid__cell--outside': !cell.inMonth,
+                'month-grid__cell--today': cell.isToday,
+                'month-grid__cell--selected': cell.isSelected,
+              }"
+              role="gridcell"
+              :aria-label="cellAriaLabel(cell)"
+              :aria-selected="cell.isSelected"
+              tabindex="0"
+              @click="handleDayClick(cell.dateStr)"
+              @keydown.enter.prevent="handleDayClick(cell.dateStr)"
+              @keydown.space.prevent="handleDayClick(cell.dateStr)"
+            >
+              <div class="month-grid__date">{{ cell.dayNumber }}</div>
+              <div class="month-grid__events">
+                <template
+                  v-for="event in cell.events.slice(0, MAX_EVENTS_PER_CELL)"
+                  :key="`${event.type}-${event.noticeId}`"
+                >
+                  <button
+                    type="button"
+                    class="event-chip"
+                    :class="{ 'event-chip--deadline': event.type === 'deadline' }"
+                    :style="{ backgroundColor: event.color, color: event.textColor }"
+                    :aria-label="eventAriaLabel(event)"
+                    :title="event.name"
+                    @click.stop="goToDetail(event.noticeId)"
+                  >
+                    <v-icon v-if="event.type === 'deadline'" size="10" class="mr-1">
+                      $clockAlert
+                    </v-icon>
+                    <span class="event-text">{{ event.name }}</span>
+                  </button>
+                </template>
+                <button
+                  v-if="cell.events.length > MAX_EVENTS_PER_CELL"
+                  type="button"
+                  class="month-grid__more"
+                  :aria-label="`查看 ${formatPublishDate(cell.dateStr)} 更多通知`"
+                  @click.stop="handleDayClick(cell.dateStr)"
+                >
+                  +{{ cell.events.length - MAX_EVENTS_PER_CELL }} 项
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div v-else class="mobile-agenda" aria-label="当月议程">
           <v-list v-if="mobileAgendaEvents.length > 0" lines="two">
@@ -494,40 +588,100 @@ onBeforeUnmount(() => {
   background: rgb(var(--v-theme-surface));
 }
 
-/* ---- 自定义 VCalendar 样式 ---- */
-.calendar-wrapper :deep(.v-calendar) {
-  border: none;
+/* ---- 自研月网格 ---- */
+.month-grid {
+  display: block;
+  user-select: none;
 }
 
-.calendar-wrapper :deep(.v-calendar-weekly__head) {
+.month-grid__head,
+.month-grid__row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.month-grid__head {
   background: rgba(var(--v-theme-primary), 0.04);
+  border-bottom: 1px solid rgb(var(--v-theme-surface-variant));
 }
 
-.calendar-wrapper :deep(.v-calendar-weekly__head-weekday) {
+.month-grid__weekday {
   font-size: 12px;
   font-weight: 600;
   color: rgb(var(--v-theme-on-surface-variant));
   padding: 8px 0;
-  border-bottom: 1px solid rgb(var(--v-theme-surface-variant));
+  text-align: center;
 }
 
-.calendar-wrapper :deep(.v-calendar-weekly__day) {
+.month-grid__cell {
+  min-height: 84px;
   border-right: 1px solid rgb(var(--v-theme-surface-variant));
   border-bottom: 1px solid rgb(var(--v-theme-surface-variant));
-  min-height: 80px;
   padding: 2px;
+  cursor: pointer;
+  outline: none;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-.calendar-wrapper :deep(.v-calendar-weekly__day:last-child) {
+.month-grid__cell:nth-child(7n) {
   border-right: none;
 }
 
-.calendar-wrapper :deep(.v-calendar-weekly__day--outside) {
+.month-grid__cell--outside {
   background: rgba(var(--v-theme-surface-variant), 0.3);
 }
 
-.calendar-wrapper :deep(.v-calendar-weekly__day--present) {
-  background: rgba(var(--v-theme-primary), 0.06);
+.month-grid__cell--selected {
+  background: rgba(var(--v-theme-primary), 0.1);
+  box-shadow: inset 0 0 0 2px rgb(var(--v-theme-primary));
+}
+
+.month-grid__cell:focus-visible {
+  box-shadow: inset 0 0 0 2px rgb(var(--v-theme-primary));
+}
+
+.month-grid__date {
+  width: 24px;
+  height: 24px;
+  margin: 2px 0 2px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgb(var(--v-theme-on-surface));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.month-grid__cell--today .month-grid__date {
+  background: rgb(var(--v-theme-primary));
+  color: rgb(var(--v-theme-on-primary));
+  border-radius: 50%;
+}
+
+.month-grid__cell--outside .month-grid__date {
+  color: rgb(var(--v-theme-on-surface-variant));
+  opacity: 0.6;
+}
+
+.month-grid__events {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.month-grid__more {
+  border: none;
+  background: transparent;
+  color: rgb(var(--v-theme-primary));
+  font-size: 11px;
+  text-align: left;
+  padding: 0 4px;
+  cursor: pointer;
+  font-family: inherit;
 }
 
 /* ---- 事件条 ---- */
