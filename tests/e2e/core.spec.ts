@@ -14,7 +14,7 @@ test('loads the notice feed and opens a detail without runtime or layout errors'
     if (message.type() === 'error') consoleErrors.push(message.text())
   })
 
-  await expect(page.getByText('NotifAI-USTC', { exact: true })).toBeVisible()
+  await expect(page.getByPlaceholder(/搜索通知/)).toBeVisible()
   const firstNotice = page.getByRole('link', { name: /^打开通知：/ }).first()
   await expect(firstNotice).toBeVisible()
 
@@ -70,6 +70,6 @@ test('redirects an unknown route to the notice feed', async ({ page }) => {
   await page.goto('/#/not-a-real-page')
 
   await expect(page).toHaveURL(/\/#\/$/)
-  await expect(page.getByText('NotifAI-USTC', { exact: true })).toBeVisible()
+  await expect(page.getByPlaceholder(/搜索通知/)).toBeVisible()
   expect(consoleProblems).toEqual([])
 })
