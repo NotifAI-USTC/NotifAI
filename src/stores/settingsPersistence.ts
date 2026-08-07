@@ -34,6 +34,26 @@ export const VALID_DEPARTMENT_ORDER = Array.from(
 )
 export const VALID_DEPARTMENT_NAMES = new Set(VALID_DEPARTMENT_ORDER)
 
+/**
+ * Source names are supplied by the backend and may change without a frontend
+ * release. Keep the same basic safety limits as other persisted strings while
+ * allowing sources discovered through GET /sources.
+ */
+export function normalizeDepartmentName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const department = normalizeNoticeSource(value.trim())
+  return department.length > 0 && department.length <= 200 ? department : null
+}
+
+function orderDepartmentNames(names: Iterable<string>): string[] {
+  const defaultOrder = new Map(VALID_DEPARTMENT_ORDER.map((name, index) => [name, index]))
+  return [...new Set(names)].sort((first, second) => {
+    const firstIndex = defaultOrder.get(first) ?? Number.MAX_SAFE_INTEGER
+    const secondIndex = defaultOrder.get(second) ?? Number.MAX_SAFE_INTEGER
+    return firstIndex - secondIndex || first.localeCompare(second)
+  })
+}
+
 export type DarkMode = 'auto' | 'light' | 'dark'
 export type SubscriptionMode = 'all' | 'custom'
 
@@ -838,8 +858,11 @@ export function effectiveSubscribedDepartments(
   settings: Pick<StoredSettings, 'subscriptionMode' | 'subscribedDepts'>,
 ): string[] {
   if (settings.subscriptionMode === 'all') return [...VALID_DEPARTMENT_ORDER]
-  const selected = new Set(settings.subscribedDepts)
-  return VALID_DEPARTMENT_ORDER.filter((department) => selected.has(department))
+  return orderDepartmentNames(
+    settings.subscribedDepts
+      .map(normalizeDepartmentName)
+      .filter((department): department is string => department !== null),
+  )
 }
 
 export function mergeSubscriptions(
@@ -860,9 +883,20 @@ export function mergeSubscriptions(
     effectiveSubscribedDepartments(local),
     effectiveSubscribedDepartments(remote),
   )
-  const selected = new Set(merged)
-  const subscribedDepts = VALID_DEPARTMENT_ORDER.filter((department) => selected.has(department))
-  if (subscribedDepts.length === VALID_DEPARTMENT_ORDER.length) {
+  const subscribedDepts = orderDepartmentNames(merged)
+  const selected = new Set(subscribedDepts)
+  const hasAllDefaultDepartments = VALID_DEPARTMENT_ORDER.every((department) =>
+    selected.has(department),
+  )
+  // Keep an explicitly custom mode even when it currently contains every
+  // static department. Otherwise a dynamic source excluded by the user from
+  // an "all" subscription cannot be represented by the merged set.
+  if (
+    local.subscriptionMode !== 'custom' &&
+    remote.subscriptionMode !== 'custom' &&
+    hasAllDefaultDepartments &&
+    subscribedDepts.length === VALID_DEPARTMENT_ORDER.length
+  ) {
     return { subscriptionMode: 'all', subscribedDepts: [] }
   }
   return { subscriptionMode: 'custom', subscribedDepts }
@@ -1087,8 +1121,8 @@ export function normalizeStoredSettings(parsed: Record<string, unknown>): Stored
   const subscribedDepts = normalizeStringArray(parsed.subscribedDepts, {
     maxLength: 200,
   })
-    .map(normalizeNoticeSource)
-    .filter((department) => VALID_DEPARTMENT_NAMES.has(department))
+    .map(normalizeDepartmentName)
+    .filter((department): department is string => department !== null)
   const subscriptionMode: SubscriptionMode =
     parsed.subscriptionMode === 'all' || parsed.subscriptionMode === 'custom'
       ? parsed.subscriptionMode
@@ -1246,9 +1280,7 @@ export function parseSettingsJournal(
     return keyword.length > 0 && keyword.length <= 200 ? keyword : null
   }
   const normalizeDepartment = (value: unknown) => {
-    if (typeof value !== 'string') return null
-    const department = normalizeNoticeSource(value)
-    return VALID_DEPARTMENT_NAMES.has(department) ? department : null
+    return normalizeDepartmentName(value)
   }
 
   const journal = createSettingsJournal(expectedClientId)

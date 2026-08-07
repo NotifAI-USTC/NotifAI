@@ -31,7 +31,9 @@ async function loadSources(): Promise<void> {
   loading.value = true
   loadError.value = ''
   try {
-    sources.value = await fetchSources()
+    const loadedSources = await fetchSources()
+    store.registerSources(loadedSources.map((source) => source.name))
+    sources.value = loadedSources
   } catch (error) {
     sources.value = null
     loadError.value =

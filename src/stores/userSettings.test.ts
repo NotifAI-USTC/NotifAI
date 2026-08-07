@@ -106,7 +106,7 @@ describe('user settings store', () => {
     window.localStorage.setItem(
       USER_SETTINGS_STORAGE_KEY,
       JSON.stringify({
-        subscribedDepts: ['计算机科学与技术学院', '计算机学院', '不存在的部门'],
+        subscribedDepts: ['计算机科学与技术学院', '计算机学院', 'x'.repeat(201)],
         starredIds: ['notice-1', 'constructor', '../invalid'],
         starredFolderMap: { 'notice-1': 'missing', constructor: 'default' },
         customTags: { 'notice-1': [' 竞赛 ', '竞赛', 42], constructor: ['安全'] },
@@ -1182,7 +1182,7 @@ describe('user settings store', () => {
     expect(store.subscriptionMode).toBe('custom')
     expect(store.subscribedDepts).not.toContain('教务处')
     const subscribedBeforeInvalidToggle = [...store.subscribedDepts]
-    store.toggleDepartment('不存在的部门')
+    store.toggleDepartment('x'.repeat(201))
     expect(store.subscribedDepts).toEqual(subscribedBeforeInvalidToggle)
 
     const folder = store.addFolder('竞赛', '$folder')
@@ -1193,6 +1193,29 @@ describe('user settings store', () => {
 
     store.removeFolder(folder.id)
     expect(store.starredFolderMap['notice-3']).toBe('default')
+  })
+
+  it('accepts and persists sources discovered from the backend', () => {
+    store = useUserSettingsStore()
+    store.registerSources(['新成立研究院'])
+
+    // Switching a source from the default "all" mode creates a custom list
+    // with that dynamic source explicitly excluded.
+    store.toggleDepartment('新成立研究院')
+    expect(store.subscriptionMode).toBe('custom')
+    expect(store.isSubscribed('新成立研究院')).toBe(false)
+    expect(store.subscribedDepts).not.toContain('新成立研究院')
+
+    store.toggleDepartment('新成立研究院')
+    expect(store.isSubscribed('新成立研究院')).toBe(true)
+    expect(store.subscribedDepts).toContain('新成立研究院')
+    expect(store.persistImmediate()).toBe(true)
+
+    store.$dispose()
+    store = null
+    setActivePinia(createPinia())
+    store = useUserSettingsStore()
+    expect(store.subscribedDepts).toContain('新成立研究院')
   })
 
   it('does not add more than 100 folders', () => {

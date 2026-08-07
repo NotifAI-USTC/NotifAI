@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { DEPARTMENTS } from '../types/notice'
+import { useUserSettingsStore } from '../stores/userSettings'
 import { fetchSources } from '../utils/request'
 import type { SourceItem } from '../types/notice'
 import {
@@ -30,6 +31,8 @@ export interface SearchFilters {
   isStarred: TriStateFilter
   tags: string[]
 }
+
+const store = useUserSettingsStore()
 
 function emptyFilters(): SearchFilters {
   return {
@@ -68,7 +71,9 @@ const sources = computed(() => {
 
 async function loadSources(): Promise<void> {
   try {
-    sourceItems.value = await fetchSources()
+    const loadedSources = await fetchSources()
+    store.registerSources(loadedSources.map((source) => source.name))
+    sourceItems.value = loadedSources
   } catch {
     // 来源列表失败时回退到内置部门表，不阻塞搜索
     sourceItems.value = null

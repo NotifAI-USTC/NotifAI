@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref } from 'vue'
 import type { NoticeItem } from '../types/notice'
-import { DEPARTMENTS, normalizeNoticeSource } from '../types/notice'
+import { DEPARTMENTS } from '../types/notice'
 import { isValidNoticeId } from '../utils/validation'
 import type { Folder } from '../types/folder'
 import {
@@ -17,7 +17,6 @@ import {
   USER_SETTINGS_JOURNAL_PREFIX,
   USER_SETTINGS_SCHEMA_VERSION,
   USER_SETTINGS_STORAGE_KEY,
-  VALID_DEPARTMENT_NAMES,
   appendOperationToJournal,
   clockStrictlyDominates,
   clocksEqual,
@@ -35,6 +34,7 @@ import {
   materializeSettingsJournal,
   mergeStoredSettings,
   mergeSyncClocks,
+  normalizeDepartmentName,
   normalizeFolderIcon,
   parseSettingsValue,
   pruneSettingsJournal,
@@ -110,15 +110,24 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   const persistenceError = ref(loaded.error)
   const systemPrefersDark = ref(false)
 
+  // Static departments are a fallback. Keep runtime sources discovered from
+  // GET /sources so switching one of them can build a complete custom list.
+  const availableSourceNames = new Set([
+    ...DEPARTMENTS.map((department) => department.name),
+    ...saved.subscribedDepts,
+  ])
+
   /** 已拉取通知的内存缓存 */
   const noticeCache = ref<Map<string, NoticeItem>>(new Map())
 
   // ---- 查询 ----
-  const isSubscribed = computed(
-    () => (dept: string) =>
+  const isSubscribed = computed(() => (dept: string) => {
+    const normalizedDept = normalizeDepartmentName(dept)
+    return (
       subscriptionMode.value === 'all' ||
-      subscribedDepts.value.includes(normalizeNoticeSource(dept)),
-  )
+      (normalizedDept !== null && subscribedDepts.value.includes(normalizedDept))
+    )
+  })
   const isStarred = computed(() => (id: string) => starredIds.value.includes(id))
   const isRead = computed(() => (id: string) => readIds.value.includes(id))
   const isPinned = computed(() => (id: string) => pinnedIds.value.includes(id))
@@ -897,12 +906,19 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   })
 
   // ---- 操作 ----
+  function registerSources(sourceNames: readonly string[]): void {
+    for (const sourceName of sourceNames) {
+      const normalized = normalizeDepartmentName(sourceName)
+      if (normalized) availableSourceNames.add(normalized)
+    }
+  }
+
   function toggleDepartment(dept: string): void {
-    const normalizedDept = normalizeNoticeSource(dept)
-    if (!VALID_DEPARTMENT_NAMES.has(normalizedDept)) return
+    const normalizedDept = normalizeDepartmentName(dept)
+    if (!normalizedDept || !availableSourceNames.has(normalizedDept)) return
     if (subscriptionMode.value === 'all') {
       subscriptionMode.value = 'custom'
-      subscribedDepts.value = DEPARTMENTS.map((item) => item.name).filter(
+      subscribedDepts.value = [...availableSourceNames].filter(
         (name) => name !== normalizedDept,
       )
       persist()
@@ -1243,6 +1259,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     urgentStarredIds,
     allCustomTags,
     // 操作
+    registerSources,
     toggleDepartment,
     addKeyword,
     removeKeyword,

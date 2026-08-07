@@ -1,4 +1,5 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEPARTMENTS } from '../types/notice'
 import AdvancedSearch from './AdvancedSearch.vue'
@@ -33,7 +34,7 @@ const stubs = {
 }
 
 function mountDialog() {
-  return shallowMount(AdvancedSearch, { global: { stubs } })
+  return shallowMount(AdvancedSearch, { global: { stubs, plugins: [createPinia()] } })
 }
 
 describe('AdvancedSearch source options', () => {
