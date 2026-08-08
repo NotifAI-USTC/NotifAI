@@ -19,8 +19,6 @@ import { readNoticeFeedCache, writeNoticeFeedCache } from '../utils/noticeFeedCa
 const PAGE_SIZE = 15
 const MAX_PAGES_PER_BATCH = 5
 const PULL_THRESHOLD = 72
-const NEW_NOTICE_POLL_MS = 60_000
-const LAST_SEEN_KEY = 'notifai.lastSeenAt'
 
 interface QueryContext {
   keyword: string
@@ -74,12 +72,9 @@ let pullStartY: number | null = null
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let requestController: AbortController | null = null
 let statsController: AbortController | null = null
-let pollTimer: ReturnType<typeof setInterval> | null = null
 let loadSequence = 0
 
 const serverStats = ref<StatsResponse | null>(null)
-const newNoticeCount = ref(0)
-const lastSeenAt = ref<string | null>(readLastSeenAt())
 
 function triStateBoolean(value: TriStateFilter): boolean | undefined {
   if (value === 'yes') return true
@@ -346,7 +341,6 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
       fetchedAt: new Date().toISOString(),
     })
     void loadServerStats()
-    markNoticesSeen()
   } catch (error) {
     if (sequence !== loadSequence || (error instanceof Error && error.name === 'AbortError')) return
 
@@ -426,18 +420,12 @@ async function refresh(): Promise<void> {
 
   refreshing.value = true
   requestError.value = ''
-  newNoticeCount.value = 0
 
   try {
     await loadInitial({ force: true })
   } finally {
     refreshing.value = false
   }
-}
-
-function refreshWithNewNotices(): void {
-  markNoticesSeen()
-  refresh()
 }
 
 function retryRequest(): void {
@@ -560,31 +548,6 @@ const displayStats = computed(() => {
   }
 })
 
-function readLastSeenAt(): string | null {
-  try {
-    const raw = window.localStorage.getItem(LAST_SEEN_KEY)
-    if (raw && !Number.isNaN(Date.parse(raw))) return raw
-  } catch {
-    /* 忽略存储异常 */
-  }
-  return null
-}
-
-function writeLastSeenAt(value: string): void {
-  try {
-    window.localStorage.setItem(LAST_SEEN_KEY, value)
-  } catch {
-    /* 忽略存储异常 */
-  }
-}
-
-/** 记录“已看到最新”的时间戳，并清除新通知提示。 */
-function markNoticesSeen(): void {
-  lastSeenAt.value = new Date().toISOString()
-  writeLastSeenAt(lastSeenAt.value)
-  newNoticeCount.value = 0
-}
-
 /** 拉取全局统计，失败时静默保留本地兜底。 */
 async function loadServerStats(): Promise<void> {
   statsController?.abort()
@@ -596,17 +559,6 @@ async function loadServerStats(): Promise<void> {
     // 统计失败不影响通知流，保留本地统计兜底
   } finally {
     if (statsController === controller) statsController = null
-  }
-}
-
-/** 增量轮询：用 since 查询是否有新通知。 */
-async function checkNewNotices(): Promise<void> {
-  if (!lastSeenAt.value) return
-  try {
-    const res = await fetchNotices({ since: lastSeenAt.value, pageSize: 1 })
-    if (res.total > 0) newNoticeCount.value = res.total
-  } catch {
-    // 静默失败，避免打扰用户
   }
 }
 
@@ -636,18 +588,13 @@ watch(
 
 onMounted(() => {
   initialLoading.value = true
-  if (!lastSeenAt.value) markNoticesSeen()
   void loadInitial({ allowCache: true })
-  pollTimer = setInterval(() => {
-    void checkNewNotices()
-  }, NEW_NOTICE_POLL_MS)
 })
 
 onBeforeUnmount(() => {
   loadSequence += 1
   requestController?.abort()
   statsController?.abort()
-  if (pollTimer) clearInterval(pollTimer)
   if (searchTimer) clearTimeout(searchTimer)
 })
 </script>
@@ -681,29 +628,6 @@ onBeforeUnmount(() => {
 
     <!-- 紧急 DDL 提示条：仅在实际数据加载完成后显示 -->
     <DdlNoticeBar v-if="!initialLoading && filteredNotices.length > 0" :notices="filteredNotices" />
-
-    <!-- 有新通知提示（since 增量轮询） -->
-    <v-alert
-      v-if="newNoticeCount > 0"
-      variant="tonal"
-      density="compact"
-      icon="$bellRingOutline"
-      class="mx-4 mt-2 new-notice-banner"
-      role="status"
-      :aria-label="`有 ${newNoticeCount} 条新通知，可刷新`"
-    >
-      {{ newNoticeCount }} 条新通知
-      <template #append>
-        <v-btn
-          icon="$refresh"
-          size="small"
-          variant="text"
-          aria-label="刷新通知"
-          title="刷新通知"
-          @click="refreshWithNewNotices"
-        />
-      </template>
-    </v-alert>
 
     <!-- 已加载数据统计概览 -->
     <div
@@ -892,11 +816,6 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow-y: auto;
   overscroll-behavior-y: contain;
-}
-
-.new-notice-banner {
-  width: fit-content;
-  max-width: calc(100% - 32px);
 }
 
 .pull-indicator {
