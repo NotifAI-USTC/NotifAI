@@ -414,6 +414,13 @@ function markCachedNoticesRead() {
       <v-card class="mb-4">
         <v-list>
           <v-list-item
+            title="订阅与屏蔽"
+            subtitle="管理通知来源和屏蔽关键词"
+            prepend-icon="$tagMultiple"
+            append-icon="$chevronRight"
+            @click="router.push({ name: 'Subscription' })"
+          />
+          <v-list-item
             title="意见反馈"
             prepend-icon="$emailOutline"
             append-icon="$chevronRight"

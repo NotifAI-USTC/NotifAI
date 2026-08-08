@@ -19,18 +19,22 @@ const activeTab = ref('Home')
 const tabs = [
   { name: 'Home', path: '/', icon: '$home', label: '首页' },
   { name: 'Calendar', path: '/calendar', icon: '$calendar', label: '日历' },
-  { name: 'Subscription', path: '/subscription', icon: '$tagMultiple', label: '订阅' },
   { name: 'Favorites', path: '/favorites', icon: '$star', label: '收藏' },
   { name: 'User', path: '/user', icon: '$account', label: '我的' },
 ]
+
+function getActiveTab(path: string): string | undefined {
+  if (path === '/user' || path.startsWith('/user/')) return 'User'
+  return tabs.find((tab) => tab.path === path)?.name
+}
 
 // 路由变化时同步激活标签
 watch(
   () => router.currentRoute.value.path,
   (path) => {
     if (path.startsWith('/detail')) return
-    const tab = tabs.find((t) => t.path === path)
-    if (tab) activeTab.value = tab.name
+    const tab = getActiveTab(path)
+    if (tab) activeTab.value = tab
   },
   { immediate: true },
 )

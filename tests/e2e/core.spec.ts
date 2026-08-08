@@ -54,6 +54,12 @@ test('persists a favorite and supports calendar and theme workflows', async ({ p
   await page.goto('/#/user')
   await expect(page.locator('.v-app-bar-title', { hasText: '个人中心' })).toBeVisible()
   await expect(page.getByText('将已加载通知标为已读', { exact: true })).toBeVisible()
+  await page.getByText('订阅与屏蔽', { exact: true }).click()
+  await expect(page).toHaveURL(/#\/user\/subscription$/)
+  await expect(page.locator('.v-app-bar-title', { hasText: '订阅与屏蔽' })).toBeVisible()
+  await page.getByRole('button', { name: '返回个人中心' }).click()
+  await expect(page).toHaveURL(/#\/user$/)
+
   await page.getByText('深色', { exact: true }).click()
   await expect(page.locator('.v-application')).toHaveClass(/v-theme--dark/)
 

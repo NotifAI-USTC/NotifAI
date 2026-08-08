@@ -302,7 +302,7 @@ function complete(): void {
             </v-chip>
           </div>
           <v-alert v-else type="info" variant="tonal" density="compact" class="mt-2">
-            不设置也可以，之后可在订阅页面随时修改。
+            不设置也可以，之后可在个人中心的“订阅与屏蔽”中随时修改。
           </v-alert>
         </section>
       </v-card-text>

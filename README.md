@@ -20,6 +20,7 @@
 - 已读记录管理（标记已读、一键清空）
 - 前台 DDL 提醒：应用打开期间对近期截止的收藏发浏览器通知（同一通知只提醒一次）
 - 明确的加载、空数据、配置错误和网络重试状态
+- 首页通知支持 IndexedDB 长效缓存：先展示缓存，再后台同步最新数据，网络失败时保留缓存并提示更新时间
 
 浏览器通知仅在前台触发，不承诺后台推送。真正的后台定时推送需要 Push API、Service Worker 和推送后端。
 
@@ -82,13 +83,15 @@ npm run check
 
 ## 页面路由
 
-| 路由              | 页面                   |
-| ----------------- | ---------------------- |
-| `/#/`             | 通知流、搜索和高级筛选 |
-| `/#/detail/:id`   | AI 摘要、原文和附件    |
-| `/#/calendar`     | 通知与截止日期月历     |
-| `/#/subscription` | 部门订阅和关键词屏蔽   |
-| `/#/user`         | 收藏、DDL 和本地设置   |
+| 路由                   | 页面                                   |
+| ---------------------- | -------------------------------------- |
+| `/#/`                  | 通知流、搜索和高级筛选                 |
+| `/#/detail/:id`        | AI 摘要、原文和附件                    |
+| `/#/calendar`          | 通知与截止日期月历                     |
+| `/#/user/subscription` | 部门订阅和关键词屏蔽（从个人中心进入） |
+| `/#/user`              | 收藏、DDL 和本地设置                   |
+
+旧地址 `/#/subscription` 会自动跳转到 `/#/user/subscription`。
 
 ## 数据边界
 
@@ -120,15 +123,15 @@ interface NoticeItem {
 
 接口支持以下查询参数：
 
-| 参数                    | 语义                                   |
-| ----------------------- | -------------------------------------- |
-| `keyword`               | 标题、来源和摘要关键词                 |
-| `source` / `sources[]`  | 单个或多个来源                         |
-| `dateFrom` / `dateTo`   | 发布日期范围，格式为 `YYYY-MM-DD`      |
-| `rangeFrom` / `rangeTo` | 日历范围；发布日或截止日任一命中即返回 |
-| `hasDeadline`           | 是否具有截止日期                       |
+| 参数                    | 语义                                                                        |
+| ----------------------- | --------------------------------------------------------------------------- |
+| `keyword`               | 标题、来源和摘要关键词                                                      |
+| `source` / `sources[]`  | 单个或多个来源                                                              |
+| `dateFrom` / `dateTo`   | 发布日期范围，格式为 `YYYY-MM-DD`                                           |
+| `rangeFrom` / `rangeTo` | 日历范围；发布日或截止日任一命中即返回                                      |
+| `hasDeadline`           | 是否具有截止日期                                                            |
 | `since`                 | ISO8601 增量查询：仅返回 `first_seen >= since` 的通知，用于「有新通知」轮询 |
-| `page` / `pageSize`     | 从 1 开始的分页，`pageSize` 最大 1000  |
+| `page` / `pageSize`     | 从 1 开始的分页，`pageSize` 最大 1000                                       |
 
 `GET /notices/:id` 返回完整 `NoticeItem`。`aiSummary`、`targetAudience`、`coreAction`、`cleanContent` 和 `attachments` 为可选字段，缺失时前端按空值处理；日期使用本地日历日字符串；`originUrl` 只接受 `ustc.edu.cn` 或其子域的无凭据 HTTPS 地址，附件 URL 接受无凭据的 HTTP(S) 地址。详细边界见 `src/utils/validation.ts`。
 
@@ -138,12 +141,12 @@ interface NoticeItem {
 
 以下端点已由前端使用：
 
-| 端点                                   | 用途                                               |
-| -------------------------------------- | -------------------------------------------------- |
-| `POST /notices/batch`                  | 批量详情：收藏页与个人中心 DDL，替代 N+1 逐条请求，最多 500 个 ID |
-| `GET /notices/calendar`                | 日历轻量视图：`month=YYYY-MM` 或 `week=YYYY-Www`，返回精简字段，替代分页循环 |
-| `GET /sources`                         | 来源列表：订阅页与首页来源下拉动态化，含分组与通知数 |
-| `GET /stats`                           | 聚合统计：首页统计条与数据新鲜度提示                |
+| 端点                    | 用途                                                                         |
+| ----------------------- | ---------------------------------------------------------------------------- |
+| `POST /notices/batch`   | 批量详情：收藏页与个人中心 DDL，替代 N+1 逐条请求，最多 500 个 ID            |
+| `GET /notices/calendar` | 日历轻量视图：`month=YYYY-MM` 或 `week=YYYY-Www`，返回精简字段，替代分页循环 |
+| `GET /sources`          | 来源列表：个人中心订阅页与首页来源下拉动态化，含分组与通知数                 |
+| `GET /stats`            | 聚合统计：首页统计条与数据新鲜度提示                                         |
 
 - 批量详情请求体为 `{ "ids": string[] }`，响应 `{ "items": NoticeItem[], "missing": string[] }`，`items` 按发布日期倒序，重复 ID 自动去重。
 - 日历轻量条目仅含 `id` / `title` / `source` / `publishDate` / `deadline`，发布日或截止日命中即返回，上限 500 条。

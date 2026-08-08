@@ -15,10 +15,15 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '通知详情' },
   },
   {
-    path: '/subscription',
+    path: '/user/subscription',
     name: 'Subscription',
     component: () => import('../views/Subscription.vue'),
-    meta: { title: '订阅管理' },
+    meta: { title: '订阅与屏蔽' },
+  },
+  {
+    // Keep old bookmarks and shared links working after moving the page under User.
+    path: '/subscription',
+    redirect: { name: 'Subscription' },
   },
   {
     path: '/user',

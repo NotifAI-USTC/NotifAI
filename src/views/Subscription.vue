@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
 import { fetchSources } from '../utils/request'
 import { DEPARTMENTS } from '../types/notice'
 import type { SourceItem } from '../types/notice'
 
 const store = useUserSettingsStore()
+const router = useRouter()
 const newKeyword = ref('')
 
 const sources = ref<SourceItem[] | null>(null)
 const loading = ref(true)
 const loadError = ref('')
+const sourceGroupOrder = ['校级部门', '二级学院', '其他'] as const
+const sourceGroupRank = new Map<string, number>(
+  sourceGroupOrder.map((group, index) => [group, index]),
+)
 
 /** 分组来源：优先使用后端 GET /sources；失败时回退到静态部门表 */
 const groupedSources = computed(() => {
@@ -24,7 +30,14 @@ const groupedSources = computed(() => {
     arr.push(item)
     groups.set(group, arr)
   }
-  return [...groups.entries()].map(([group, items]) => ({ group, items }))
+  return [...groups.entries()]
+    .sort(([groupA], [groupB]) => {
+      const rankA = sourceGroupRank.get(groupA) ?? sourceGroupOrder.length
+      const rankB = sourceGroupRank.get(groupB) ?? sourceGroupOrder.length
+      if (rankA !== rankB) return rankA - rankB
+      return groupA.localeCompare(groupB, 'zh-CN')
+    })
+    .map(([group, items]) => ({ group, items }))
 })
 
 async function loadSources(): Promise<void> {
@@ -59,6 +72,13 @@ onMounted(() => {
   <div class="subscription-page">
     <h1 class="sr-only">订阅与屏蔽</h1>
     <v-app-bar color="surface" elevation="1">
+      <v-btn
+        icon="$arrowLeft"
+        variant="text"
+        aria-label="返回个人中心"
+        title="返回个人中心"
+        @click="router.push({ name: 'User' })"
+      />
       <v-app-bar-title>订阅与屏蔽</v-app-bar-title>
     </v-app-bar>
 
