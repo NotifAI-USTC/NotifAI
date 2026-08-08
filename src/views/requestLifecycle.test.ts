@@ -10,6 +10,7 @@ interface MockSettingsStore {
   starredIds: string[]
   urgentStarredIds: string[]
   importantIds: string[]
+  pinnedIds: string[]
   darkMode: string
   readIds: string[]
   isRead: () => boolean
@@ -62,6 +63,7 @@ vi.mock('../stores/userSettings', async () => {
     starredIds: ['notice-1'],
     urgentStarredIds: ['notice-1'],
     importantIds: ['notice-1'],
+    pinnedIds: [] as string[],
     darkMode: 'auto',
     readIds: [] as string[],
     isRead: () => false,

@@ -416,8 +416,22 @@ function onTouchEnd(): void {
 const pullReady = computed(() => pullDistance.value >= PULL_THRESHOLD)
 
 const filteredNotices = computed(() => {
-  // 已经在 fetchBatch 中过滤了
-  return notices.value
+  // 已经在 fetchBatch 中过滤了。置顶通知浮动到列表顶部：
+  // 最近置顶的排最前，非置顶项保留服务端顺序（发布日期倒序）。
+  // 仅在 computed 内排序，不改动 notices.value，避免破坏分页一致性 / 重叠检测。
+  const pinnedSet = new Set(store.pinnedIds)
+  if (pinnedSet.size === 0) return notices.value
+  const pinnedOrder = new Map(store.pinnedIds.map((id, i) => [id, i]))
+  return [...notices.value].sort((a, b) => {
+    const pa = pinnedSet.has(a.id)
+    const pb = pinnedSet.has(b.id)
+    if (pa && pb) {
+      return (pinnedOrder.get(b.id) ?? 0) - (pinnedOrder.get(a.id) ?? 0)
+    }
+    if (pa) return -1
+    if (pb) return 1
+    return 0
+  })
 })
 
 /** 基于已加载数据的轻量统计（本地兜底，诚实标注口径）。 */

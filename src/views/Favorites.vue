@@ -29,10 +29,25 @@ const folderTabs = computed(() => [
 ])
 
 const filteredNotices = computed(() => {
-  if (!selectedFolder.value) return notices.value
-  return notices.value.filter(
-    (notice) => (store.starredFolderMap[notice.id] ?? 'default') === selectedFolder.value,
-  )
+  const filtered = selectedFolder.value
+    ? notices.value.filter(
+        (notice) => (store.starredFolderMap[notice.id] ?? 'default') === selectedFolder.value,
+      )
+    : notices.value
+  // 置顶通知浮动到列表顶部：最近置顶的排最前，非置顶项保留收藏夹内的发布日期倒序。
+  const pinnedSet = new Set(store.pinnedIds)
+  if (pinnedSet.size === 0) return filtered
+  const pinnedOrder = new Map(store.pinnedIds.map((id, i) => [id, i]))
+  return [...filtered].sort((a, b) => {
+    const pa = pinnedSet.has(a.id)
+    const pb = pinnedSet.has(b.id)
+    if (pa && pb) {
+      return (pinnedOrder.get(b.id) ?? 0) - (pinnedOrder.get(a.id) ?? 0)
+    }
+    if (pa) return -1
+    if (pb) return 1
+    return 0
+  })
 })
 
 async function loadFavorites(): Promise<void> {
