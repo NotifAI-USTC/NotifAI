@@ -2,7 +2,10 @@ import { expect, test } from '@playwright/test'
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/#/calendar', { waitUntil: 'networkidle' })
-  await page.evaluate(() => window.localStorage.clear())
+  await page.evaluate(() => {
+    window.localStorage.clear()
+    window.localStorage.setItem('notifai_has_onboarded', 'true')
+  })
   await page.reload({ waitUntil: 'networkidle' })
 })
 

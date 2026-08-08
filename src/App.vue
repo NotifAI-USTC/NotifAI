@@ -6,6 +6,7 @@ import { useUserSettingsStore } from './stores/userSettings'
 import { useWindowSize } from './composables/useWindowSize'
 import { useSnackbar } from './composables/useSnackbar'
 import { useForegroundDdlReminder } from './composables/useForegroundDdlReminder'
+import OnboardingModal from './components/OnboardingModal.vue'
 
 const router = useRouter()
 const store = useUserSettingsStore()
@@ -75,6 +76,9 @@ watch(
     <v-main>
       <router-view />
     </v-main>
+
+    <!-- 首次使用引导：持久化完成前不允许误触关闭。 -->
+    <OnboardingModal v-if="!store.hasOnboarded" />
 
     <!-- 移动端：底部导航栏 -->
     <v-bottom-navigation v-if="isMobile" v-model="activeTab" grow>

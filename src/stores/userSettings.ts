@@ -65,6 +65,70 @@ export {
 }
 export type { DarkMode } from './settingsPersistence'
 
+export type OnboardingIdentity =
+  | 'freshman'
+  | 'undergraduate'
+  | 'postgraduate'
+  | 'custom'
+
+export interface OnboardingConfig {
+  identity: OnboardingIdentity
+  channels: string[]
+  keywords: string[]
+}
+
+export const ONBOARDING_FLAG_STORAGE_KEY = 'notifai_has_onboarded'
+export const ONBOARDING_IDENTITY_STORAGE_KEY = 'notifai_user_identity'
+export const ONBOARDING_CHANNELS_STORAGE_KEY = 'notifai_subscribed_channels'
+export const ONBOARDING_KEYWORDS_STORAGE_KEY = 'notifai_black_keywords'
+
+function readOnboardingFlag(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(ONBOARDING_FLAG_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function readOnboardingIdentity(): OnboardingIdentity {
+  if (typeof window === 'undefined') return 'freshman'
+  try {
+    const value = window.localStorage.getItem(ONBOARDING_IDENTITY_STORAGE_KEY)
+    if (
+      value === 'freshman' ||
+      value === 'undergraduate' ||
+      value === 'postgraduate' ||
+      value === 'custom'
+    ) {
+      return value
+    }
+  } catch {
+    // 使用默认身份
+  }
+  return 'freshman'
+}
+
+function writeOnboardingItem(key: string, value: string): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    window.localStorage.setItem(key, value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function removeOnboardingItem(key: string): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    window.localStorage.removeItem(key)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export const useUserSettingsStore = defineStore('userSettings', () => {
   const loaded = loadSettings()
   const saved = loaded.settings
@@ -109,6 +173,14 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   const notificationEnabled = ref<boolean>(saved.notificationEnabled)
   const persistenceError = ref(loaded.error)
   const systemPrefersDark = ref(false)
+  const hasOnboarded = ref(readOnboardingFlag())
+  const userIdentity = ref<OnboardingIdentity>(readOnboardingIdentity())
+
+  // Onboarding uses the same canonical preference arrays as the rest of the
+  // app. These aliases keep the onboarding contract descriptive without
+  // creating a second source of truth.
+  const subscribedChannels = subscribedDepts
+  const blackKeywords = blacklistKeywords
 
   // Static departments are a fallback. Keep runtime sources discovered from
   // GET /sources so switching one of them can build a complete custom list.
@@ -906,6 +978,56 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   })
 
   // ---- 操作 ----
+  function completeOnboarding(config: OnboardingConfig): void {
+    const identity: OnboardingIdentity =
+      config.identity === 'freshman' ||
+      config.identity === 'undergraduate' ||
+      config.identity === 'postgraduate' ||
+      config.identity === 'custom'
+        ? config.identity
+        : 'custom'
+    const channels = Array.from(
+      new Set(
+        (Array.isArray(config.channels) ? config.channels : [])
+          .map(normalizeDepartmentName)
+          .filter((channel): channel is string => channel !== null),
+      ),
+    ).slice(0, 100)
+    const keywords = Array.from(
+      new Set(
+        (Array.isArray(config.keywords) ? config.keywords : [])
+          .filter((keyword): keyword is string => typeof keyword === 'string')
+          .map((keyword) => keyword.trim())
+          .filter((keyword) => keyword.length > 0 && keyword.length <= 200),
+      ),
+    ).slice(0, MAX_STORED_ITEMS)
+
+    registerSources(channels)
+    subscriptionMode.value = channels.length === 0 ? 'all' : 'custom'
+    subscribedDepts.value = channels
+    blacklistKeywords.value = keywords
+    userIdentity.value = identity
+    hasOnboarded.value = true
+
+    const onboardingStored = [
+      writeOnboardingItem(ONBOARDING_FLAG_STORAGE_KEY, 'true'),
+      writeOnboardingItem(ONBOARDING_IDENTITY_STORAGE_KEY, identity),
+      writeOnboardingItem(ONBOARDING_CHANNELS_STORAGE_KEY, JSON.stringify(channels)),
+      writeOnboardingItem(ONBOARDING_KEYWORDS_STORAGE_KEY, JSON.stringify(keywords)),
+    ].every(Boolean)
+    const settingsStored = persistImmediate()
+    if ((!onboardingStored || !settingsStored) && !persistenceError.value) {
+      persistenceError.value = '入门设置保存失败，请检查浏览器存储权限'
+    }
+  }
+
+  function resetOnboarding(): void {
+    hasOnboarded.value = false
+    if (!removeOnboardingItem(ONBOARDING_FLAG_STORAGE_KEY)) {
+      persistenceError.value = '无法重置入门引导，请检查浏览器存储权限'
+    }
+  }
+
   function registerSources(sourceNames: readonly string[]): void {
     for (const sourceName of sourceNames) {
       const normalized = normalizeDepartmentName(sourceName)
@@ -1248,6 +1370,10 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     folders,
     notificationEnabled,
     persistenceError,
+    hasOnboarded,
+    userIdentity,
+    subscribedChannels,
+    blackKeywords,
     noticeCache,
     // 查询
     isSubscribed,
@@ -1259,6 +1385,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     urgentStarredIds,
     allCustomTags,
     // 操作
+    completeOnboarding,
+    resetOnboarding,
     registerSources,
     toggleDepartment,
     addKeyword,

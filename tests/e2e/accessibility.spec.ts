@@ -21,6 +21,8 @@ const PAGES = [
 
 for (const pageDef of PAGES) {
   test(`无严重无障碍违规: ${pageDef.name}`, async ({ page }) => {
+    await page.goto('/#/', { waitUntil: 'networkidle' })
+    await page.evaluate(() => window.localStorage.setItem('notifai_has_onboarded', 'true'))
     await page.goto(pageDef.route, { waitUntil: 'networkidle' })
     await page.waitForTimeout(800)
 

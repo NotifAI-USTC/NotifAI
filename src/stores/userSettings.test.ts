@@ -2,6 +2,10 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NoticeItem } from '../types/notice'
 import {
+  ONBOARDING_CHANNELS_STORAGE_KEY,
+  ONBOARDING_FLAG_STORAGE_KEY,
+  ONBOARDING_IDENTITY_STORAGE_KEY,
+  ONBOARDING_KEYWORDS_STORAGE_KEY,
   USER_SETTINGS_JOURNAL_PREFIX,
   USER_SETTINGS_SCHEMA_VERSION,
   USER_SETTINGS_STORAGE_KEY,
@@ -1216,6 +1220,34 @@ describe('user settings store', () => {
     setActivePinia(createPinia())
     store = useUserSettingsStore()
     expect(store.subscribedDepts).toContain('新成立研究院')
+  })
+
+  it('completes and resets onboarding without creating a second settings source', () => {
+    store = useUserSettingsStore()
+    expect(store.hasOnboarded).toBe(false)
+
+    store.completeOnboarding({
+      identity: 'freshman',
+      channels: ['教务处', '迎新特辑'],
+      keywords: ['考研', '考研'],
+    })
+
+    expect(store.hasOnboarded).toBe(true)
+    expect(store.userIdentity).toBe('freshman')
+    expect(store.subscribedChannels).toEqual(['教务处', '迎新特辑'])
+    expect(store.blackKeywords).toEqual(['考研'])
+    expect(window.localStorage.getItem(ONBOARDING_FLAG_STORAGE_KEY)).toBe('true')
+    expect(window.localStorage.getItem(ONBOARDING_IDENTITY_STORAGE_KEY)).toBe('freshman')
+    expect(JSON.parse(window.localStorage.getItem(ONBOARDING_CHANNELS_STORAGE_KEY) ?? '[]')).toEqual(
+      ['教务处', '迎新特辑'],
+    )
+    expect(JSON.parse(window.localStorage.getItem(ONBOARDING_KEYWORDS_STORAGE_KEY) ?? '[]')).toEqual(
+      ['考研'],
+    )
+
+    store.resetOnboarding()
+    expect(store.hasOnboarded).toBe(false)
+    expect(window.localStorage.getItem(ONBOARDING_FLAG_STORAGE_KEY)).toBeNull()
   })
 
   it('does not add more than 100 folders', () => {
