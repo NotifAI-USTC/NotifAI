@@ -683,20 +683,27 @@ onBeforeUnmount(() => {
     <DdlNoticeBar v-if="!initialLoading && filteredNotices.length > 0" :notices="filteredNotices" />
 
     <!-- 有新通知提示（since 增量轮询） -->
-    <v-btn
+    <v-alert
       v-if="newNoticeCount > 0"
-      block
-      color="primary"
       variant="tonal"
-      class="mx-4 mt-2 new-notice-btn"
+      density="compact"
+      icon="$bellRingOutline"
+      class="mx-4 mt-2 new-notice-banner"
       role="status"
-      aria-label="有新通知，点击刷新"
-      @click="refreshWithNewNotices"
+      :aria-label="`有 ${newNoticeCount} 条新通知，可刷新`"
     >
-      <v-icon start size="16">$bellRing</v-icon>
-      有 {{ newNoticeCount }} 条新通知，点击刷新
-      <v-icon end size="16">$refresh</v-icon>
-    </v-btn>
+      {{ newNoticeCount }} 条新通知
+      <template #append>
+        <v-btn
+          icon="$refresh"
+          size="small"
+          variant="text"
+          aria-label="刷新通知"
+          title="刷新通知"
+          @click="refreshWithNewNotices"
+        />
+      </template>
+    </v-alert>
 
     <!-- 已加载数据统计概览 -->
     <div
@@ -885,6 +892,11 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow-y: auto;
   overscroll-behavior-y: contain;
+}
+
+.new-notice-banner {
+  width: fit-content;
+  max-width: calc(100% - 32px);
 }
 
 .pull-indicator {
