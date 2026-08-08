@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
-import { fetchNoticesByIds } from '../utils/request'
 import { calculateRemainingDays, getLocalToday } from '../utils/date'
 import type { DarkMode } from '../stores/userSettings'
 import type { NoticeItem } from '../types/notice'
@@ -14,12 +13,12 @@ import {
 import FolderDialog from '../components/FolderDialog.vue'
 import { hapticMedium } from '../utils/haptics'
 import { useSnackbar } from '../composables/useSnackbar'
+import { loadBatchNotices } from '../composables/useBatchNoticeLoader'
 
 const router = useRouter()
 const store = useUserSettingsStore()
 const snackbar = useSnackbar()
 
-const IMPORTANT_BATCH_SIZE = 500
 const IMPORTANT_REQUEST_LIMIT = 500
 const FEEDBACK_EMAIL = 'cuijunxi@mail.ustc.edu.cn'
 
@@ -61,62 +60,29 @@ async function loadImportantNotices() {
   importantRequestController?.abort()
   const controller = new AbortController()
   importantRequestController = controller
-  const allIds = [...store.importantIds]
-  const omittedCount = Math.max(0, allIds.length - IMPORTANT_REQUEST_LIMIT)
-  const ids = allIds.slice(-IMPORTANT_REQUEST_LIMIT)
-  const items: NoticeItem[] = []
-  let failedCount = 0
-  let staleFallbackCount = 0
 
   importantLoading.value = true
   importantLoadError.value = ''
 
   try {
-    // 分批调用批量详情接口（每批 ≤ 500），替代原来的 N+1 逐条请求
-    for (let start = 0; start < ids.length; start += IMPORTANT_BATCH_SIZE) {
-      if (controller.signal.aborted || requestId !== importantRequestId) return
-      const chunk = ids.slice(start, start + IMPORTANT_BATCH_SIZE)
-      try {
-        const result = await fetchNoticesByIds(chunk, controller.signal)
-        if (controller.signal.aborted || requestId !== importantRequestId) return
-        for (const notice of result.items) {
-          store.cacheNotice(notice)
-          if (notice.deadline) items.push(notice)
-        }
-        // 后端缺失的 ID 回退到本地缓存
-        for (const missingId of result.missing) {
-          const cached = store.getCachedNotice(missingId)
-          if (cached?.deadline) {
-            items.push(cached)
-            staleFallbackCount += 1
-          } else {
-            failedCount += 1
-          }
-        }
-      } catch {
-        if (controller.signal.aborted || requestId !== importantRequestId) return
-        // 整批请求失败时逐条回退到缓存
-        for (const id of chunk) {
-          const cached = store.getCachedNotice(id)
-          if (cached?.deadline) {
-            items.push(cached)
-            staleFallbackCount += 1
-          } else {
-            failedCount += 1
-          }
-        }
-      }
-    }
+    const result = await loadBatchNotices(store.importantIds, {
+      maxIds: IMPORTANT_REQUEST_LIMIT,
+      signal: controller.signal,
+      include: (notice) => Boolean(notice.deadline),
+    })
+    if (controller.signal.aborted || requestId !== importantRequestId) return
 
-    items.sort((a, b) => (a.deadline ?? '').localeCompare(b.deadline ?? ''))
-    importantNotices.value = items
+    result.items.sort((a, b) => (a.deadline ?? '').localeCompare(b.deadline ?? ''))
+    importantNotices.value = result.items
 
     const warnings: string[] = []
-    if (omittedCount > 0) warnings.push(`仅检查最近 ${IMPORTANT_REQUEST_LIMIT} 条重要通知`)
-    if (staleFallbackCount > 0) {
-      warnings.push(`有 ${staleFallbackCount} 条重要通知使用缓存数据`)
+    if (result.omittedCount > 0) {
+      warnings.push(`仅检查最近 ${IMPORTANT_REQUEST_LIMIT} 条重要通知`)
     }
-    if (failedCount > 0) warnings.push(`有 ${failedCount} 条重要通知加载失败`)
+    if (result.staleFallbackCount > 0) {
+      warnings.push(`有 ${result.staleFallbackCount} 条重要通知使用缓存数据`)
+    }
+    if (result.failedCount > 0) warnings.push(`有 ${result.failedCount} 条重要通知加载失败`)
     importantLoadError.value = warnings.join('；')
   } catch (error) {
     if (controller.signal.aborted || requestId !== importantRequestId) return
@@ -485,9 +451,7 @@ function restartOnboarding(): void {
         </v-card-text>
         <v-card-actions class="justify-center pa-4">
           <v-btn variant="tonal" @click="showClearReadConfirm = false">取消</v-btn>
-          <v-btn color="error" prepend-icon="$delete" @click="handleClearReadHistory">
-            清空
-          </v-btn>
+          <v-btn color="error" prepend-icon="$delete" @click="handleClearReadHistory"> 清空 </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
