@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useUserSettingsStore } from '../stores/userSettings'
 import type { OnboardingIdentity } from '../stores/userSettings'
 import { useWindowSize } from '../composables/useWindowSize'
+import { fetchSources } from '../utils/request'
+import { DEPARTMENTS } from '../types/notice'
+import type { SourceItem } from '../types/notice'
 
 interface ChannelOption {
   name: string
-  group: '校级部门' | '院级单位'
+  group: '校级部门' | '二级学院'
   icon: string
 }
 
@@ -19,22 +22,35 @@ interface IdentityPreset {
   selectAll?: boolean
 }
 
-const CHANNEL_OPTIONS: readonly ChannelOption[] = [
+const SCHOOL_SOURCE_ICONS: Readonly<Record<string, string>> = {
+  教务处: '$school',
+  本科生院: '$accountGroup',
+  学工部: '$account',
+  科研部: '$flask',
+  校团委: '$bullhornOutline',
+  迎新特辑: '$calendarCheck',
+}
+
+const FALLBACK_SCHOOL_OPTIONS: readonly ChannelOption[] = [
   { name: '教务处', group: '校级部门', icon: '$school' },
   { name: '本科生院', group: '校级部门', icon: '$accountGroup' },
   { name: '学工部', group: '校级部门', icon: '$account' },
   { name: '科研部', group: '校级部门', icon: '$flask' },
   { name: '校团委', group: '校级部门', icon: '$bullhornOutline' },
   { name: '迎新特辑', group: '校级部门', icon: '$calendarCheck' },
-  { name: '计算机学院', group: '院级单位', icon: '$domain' },
-  { name: '大数据学院', group: '院级单位', icon: '$magnifyScan' },
-  { name: '物理学院', group: '院级单位', icon: '$flask' },
-  { name: '工程科学学院', group: '院级单位', icon: '$domain' },
 ]
 
+const FALLBACK_SECONDARY_OPTIONS: readonly ChannelOption[] = DEPARTMENTS.filter(
+  (department) => department.group === '二级学院',
+).map((department) => ({
+  name: department.name,
+  group: '二级学院',
+  icon: '$domain',
+}))
+
 const FRESHMAN_CHANNELS = ['教务处', '本科生院', '迎新特辑']
-const COMPUTER_CHANNELS = ['教务处', '计算机学院']
-const POSTGRADUATE_CHANNELS = ['科研部', '计算机学院']
+const UNDERGRADUATE_CHANNELS = ['教务处', '本科生院']
+const POSTGRADUATE_CHANNELS = ['科研部']
 
 const store = useUserSettingsStore()
 const { isMobile } = useWindowSize()
@@ -42,29 +58,29 @@ const { isMobile } = useWindowSize()
 const identityPresets: readonly IdentityPreset[] = [
   {
     value: 'freshman',
-    title: '2026 级新生',
-    description: '优先关注教务与迎新信息',
+    title: '新生',
+    description: '优先关注教务、本科生院与迎新信息',
     icon: '$school',
     channels: FRESHMAN_CHANNELS,
   },
   {
     value: 'undergraduate',
-    title: '计算机学院学生',
-    description: '关注校级与计算机学院通知',
+    title: '本科生',
+    description: '关注教务、本科生院等本科培养信息',
     icon: '$domain',
-    channels: COMPUTER_CHANNELS,
+    channels: UNDERGRADUATE_CHANNELS,
   },
   {
     value: 'postgraduate',
     title: '研究生',
-    description: '关注科研与院系信息',
+    description: '关注科研与研究生相关信息',
     icon: '$flask',
     channels: POSTGRADUATE_CHANNELS,
   },
   {
     value: 'custom',
-    title: '通用 / 全选',
-    description: '先查看所有来源，再自行调整',
+    title: '全部',
+    description: '关注所有来源，之后可自行调整',
     icon: '$accountGroup',
     channels: [],
     selectAll: true,
@@ -75,19 +91,60 @@ const currentStep = ref(1)
 const draftIdentity = ref<OnboardingIdentity>(store.userIdentity)
 const draftSelectAll = ref(store.subscriptionMode === 'all')
 const draftChannels = ref<string[]>(
-  store.subscribedChannels.length > 0
-    ? [...store.subscribedChannels]
-    : [...FRESHMAN_CHANNELS],
+  store.subscribedChannels.length > 0 ? [...store.subscribedChannels] : [...FRESHMAN_CHANNELS],
 )
 const draftKeywords = ref<string[]>([...store.blackKeywords])
 const newKeyword = ref('')
+const sources = ref<SourceItem[] | null>(null)
+const sourcesLoading = ref(false)
+const sourcesError = ref('')
+let sourceRequestController: AbortController | null = null
 
-store.registerSources(CHANNEL_OPTIONS.map((channel) => channel.name))
+store.registerSources([
+  ...FALLBACK_SCHOOL_OPTIONS.map((channel) => channel.name),
+  ...FALLBACK_SECONDARY_OPTIONS.map((channel) => channel.name),
+])
 
-const progress = computed(() => (currentStep.value / 3) * 100)
+const progress = computed(() => (currentStep.value / 4) * 100)
 const canContinueFromChannels = computed(
   () => draftSelectAll.value || draftChannels.value.length > 0,
 )
+const schoolOptions = computed<ChannelOption[]>(() => {
+  if (sources.value === null) return [...FALLBACK_SCHOOL_OPTIONS]
+  return sources.value
+    .filter((source) => source.group === '校级部门')
+    .map((source) => ({
+      name: source.name,
+      group: '校级部门',
+      icon: SCHOOL_SOURCE_ICONS[source.name] ?? '$domain',
+    }))
+})
+const secondaryOptions = computed<ChannelOption[]>(() => {
+  if (sources.value === null) return [...FALLBACK_SECONDARY_OPTIONS]
+  return sources.value
+    .filter((source) => source.group === '二级学院')
+    .map((source) => ({ name: source.name, group: '二级学院', icon: '$domain' }))
+})
+const allChannelNames = computed(() => {
+  const names =
+    sources.value === null
+      ? [
+          ...FALLBACK_SCHOOL_OPTIONS.map((channel) => channel.name),
+          ...FALLBACK_SECONDARY_OPTIONS.map((channel) => channel.name),
+        ]
+      : sources.value.map((source) => source.name)
+  return Array.from(new Set(names))
+})
+const selectedSchoolCount = computed(() => {
+  if (draftSelectAll.value) return schoolOptions.value.length
+  const selected = new Set(draftChannels.value)
+  return schoolOptions.value.filter((channel) => selected.has(channel.name)).length
+})
+const selectedSecondaryCount = computed(() => {
+  if (draftSelectAll.value) return secondaryOptions.value.length
+  const selected = new Set(draftChannels.value)
+  return secondaryOptions.value.filter((channel) => selected.has(channel.name)).length
+})
 
 function selectedIdentity(value: OnboardingIdentity): boolean {
   return draftIdentity.value === value
@@ -106,9 +163,7 @@ function isChannelSelected(channel: string): boolean {
 function toggleChannel(channel: string): void {
   if (draftSelectAll.value) {
     draftSelectAll.value = false
-    draftChannels.value = CHANNEL_OPTIONS.map((option) => option.name).filter(
-      (name) => name !== channel,
-    )
+    draftChannels.value = allChannelNames.value.filter((name) => name !== channel)
     draftIdentity.value = 'custom'
     return
   }
@@ -122,9 +177,50 @@ function toggleChannel(channel: string): void {
   draftIdentity.value = 'custom'
 }
 
+async function loadSources(force = false): Promise<void> {
+  if (sourcesLoading.value || (!force && sources.value !== null)) return
+
+  sourceRequestController?.abort()
+  const controller = new AbortController()
+  sourceRequestController = controller
+  sourcesLoading.value = true
+  sourcesError.value = ''
+
+  try {
+    const loadedSources = await fetchSources(controller.signal)
+    if (controller.signal.aborted) return
+    sources.value = loadedSources
+    store.registerSources(loadedSources.map((source) => source.name))
+  } catch (error) {
+    if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
+      return
+    }
+    sources.value = null
+    sourcesError.value =
+      error instanceof Error
+        ? `${error.message}，已展示内置来源列表`
+        : '来源列表加载失败，已展示内置来源列表'
+  } finally {
+    if (sourceRequestController === controller) {
+      sourceRequestController = null
+      sourcesLoading.value = false
+    }
+  }
+}
+
 function nextStep(): void {
+  if (currentStep.value === 1) {
+    currentStep.value = 2
+    void loadSources()
+    return
+  }
   if (currentStep.value === 2 && !canContinueFromChannels.value) return
-  currentStep.value = Math.min(3, currentStep.value + 1)
+  if (currentStep.value === 2) {
+    currentStep.value = 3
+    void loadSources()
+    return
+  }
+  currentStep.value = Math.min(4, currentStep.value + 1)
 }
 
 function previousStep(): void {
@@ -151,6 +247,10 @@ function complete(): void {
     keywords: [...draftKeywords.value],
   })
 }
+
+onBeforeUnmount(() => {
+  sourceRequestController?.abort()
+})
 </script>
 
 <template>
@@ -174,7 +274,7 @@ function complete(): void {
             <p class="text-caption text-medium-emphasis mb-0">用一分钟设置你的通知看板</p>
           </div>
         </div>
-        <v-chip size="small" color="primary" variant="tonal">{{ currentStep }} / 3</v-chip>
+        <v-chip size="small" color="primary" variant="tonal">{{ currentStep }} / 4</v-chip>
       </v-card-title>
 
       <v-progress-linear
@@ -222,7 +322,7 @@ function complete(): void {
         <section v-else-if="currentStep === 2" aria-labelledby="onboarding-preferences-title">
           <h3 id="onboarding-preferences-title" class="text-h6 mb-2">先告诉我们你的身份</h3>
           <p class="text-body-2 text-medium-emphasis mb-4">
-            选择一个预设后，仍可以在下方调整关注来源。
+            选择一个预设后，仍可以在下方调整校级部门；下一步可以单独选择二级学院。
           </p>
 
           <div class="identity-grid" role="list" aria-label="身份预设">
@@ -244,18 +344,45 @@ function complete(): void {
             </v-btn>
           </div>
 
-          <div class="d-flex align-center justify-space-between mt-6 mb-2">
-            <h4 class="text-subtitle-1">关注来源</h4>
-            <span class="text-caption text-medium-emphasis">
-              {{ draftSelectAll ? '当前关注所有来源' : `已选 ${draftChannels.length} 个` }}
-            </span>
-          </div>
+          <v-alert v-if="sourcesError" type="warning" variant="tonal" class="mb-4" role="status">
+            {{ sourcesError }}
+            <template #append>
+              <v-btn
+                prepend-icon="$refresh"
+                variant="text"
+                size="small"
+                aria-label="重试加载来源列表"
+                @click="loadSources(true)"
+              >
+                重试
+              </v-btn>
+            </template>
+          </v-alert>
 
-          <div class="channel-group" v-for="group in ['校级部门', '院级单位']" :key="group">
-            <div class="text-caption text-medium-emphasis mb-2">{{ group }}</div>
-            <div class="d-flex flex-wrap ga-2 mb-3">
+          <v-progress-circular
+            v-if="sourcesLoading"
+            indeterminate
+            color="primary"
+            class="d-block mx-auto my-8"
+            aria-label="正在加载校级部门来源"
+          />
+
+          <template v-else>
+            <div class="d-flex align-center justify-space-between mt-6 mb-2">
+              <h4 class="text-subtitle-1">校级部门</h4>
+              <span class="text-caption text-medium-emphasis">
+                {{ draftSelectAll ? '当前关注所有来源' : `已选 ${selectedSchoolCount} 个` }}
+              </span>
+            </div>
+
+            <div
+              v-if="schoolOptions.length > 0"
+              class="d-flex flex-wrap ga-2 mb-3"
+              role="group"
+              aria-label="校级部门订阅"
+            >
               <v-chip
-                v-for="channel in CHANNEL_OPTIONS.filter((option) => option.group === group)"
+                v-for="channel in schoolOptions"
                 :key="channel.name"
                 filter
                 clickable
@@ -268,7 +395,87 @@ function complete(): void {
                 {{ channel.name }}
               </v-chip>
             </div>
-          </div>
+            <v-alert
+              v-else
+              type="info"
+              variant="tonal"
+              density="compact"
+              class="mt-2"
+              role="status"
+            >
+              当前没有可选的校级部门来源，可以直接跳过此步。
+            </v-alert>
+          </template>
+        </section>
+
+        <section v-else-if="currentStep === 3" aria-labelledby="onboarding-secondary-title">
+          <h3 id="onboarding-secondary-title" class="text-h6 mb-2">选择二级学院订阅</h3>
+          <p class="text-body-2 text-medium-emphasis mb-4">
+            可以选择多个二级学院，也可以暂时不选，之后可在个人中心继续调整。
+          </p>
+
+          <v-progress-circular
+            v-if="sourcesLoading"
+            indeterminate
+            color="primary"
+            class="d-block mx-auto my-8"
+            aria-label="正在加载二级学院来源"
+          />
+
+          <v-alert v-if="sourcesError" type="warning" variant="tonal" class="mb-4" role="status">
+            {{ sourcesError }}
+            <template #append>
+              <v-btn
+                prepend-icon="$refresh"
+                variant="text"
+                size="small"
+                aria-label="重试加载二级学院来源"
+                @click="loadSources(true)"
+              >
+                重试
+              </v-btn>
+            </template>
+          </v-alert>
+
+          <template v-if="!sourcesLoading">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <h4 class="text-subtitle-1">二级学院</h4>
+              <span class="text-caption text-medium-emphasis">
+                {{ draftSelectAll ? '当前关注所有来源' : `已选 ${selectedSecondaryCount} 个` }}
+              </span>
+            </div>
+
+            <div
+              v-if="secondaryOptions.length > 0"
+              class="d-flex flex-wrap ga-2"
+              role="group"
+              aria-label="二级学院订阅"
+            >
+              <v-chip
+                v-for="channel in secondaryOptions"
+                :key="channel.name"
+                filter
+                clickable
+                :color="isChannelSelected(channel.name) ? 'primary' : undefined"
+                :variant="isChannelSelected(channel.name) ? 'tonal' : 'outlined'"
+                :aria-pressed="isChannelSelected(channel.name)"
+                @click="toggleChannel(channel.name)"
+              >
+                <v-icon start size="16">{{ channel.icon }}</v-icon>
+                {{ channel.name }}
+              </v-chip>
+            </div>
+            <v-alert
+              v-else
+              type="info"
+              variant="tonal"
+              density="compact"
+              class="mt-2"
+              role="status"
+            >
+              当前没有可选的二级学院来源，可以直接跳过此步。
+            </v-alert>
+          </template>
         </section>
 
         <section v-else aria-labelledby="onboarding-filter-title">
@@ -323,11 +530,15 @@ function complete(): void {
           :disabled="!canContinueFromChannels"
           @click="nextStep"
         >
+          下一步：选择二级学院
+          <v-icon end>$chevronRight</v-icon>
+        </v-btn>
+        <v-btn v-else-if="currentStep === 3" color="primary" @click="nextStep">
           下一步：AI 过滤设置
           <v-icon end>$chevronRight</v-icon>
         </v-btn>
         <v-btn
-          v-if="currentStep === 3"
+          v-if="currentStep === 4"
           color="primary"
           prepend-icon="$checkCircleOutline"
           @click="complete"

@@ -1,8 +1,17 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useUserSettingsStore } from '../stores/userSettings'
 import OnboardingModal from './OnboardingModal.vue'
+
+vi.mock('../utils/request', () => ({
+  fetchSources: vi.fn().mockResolvedValue([
+    { name: '教务处', group: '校级部门', noticeCount: 10 },
+    { name: '学生事务中心', group: '校级部门', noticeCount: 3 },
+    { name: '计算机学院', group: '二级学院', noticeCount: 2 },
+    { name: '大数据学院', group: '二级学院', noticeCount: 1 },
+  ]),
+}))
 
 const stubs = {
   VDialog: {
@@ -59,7 +68,11 @@ describe('OnboardingModal', () => {
     expect(wrapper.text()).toContain('欢迎使用 NotifAI-USTC')
 
     await findButton(wrapper, '开始个性化配置').trigger('click')
-    await findButton(wrapper, '计算机学院学生').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('学生事务中心')
+    await findButton(wrapper, '本科生关注教务、本科生院等本科培养信息').trigger('click')
+    await findButton(wrapper, '下一步：选择二级学院').trigger('click')
+    await flushPromises()
     await findButton(wrapper, '下一步：AI 过滤设置').trigger('click')
     await findButton(wrapper, '开启我的智能看板').trigger('click')
     await flushPromises()
@@ -67,6 +80,47 @@ describe('OnboardingModal', () => {
     const store = useUserSettingsStore()
     expect(store.hasOnboarded).toBe(true)
     expect(store.userIdentity).toBe('undergraduate')
-    expect(store.subscribedChannels).toEqual(['教务处', '计算机学院'])
+    expect(store.subscribedChannels).toEqual(['教务处', '本科生院'])
+  })
+
+  it('loads secondary schools from the API and supports multiple selections', async () => {
+    const wrapper = mountModal()
+
+    await findButton(wrapper, '开始个性化配置').trigger('click')
+    await findButton(wrapper, '新生').trigger('click')
+    await findButton(wrapper, '下一步：选择二级学院').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('计算机学院')
+    expect(wrapper.text()).toContain('大数据学院')
+    await findButton(wrapper, '计算机学院').trigger('click')
+    await findButton(wrapper, '大数据学院').trigger('click')
+    await findButton(wrapper, '下一步：AI 过滤设置').trigger('click')
+    await findButton(wrapper, '开启我的智能看板').trigger('click')
+    await flushPromises()
+
+    const store = useUserSettingsStore()
+    expect(store.subscribedChannels).toEqual([
+      '教务处',
+      '本科生院',
+      '迎新特辑',
+      '计算机学院',
+      '大数据学院',
+    ])
+  })
+
+  it('allows continuing without selecting any secondary school', async () => {
+    const wrapper = mountModal()
+
+    await findButton(wrapper, '开始个性化配置').trigger('click')
+    await findButton(wrapper, '新生').trigger('click')
+    await findButton(wrapper, '下一步：选择二级学院').trigger('click')
+    await flushPromises()
+    await findButton(wrapper, '下一步：AI 过滤设置').trigger('click')
+    await findButton(wrapper, '开启我的智能看板').trigger('click')
+    await flushPromises()
+
+    const store = useUserSettingsStore()
+    expect(store.subscribedChannels).toEqual(['教务处', '本科生院', '迎新特辑'])
   })
 })

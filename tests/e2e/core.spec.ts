@@ -69,6 +69,20 @@ test('persists a favorite and supports calendar and theme workflows', async ({ p
   await expect(page.getByText('无法加载当月通知')).toHaveCount(0)
 })
 
+test('reopens onboarding from the user center', async ({ page }) => {
+  const desktopNavigation = page.locator('.v-navigation-drawer')
+  if (await desktopNavigation.isVisible()) {
+    await desktopNavigation.locator('.v-list-item').nth(3).click()
+  } else {
+    await page.getByText('我的', { exact: true }).click()
+  }
+  await expect(page.locator('.v-app-bar-title', { hasText: '个人中心' })).toBeVisible()
+
+  await page.getByText('重新进行入门引导', { exact: true }).click()
+  await expect(page.getByRole('heading', { name: '欢迎使用 NotifAI-USTC' })).toBeVisible()
+  await expect(page.getByText('1 / 4', { exact: true })).toBeVisible()
+})
+
 test('redirects an unknown route to the notice feed', async ({ page }) => {
   const consoleProblems: string[] = []
   page.on('console', (message) => {

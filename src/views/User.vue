@@ -243,6 +243,11 @@ function markCachedNoticesRead() {
   hapticMedium()
   store.markCachedNoticesRead()
 }
+
+function restartOnboarding(): void {
+  store.resetOnboarding()
+  snackbar.showSuccess('已重新打开入门引导')
+}
 </script>
 
 <template>
@@ -350,6 +355,13 @@ function markCachedNoticesRead() {
             prepend-icon="$folderCog"
             append-icon="$chevronRight"
             @click="showFolderDialog = true"
+          />
+          <v-list-item
+            title="重新进行入门引导"
+            subtitle="重新设置身份、订阅来源和屏蔽关键词"
+            prepend-icon="$robot"
+            append-icon="$chevronRight"
+            @click="restartOnboarding"
           />
         </v-list>
       </v-card>
