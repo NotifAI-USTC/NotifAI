@@ -36,11 +36,25 @@ interface QueryContext {
 interface FetchBatchResult {
   items: NoticeItem[]
   rawCount: number
+  rawIds: string[]
   nextPage: number
   finished: boolean
   scanPaused: boolean
   stale: boolean
   total: number
+  inconsistent: boolean
+  overlap: boolean
+}
+
+interface FetchPageResult {
+  items: NoticeItem[]
+  rawCount: number
+  rawIds: string[]
+  page: number
+  finished: boolean
+  stale: boolean
+  total: number
+  inconsistent: boolean
 }
 
 type RetryAction = 'refresh' | 'load'
@@ -73,6 +87,7 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null
 let requestController: AbortController | null = null
 let statsController: AbortController | null = null
 let loadSequence = 0
+const loadedRawIds = new Set<string>()
 
 const serverStats = ref<StatsResponse | null>(null)
 
@@ -159,6 +174,15 @@ function applyClientFilters(items: NoticeItem[], context: QueryContext): NoticeI
   return items.filter((notice) => matchesLocalFilters(notice, context))
 }
 
+function hasLocalFilters(context: QueryContext): boolean {
+  return (
+    context.isRead !== 'any' ||
+    context.isStarred !== 'any' ||
+    context.tags.length > 0 ||
+    context.blacklistKeywords.length > 0
+  )
+}
+
 function mergeUniqueNotices(existing: NoticeItem[], incoming: NoticeItem[]): NoticeItem[] {
   const seen = new Set(existing.map((n) => n.id))
   const merged = [...existing]
@@ -171,23 +195,53 @@ function mergeUniqueNotices(existing: NoticeItem[], incoming: NoticeItem[]): Not
   return merged
 }
 
-async function fetchBatch(context: QueryContext, page: number): Promise<FetchBatchResult> {
+function staleBatchResult(page: number): FetchBatchResult {
+  return {
+    items: [],
+    rawCount: 0,
+    rawIds: [],
+    nextPage: page,
+    finished: true,
+    scanPaused: false,
+    stale: true,
+    total: 0,
+    inconsistent: false,
+    overlap: false,
+  }
+}
+
+function stalePageResult(page: number): FetchPageResult {
+  return {
+    items: [],
+    rawCount: 0,
+    rawIds: [],
+    page,
+    finished: true,
+    stale: true,
+    total: 0,
+    inconsistent: false,
+  }
+}
+
+async function fetchPage(
+  context: QueryContext,
+  page: number,
+  signal: AbortSignal,
+): Promise<FetchPageResult> {
   const params = buildServerParams(context, page)
-  const controller = new AbortController()
-  requestController?.abort()
-  requestController = controller
 
   try {
-    const response = await fetchNotices(params, controller.signal)
-    if (controller.signal.aborted) {
+    const response = await fetchNotices(params, signal)
+    if (signal.aborted) {
       return {
         items: [],
         rawCount: 0,
-        nextPage: page,
+        rawIds: [],
+        page,
         finished: true,
-        scanPaused: false,
         stale: true,
         total: 0,
+        inconsistent: false,
       }
     }
 
@@ -203,26 +257,96 @@ async function fetchBatch(context: QueryContext, page: number): Promise<FetchBat
     return {
       items: filtered,
       rawCount: response.items.length,
-      nextPage: page + 1,
+      rawIds: response.items.map((notice) => notice.id),
+      page,
       finished: exhausted,
-      scanPaused: false,
       stale: false,
       total,
+      inconsistent: isOffsetPageInconsistent({
+        itemCount: response.items.length,
+        page,
+        pageSize: PAGE_SIZE,
+        total,
+      }),
     }
   } catch (error) {
-    if (controller.signal.aborted) {
-      return {
-        items: [],
-        rawCount: 0,
-        nextPage: page,
-        finished: true,
-        scanPaused: false,
-        stale: true,
-        total: 0,
-      }
-    }
+    if (signal.aborted) return stalePageResult(page)
     throw error
   }
+}
+
+/**
+ * 读取一批服务端页面。高级搜索中的已读、收藏、标签和屏蔽词属于本地
+ * 状态，不能依赖后端分页结果；当第一页没有匹配项时，继续扫描有限的
+ * 后续页面，避免首页误报“暂无通知”。
+ */
+async function fetchBatch(
+  context: QueryContext,
+  startPage: number,
+  signal: AbortSignal,
+): Promise<FetchBatchResult> {
+  const shouldScan = hasLocalFilters(context)
+  const maxPages = shouldScan ? MAX_PAGES_PER_BATCH : 1
+  let page = startPage
+  let total = 0
+  let firstRawCount = 0
+  let finished = false
+  let scanPaused = false
+  let inconsistent = false
+  let overlap = false
+  let pagesFetched = 0
+  let items: NoticeItem[] = []
+  const rawIds: string[] = []
+  const seenRawIds = new Set<string>()
+
+  for (; pagesFetched < maxPages; pagesFetched += 1) {
+    const result = await fetchPage(context, page, signal)
+    if (result.stale) return staleBatchResult(page)
+
+    if (pagesFetched === 0) {
+      firstRawCount = result.rawCount
+      total = result.total
+    } else if (result.total !== total) {
+      // total 在一次逻辑加载中变化通常意味着数据源排序/快照不稳定。
+      inconsistent = true
+    }
+
+    if (result.inconsistent) inconsistent = true
+    for (const id of result.rawIds) {
+      if (seenRawIds.has(id)) overlap = true
+      seenRawIds.add(id)
+      rawIds.push(id)
+    }
+    items = mergeUniqueNotices(items, result.items)
+    finished = result.finished
+    page = result.page + 1
+
+    if (inconsistent || finished || !shouldScan || items.length > 0) break
+  }
+
+  if (shouldScan && items.length === 0 && !finished && !inconsistent) {
+    scanPaused = pagesFetched >= maxPages
+  }
+
+  return {
+    items,
+    rawCount: firstRawCount,
+    rawIds,
+    nextPage: page,
+    finished,
+    scanPaused,
+    stale: false,
+    total,
+    inconsistent,
+    overlap,
+  }
+}
+
+function startNoticeRequest(): AbortController {
+  requestController?.abort()
+  const controller = new AbortController()
+  requestController = controller
+  return controller
 }
 
 interface LoadInitialOptions {
@@ -253,6 +377,8 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
     return
   }
 
+  const controller = startNoticeRequest()
+
   requestError.value = ''
   let hasVisibleData = hasCurrentData
   let showingCachedData = false
@@ -269,6 +395,8 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
         scanPaused.value = cached.scanPaused
         loadedTotal.value = cached.total
         loadedQueryKey = queryKey
+        loadedRawIds.clear()
+        for (const item of cached.items) loadedRawIds.add(item.id)
         hasVisibleData = true
         showingCachedData = true
         cachedFetchedAt = cached.fetchedAt
@@ -292,6 +420,7 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
     scanPaused.value = false
     loadedTotal.value = null
     notices.value = []
+    loadedRawIds.clear()
     cacheStatusMessage.value = ''
   } else {
     // 有缓存或当前数据时保留卡片，网络请求只显示顶部的轻量进度条。
@@ -302,18 +431,11 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
   backgroundRefreshing.value = hasVisibleData
 
   try {
-    const result = await fetchBatch(context, 1)
+    const result = await fetchBatch(context, 1, controller.signal)
     if (result.stale || sequence !== loadSequence) return
 
     // 分页一致性：非最后一页必须返回满页，否则视为数据源异常
-    if (
-      isOffsetPageInconsistent({
-        itemCount: result.rawCount,
-        page: 1,
-        pageSize: PAGE_SIZE,
-        total: result.total,
-      })
-    ) {
+    if (result.inconsistent || result.overlap) {
       cacheStatusMessage.value = ''
       requestError.value = hasVisibleData
         ? '最新通知加载失败，继续显示现有数据；可点击重试。'
@@ -328,6 +450,8 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
     scanPaused.value = result.scanPaused
     loadedTotal.value = result.total
     loadedQueryKey = queryKey
+    loadedRawIds.clear()
+    for (const id of result.rawIds) loadedRawIds.add(id)
     store.cacheNotices(result.items)
     cacheStatusMessage.value = ''
     cachedFetchedAt = null
@@ -369,6 +493,7 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
       retryAction.value = 'refresh'
     }
   } finally {
+    if (requestController === controller) requestController = null
     if (sequence === loadSequence) {
       loading.value = false
       backgroundRefreshing.value = false
@@ -380,18 +505,26 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
 async function loadMore(): Promise<void> {
   if (loading.value || backgroundRefreshing.value || finished.value) return
 
+  const sequence = loadSequence
   const context = buildQueryContext()
+  const queryKey = getQueryKey(context)
+  const controller = startNoticeRequest()
   loading.value = true
   requestError.value = ''
 
   try {
-    const result = await fetchBatch(context, nextPage.value)
-    if (result.stale) return
+    const result = await fetchBatch(context, nextPage.value, controller.signal)
+    if (result.stale || sequence !== loadSequence || queryKey !== loadedQueryKey) return
 
     // 分页一致性：新页与已加载记录重叠，说明数据源排序不稳定
     const existingIds = new Set(notices.value.map((n) => n.id))
-    const overlap = result.items.some((n) => existingIds.has(n.id))
-    if (overlap) {
+    const overlap = result.rawIds.some((id) => loadedRawIds.has(id) || existingIds.has(id))
+    if (
+      result.inconsistent ||
+      result.overlap ||
+      overlap ||
+      (loadedTotal.value !== null && result.total !== loadedTotal.value)
+    ) {
       requestError.value = '更多通知加载失败'
       retryAction.value = 'load'
       return
@@ -402,6 +535,7 @@ async function loadMore(): Promise<void> {
     finished.value = result.finished
     scanPaused.value = result.scanPaused
     loadedTotal.value = result.total
+    for (const id of result.rawIds) loadedRawIds.add(id)
   } catch (error) {
     if (error instanceof ApiConfigurationError) {
       requestError.value = error.message
@@ -411,7 +545,8 @@ async function loadMore(): Promise<void> {
       retryAction.value = 'load'
     }
   } finally {
-    loading.value = false
+    if (requestController === controller) requestController = null
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -505,13 +640,18 @@ function onTouchEnd(): void {
 const pullReady = computed(() => pullDistance.value >= PULL_THRESHOLD)
 
 const filteredNotices = computed(() => {
-  // 已经在 fetchBatch 中过滤了。置顶通知浮动到列表顶部：
+  // fetchBatch 会提前过滤以决定是否继续扫描分页；这里再过滤一次，
+  // 让用户在当前页直接标记已读、收藏、加标签或修改屏蔽词后，列表能
+  // 立即反映本地状态，而不必重新请求首页。
+  const visibleNotices = applyClientFilters(notices.value, buildQueryContext())
+
+  // 置顶通知浮动到列表顶部：
   // 最近置顶的排最前，非置顶项保留服务端顺序（发布日期倒序）。
   // 仅在 computed 内排序，不改动 notices.value，避免破坏分页一致性 / 重叠检测。
   const pinnedSet = new Set(store.pinnedIds)
-  if (pinnedSet.size === 0) return notices.value
+  if (pinnedSet.size === 0) return visibleNotices
   const pinnedOrder = new Map(store.pinnedIds.map((id, i) => [id, i]))
-  return [...notices.value].sort((a, b) => {
+  return [...visibleNotices].sort((a, b) => {
     const pa = pinnedSet.has(a.id)
     const pb = pinnedSet.has(b.id)
     if (pa && pb) {
@@ -785,7 +925,7 @@ onBeforeUnmount(() => {
       </v-alert>
 
       <v-card
-        v-if="filteredNotices.length === 0 && !loading && !requestError"
+        v-if="filteredNotices.length === 0 && !loading && !requestError && !scanPaused"
         flat
         class="text-center pa-8 bg-transparent"
       >

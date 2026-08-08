@@ -19,6 +19,7 @@ const snackbar = useSnackbar()
 
 const notice = ref<NoticeItem | null>(null)
 const loading = ref(true)
+const refreshing = ref(false)
 const loadError = ref('')
 const showShare = ref(false)
 const showImagePreview = ref(false)
@@ -40,26 +41,46 @@ async function loadNotice(): Promise<void> {
   const controller = new AbortController()
   loadController = controller
   loading.value = true
-  loadError.value = ''
+  refreshing.value = false
   notice.value = null
+  loadError.value = ''
 
   try {
     const id = route.params.id
     if (typeof id !== 'string') {
       throw new DataValidationError('通知 ID 格式无效')
     }
+
+    // 详情页优先展示首页、收藏页或其他页面已经写入的内存缓存，
+    // 同时在后台请求最新内容。这样从列表进入详情时不会再次等待网络。
+    const cachedNotice = store.getCachedNotice(id)
+    notice.value = cachedNotice ?? null
+    loading.value = cachedNotice === undefined
+    refreshing.value = cachedNotice !== undefined
+    if (cachedNotice) store.markRead(cachedNotice.id)
+
     const loadedNotice = await fetchNoticeById(id, controller.signal)
     if (controller.signal.aborted || sequence !== loadSequence) return
 
     notice.value = loadedNotice
+    loadError.value = ''
     store.cacheNotice(loadedNotice)
     store.markRead(loadedNotice.id)
   } catch (error) {
     if (controller.signal.aborted || sequence !== loadSequence) return
-    loadError.value = getLoadErrorMessage(error)
+    const errorMessage = getLoadErrorMessage(error)
+    if (notice.value) {
+      // 已有缓存时保留正文，把失败降级为可重试的提示，而不是覆盖整个详情页。
+      loadError.value = `${errorMessage}，当前显示缓存数据；可点击重试。`
+    } else {
+      loadError.value = errorMessage
+    }
   } finally {
     if (loadController === controller) loadController = null
-    if (sequence === loadSequence) loading.value = false
+    if (sequence === loadSequence) {
+      loading.value = false
+      refreshing.value = false
+    }
   }
 }
 
@@ -145,10 +166,10 @@ function handleContentKeydown(event: KeyboardEvent): void {
     </v-app-bar>
 
     <!-- 加载状态 -->
-    <SkeletonLoader v-if="loading" type="detail" />
+    <SkeletonLoader v-if="loading && !notice" type="detail" />
 
     <!-- 错误状态 -->
-    <v-container v-else-if="loadError" fluid>
+    <v-container v-else-if="loadError && !notice" fluid>
       <v-row justify="center">
         <v-col :cols="12" :md="8" :lg="6">
           <v-card class="pa-4 text-center">
@@ -167,6 +188,24 @@ function handleContentKeydown(event: KeyboardEvent): void {
     <v-container v-else-if="notice" fluid>
       <v-row justify="center">
         <v-col :cols="12" :md="8" :lg="6">
+          <v-progress-linear v-if="refreshing" indeterminate color="primary" class="mb-4" />
+
+          <v-alert
+            v-if="loadError"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mb-4"
+            role="status"
+          >
+            {{ loadError }}
+            <template #append>
+              <v-btn variant="text" size="small" prepend-icon="$refresh" @click="loadNotice">
+                重试
+              </v-btn>
+            </template>
+          </v-alert>
+
           <!-- AI 智能提炼卡片 -->
           <v-card class="mb-6 ai-card" variant="outlined">
             <v-card-title class="d-flex align-center ga-2">

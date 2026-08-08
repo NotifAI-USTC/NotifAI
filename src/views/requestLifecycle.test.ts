@@ -292,6 +292,32 @@ describe('view request lifecycle', () => {
     expect(mocks.fetchNotices.mock.calls.map(([params]) => params.page)).toEqual([1, 2])
   })
 
+  it('scans later Home pages when a local blacklist filters out the first page', async () => {
+    const storeState = mocks.storeState!
+    storeState.blacklistKeywords = ['屏蔽']
+    mocks.fetchNotices.mockImplementation(async (params: { page?: number }) => ({
+      items: Array.from({ length: 15 }, (_, index) =>
+        makeNotice({
+          id: `notice-${(params.page ?? 1) * 100 + index}`,
+          title: params.page === 1 ? '屏蔽通知' : '可见通知',
+        }),
+      ),
+      total: 30,
+    }))
+
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(mocks.fetchNotices.mock.calls.map(([params]) => params.page)).toEqual([1, 2])
+    expect(wrapper.text()).toContain('可见通知')
+    expect(wrapper.text()).not.toContain('暂无通知')
+
+    wrapper.unmount()
+    wrappers.splice(wrappers.indexOf(wrapper), 1)
+    storeState.blacklistKeywords = []
+  })
+
   it('rejects a final Home page that overlaps an earlier page', async () => {
     mocks.fetchNotices.mockImplementation(async (params: { page?: number }) => ({
       items:

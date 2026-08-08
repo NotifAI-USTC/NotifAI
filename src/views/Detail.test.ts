@@ -5,6 +5,7 @@ import type { NoticeItem } from '../types/notice'
 
 const mocks = vi.hoisted(() => ({
   fetchNoticeById: vi.fn(),
+  getCachedNotice: vi.fn(),
   cacheNotice: vi.fn(),
   markRead: vi.fn(),
   showError: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('../utils/request', () => ({
 
 vi.mock('../stores/userSettings', () => ({
   useUserSettingsStore: () => ({
+    getCachedNotice: mocks.getCachedNotice,
     cacheNotice: mocks.cacheNotice,
     markRead: mocks.markRead,
   }),
@@ -72,23 +74,28 @@ function createTestRouter() {
   })
 }
 
+const slotStub = { template: '<div><slot /></div>' }
+
 const componentStubs = {
   VAppBar: true,
   VAppBarTitle: true,
   VBtn: true,
   VIcon: true,
   VSpacer: true,
-  VContainer: true,
-  VRow: true,
-  VCol: true,
-  VCard: true,
-  VCardTitle: true,
-  VCardText: true,
-  VCardActions: true,
-  VList: true,
-  VListItem: true,
-  VListItemTitle: true,
-  VListItemSubtitle: true,
+  VContainer: slotStub,
+  VRow: slotStub,
+  VCol: slotStub,
+  VCard: slotStub,
+  VCardTitle: slotStub,
+  VCardText: slotStub,
+  VCardActions: slotStub,
+  VCardSubtitle: slotStub,
+  VAlert: slotStub,
+  VProgressLinear: true,
+  VList: slotStub,
+  VListItem: slotStub,
+  VListItemTitle: slotStub,
+  VListItemSubtitle: slotStub,
   VDivider: true,
   ShareDialog: true,
   ImagePreview: true,
@@ -100,6 +107,7 @@ describe('Detail request lifecycle', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.getCachedNotice.mockReturnValue(undefined)
   })
 
   afterEach(() => {
@@ -172,5 +180,50 @@ describe('Detail request lifecycle', () => {
     expect(mocks.cacheNotice).toHaveBeenCalledWith(latestNotice)
     expect(mocks.markRead).toHaveBeenCalledOnce()
     expect(mocks.markRead).toHaveBeenCalledWith('notice-2')
+  })
+
+  it('renders a cached detail immediately and replaces it with the fresh response', async () => {
+    const cachedNotice = createNotice('notice-1')
+    const freshNotice = createNotice('notice-1')
+    freshNotice.aiSummary = '新摘要'
+    const pending = createDeferred<NoticeItem>()
+    mocks.getCachedNotice.mockReturnValue(cachedNotice)
+    mocks.fetchNoticeById.mockReturnValue(pending.promise)
+
+    const router = createTestRouter()
+    await router.push('/detail/notice-1')
+    const wrapper = shallowMount(Detail, {
+      global: { plugins: [router], stubs: componentStubs },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(mocks.getCachedNotice).toHaveBeenCalledWith('notice-1')
+    expect(wrapper.text()).toContain('摘要')
+    expect(wrapper.text()).not.toContain('无法加载通知')
+
+    pending.resolve(freshNotice)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('新摘要')
+    expect(mocks.cacheNotice).toHaveBeenCalledWith(freshNotice)
+  })
+
+  it('keeps cached detail visible and shows a retry warning when refresh fails', async () => {
+    const cachedNotice = createNotice('notice-1')
+    mocks.getCachedNotice.mockReturnValue(cachedNotice)
+    mocks.fetchNoticeById.mockRejectedValue(new Error('network unavailable'))
+
+    const router = createTestRouter()
+    await router.push('/detail/notice-1')
+    const wrapper = shallowMount(Detail, {
+      global: { plugins: [router], stubs: componentStubs },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('摘要')
+    expect(wrapper.text()).toContain('当前显示缓存数据')
+    expect(wrapper.text()).not.toContain('通知数据校验失败')
   })
 })
