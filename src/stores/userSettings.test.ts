@@ -1236,18 +1236,33 @@ describe('user settings store', () => {
     expect(store.userIdentity).toBe('freshman')
     expect(store.subscribedChannels).toEqual(['教务处', '迎新特辑'])
     expect(store.blackKeywords).toEqual(['考研'])
+    expect(store.subscriptionMode).toBe('custom')
+    expect(
+      JSON.parse(window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY) ?? '{}'),
+    ).toMatchObject({
+      subscriptionMode: 'custom',
+      subscribedDepts: ['教务处', '迎新特辑'],
+      blacklistKeywords: ['考研'],
+    })
     expect(window.localStorage.getItem(ONBOARDING_FLAG_STORAGE_KEY)).toBe('true')
     expect(window.localStorage.getItem(ONBOARDING_IDENTITY_STORAGE_KEY)).toBe('freshman')
-    expect(JSON.parse(window.localStorage.getItem(ONBOARDING_CHANNELS_STORAGE_KEY) ?? '[]')).toEqual(
-      ['教务处', '迎新特辑'],
-    )
-    expect(JSON.parse(window.localStorage.getItem(ONBOARDING_KEYWORDS_STORAGE_KEY) ?? '[]')).toEqual(
-      ['考研'],
-    )
+    expect(
+      JSON.parse(window.localStorage.getItem(ONBOARDING_CHANNELS_STORAGE_KEY) ?? '[]'),
+    ).toEqual(['教务处', '迎新特辑'])
+    expect(
+      JSON.parse(window.localStorage.getItem(ONBOARDING_KEYWORDS_STORAGE_KEY) ?? '[]'),
+    ).toEqual(['考研'])
 
     store.resetOnboarding()
     expect(store.hasOnboarded).toBe(false)
+    expect(store.userIdentity).toBe('freshman')
+    expect(store.subscriptionMode).toBe('all')
+    expect(store.subscribedDepts).toEqual([])
+    expect(store.blacklistKeywords).toEqual([])
     expect(window.localStorage.getItem(ONBOARDING_FLAG_STORAGE_KEY)).toBeNull()
+    expect(window.localStorage.getItem(ONBOARDING_IDENTITY_STORAGE_KEY)).toBeNull()
+    expect(window.localStorage.getItem(ONBOARDING_CHANNELS_STORAGE_KEY)).toBeNull()
+    expect(window.localStorage.getItem(ONBOARDING_KEYWORDS_STORAGE_KEY)).toBeNull()
   })
 
   it('does not add more than 100 folders', () => {
@@ -1376,7 +1391,6 @@ describe('user settings store', () => {
   })
 })
 
-
 describe('settings export / import and read history', () => {
   let store: ReturnType<typeof useUserSettingsStore> | null = null
 
@@ -1414,9 +1428,7 @@ describe('settings export / import and read history', () => {
     expect(store.isStarred('notice-1')).toBe(true)
     expect(store.blacklistKeywords).toContain('考研')
     expect(store.customTags['notice-1']).toContain('重要')
-    const persisted = JSON.parse(
-      window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY) ?? '{}',
-    )
+    const persisted = JSON.parse(window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY) ?? '{}')
     expect(persisted.starredIds).toContain('notice-1')
   })
 

@@ -65,11 +65,7 @@ export {
 }
 export type { DarkMode } from './settingsPersistence'
 
-export type OnboardingIdentity =
-  | 'freshman'
-  | 'undergraduate'
-  | 'postgraduate'
-  | 'custom'
+export type OnboardingIdentity = 'freshman' | 'undergraduate' | 'postgraduate' | 'custom'
 
 export interface OnboardingConfig {
   identity: OnboardingIdentity
@@ -774,6 +770,71 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     }, 300)
   }
 
+  /**
+   * 标记一次绕过 debounce 的设置变更。
+   *
+   * 入门引导会一次性修改多个 ref，然后直接调用 persistImmediate。若没有
+   * 先创建基线，persistImmediate 会误以为没有待写入的设置日志并提前返回。
+   */
+  function markSettingsDirtyForImmediatePersistence(): void {
+    if (!unflushedBaseline) unflushedBaseline = cloneStoredSettings(stableViewSettings)
+  }
+
+  /**
+   * 写入一份新的 canonical 快照并确认当前客户端的旧同步日志。
+   *
+   * “重置入门引导”包含“从自定义订阅切回全部来源”这一语义，无法用普通
+   * 集合增量日志无歧义地表达（“全部来源”不是一个真实的来源列表）。因此
+   * 重置时使用带递增同步时钟的快照，避免旧日志在下次启动时把设置恢复回来。
+   */
+  function forcePersistCurrentSnapshot(): boolean {
+    if (typeof window === 'undefined') return true
+    if (storageReadOnly) {
+      persistenceError.value = FUTURE_SCHEMA_ERROR
+      return false
+    }
+    if (persistTimer) {
+      clearTimeout(persistTimer)
+      persistTimer = null
+    }
+
+    const oldJournalKeys = new Set<string>([
+      ...(persistedLocalJournalKey ? [persistedLocalJournalKey] : []),
+      ...supersededLocalJournalKeys.keys(),
+    ])
+    const snapshot = createSnapshot()
+    const nextSequence = Math.max(localSequence, syncSequence(currentSyncClock, syncClientId)) + 1
+    snapshot.syncClock = mergeSyncClocks(snapshot.syncClock, currentSyncClock)
+    snapshot.syncClock[syncClientId] = nextSequence
+    snapshot.syncWriter = syncClientId
+
+    localSequence = nextSequence
+    currentSyncClock = Object.assign(
+      Object.create(null) as Record<string, number>,
+      snapshot.syncClock,
+    )
+    currentSyncWriter = syncClientId
+    localJournal = createSettingsJournal(syncClientId)
+    localJournalNeedsWrite = false
+    persistedLocalJournalKey = null
+    persistedLocalJournalRaw = null
+    supersededLocalJournalKeys.clear()
+    unflushedBaseline = null
+    pendingCheckpointCandidate = null
+
+    const stored = writeSnapshot(snapshot)
+    if (!stored) return false
+
+    for (const key of oldJournalKeys) {
+      try {
+        window.localStorage.removeItem(key)
+      } catch {
+        // 快照已包含重置后的状态；旧日志清理失败不会阻止本次重置生效。
+      }
+    }
+    return true
+  }
+
   /** 立即持久化（页面卸载前调用） */
   function persistImmediate(): boolean {
     if (persistTimer) {
@@ -1003,6 +1064,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     ).slice(0, MAX_STORED_ITEMS)
 
     registerSources(channels)
+    markSettingsDirtyForImmediatePersistence()
     subscriptionMode.value = channels.length === 0 ? 'all' : 'custom'
     subscribedDepts.value = channels
     blacklistKeywords.value = keywords
@@ -1023,7 +1085,24 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
 
   function resetOnboarding(): void {
     hasOnboarded.value = false
-    if (!removeOnboardingItem(ONBOARDING_FLAG_STORAGE_KEY)) {
+    userIdentity.value = 'freshman'
+
+    // 重置入门引导应同时清除它管理的 canonical 偏好，不能只删除显示标记。
+    // 收藏、已读、置顶、重要通知和收藏夹属于独立的用户数据，必须保留。
+    subscriptionMode.value = 'all'
+    subscribedDepts.value = []
+    blacklistKeywords.value = []
+
+    const onboardingCleared = [
+      ONBOARDING_FLAG_STORAGE_KEY,
+      ONBOARDING_IDENTITY_STORAGE_KEY,
+      ONBOARDING_CHANNELS_STORAGE_KEY,
+      ONBOARDING_KEYWORDS_STORAGE_KEY,
+    ]
+      .map(removeOnboardingItem)
+      .every(Boolean)
+    const settingsStored = forcePersistCurrentSnapshot()
+    if ((!onboardingCleared || !settingsStored) && !persistenceError.value) {
       persistenceError.value = '无法重置入门引导，请检查浏览器存储权限'
     }
   }
@@ -1040,9 +1119,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     if (!normalizedDept || !availableSourceNames.has(normalizedDept)) return
     if (subscriptionMode.value === 'all') {
       subscriptionMode.value = 'custom'
-      subscribedDepts.value = [...availableSourceNames].filter(
-        (name) => name !== normalizedDept,
-      )
+      subscribedDepts.value = [...availableSourceNames].filter((name) => name !== normalizedDept)
       persist()
       return
     }
@@ -1312,7 +1389,10 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       supersededLocalJournalKeys.clear()
       unflushedBaseline = null
       needsMigration = false
-      return { ok: true, message: parsed.needsMigration ? '已导入并迁移到当前版本' : '偏好设置已导入' }
+      return {
+        ok: true,
+        message: parsed.needsMigration ? '已导入并迁移到当前版本' : '偏好设置已导入',
+      }
     } catch (error) {
       return {
         ok: false,

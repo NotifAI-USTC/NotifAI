@@ -106,9 +106,8 @@ store.registerSources([
 ])
 
 const progress = computed(() => (currentStep.value / 4) * 100)
-const canContinueFromChannels = computed(
-  () => draftSelectAll.value || draftChannels.value.length > 0,
-)
+// 校级部门和二级学院都允许不订阅，完成后由 store 将空列表解释为“全部来源”。
+const canContinueFromChannels = computed(() => true)
 const schoolOptions = computed<ChannelOption[]>(() => {
   if (sources.value === null) return [...FALLBACK_SCHOOL_OPTIONS]
   return sources.value
@@ -150,10 +149,16 @@ function selectedIdentity(value: OnboardingIdentity): boolean {
   return draftIdentity.value === value
 }
 
+function resolvePresetChannels(channels: readonly string[]): string[] {
+  if (sources.value === null) return [...channels]
+  const available = new Set(allChannelNames.value)
+  return channels.filter((channel) => available.has(channel))
+}
+
 function selectIdentity(preset: IdentityPreset): void {
   draftIdentity.value = preset.value
   draftSelectAll.value = Boolean(preset.selectAll)
-  draftChannels.value = [...preset.channels]
+  draftChannels.value = resolvePresetChannels(preset.channels)
 }
 
 function isChannelSelected(channel: string): boolean {
@@ -191,6 +196,12 @@ async function loadSources(force = false): Promise<void> {
     if (controller.signal.aborted) return
     sources.value = loadedSources
     store.registerSources(loadedSources.map((source) => source.name))
+
+    // 来源列表是动态数据。若用户尚未手动改成“全部/自定义”，将静态
+    // 预设裁剪到当前 API 真正存在的来源，避免保存无法在引导页选择的名称。
+    if (draftIdentity.value !== 'custom' && !draftSelectAll.value) {
+      draftChannels.value = resolvePresetChannels(draftChannels.value)
+    }
   } catch (error) {
     if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
       return

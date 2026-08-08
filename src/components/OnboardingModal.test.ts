@@ -31,6 +31,7 @@ const stubs = {
     template: '<button v-bind="$attrs" :disabled="disabled"><slot /></button>',
   },
   VProgressLinear: true,
+  VProgressCircular: true,
   VSpacer: { template: '<span />' },
   VTextField: true,
   VAlert: { template: '<div><slot /></div>' },
@@ -80,7 +81,7 @@ describe('OnboardingModal', () => {
     const store = useUserSettingsStore()
     expect(store.hasOnboarded).toBe(true)
     expect(store.userIdentity).toBe('undergraduate')
-    expect(store.subscribedChannels).toEqual(['教务处', '本科生院'])
+    expect(store.subscribedChannels).toEqual(['教务处'])
   })
 
   it('loads secondary schools from the API and supports multiple selections', async () => {
@@ -100,13 +101,7 @@ describe('OnboardingModal', () => {
     await flushPromises()
 
     const store = useUserSettingsStore()
-    expect(store.subscribedChannels).toEqual([
-      '教务处',
-      '本科生院',
-      '迎新特辑',
-      '计算机学院',
-      '大数据学院',
-    ])
+    expect(store.subscribedChannels).toEqual(['教务处', '计算机学院', '大数据学院'])
   })
 
   it('allows continuing without selecting any secondary school', async () => {
@@ -121,6 +116,6 @@ describe('OnboardingModal', () => {
     await flushPromises()
 
     const store = useUserSettingsStore()
-    expect(store.subscribedChannels).toEqual(['教务处', '本科生院', '迎新特辑'])
+    expect(store.subscribedChannels).toEqual(['教务处'])
   })
 })
