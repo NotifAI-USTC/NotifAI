@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   fetchNoticesByIds: vi.fn(),
   fetchCalendarNotices: vi.fn(),
   fetchStats: vi.fn(),
+  readNoticeFeedCache: vi.fn(),
+  writeNoticeFeedCache: vi.fn(),
   push: vi.fn(),
   cacheNotices: vi.fn(),
   cacheNotice: vi.fn(),
@@ -47,6 +49,11 @@ vi.mock('../utils/request', () => ({
   fetchNoticesByIds: mocks.fetchNoticesByIds,
   fetchCalendarNotices: mocks.fetchCalendarNotices,
   fetchStats: mocks.fetchStats,
+}))
+
+vi.mock('../utils/noticeFeedCache', () => ({
+  readNoticeFeedCache: mocks.readNoticeFeedCache,
+  writeNoticeFeedCache: mocks.writeNoticeFeedCache,
 }))
 
 vi.mock('vue-router', () => ({
@@ -115,7 +122,13 @@ function makeNotice(overrides: Partial<NoticeItem> = {}): NoticeItem {
 }
 
 function makeCalendarItem(
-  overrides: Partial<{ id: string; title: string; source: string; publishDate: string; deadline: string | null }> = {},
+  overrides: Partial<{
+    id: string
+    title: string
+    source: string
+    publishDate: string
+    deadline: string | null
+  }> = {},
 ): { id: string; title: string; source: string; publishDate: string; deadline: string | null } {
   return {
     id: 'notice-1',
@@ -131,7 +144,10 @@ const stubs = {
   AdvancedSearch: true,
   DdlNoticeBar: true,
   FolderDialog: true,
-  NoticeCard: true,
+  NoticeCard: {
+    props: ['notice'],
+    template: '<div class="notice-card-stub">{{ notice.title }}</div>',
+  },
   SkeletonLoader: true,
   ShareDialog: true,
   VCalendar: true,
@@ -142,6 +158,7 @@ describe('view request lifecycle', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.readNoticeFeedCache.mockResolvedValue(null)
   })
 
   afterEach(() => {
@@ -210,6 +227,51 @@ describe('view request lifecycle', () => {
 
     expect(mocks.fetchNotices).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('通知加载失败')
+  })
+
+  it('shows a persisted Home cache immediately while refreshing in the background', async () => {
+    mocks.readNoticeFeedCache.mockResolvedValue({
+      key: 'home-cache-key',
+      items: [makeNotice({ title: '缓存通知' })],
+      total: 1,
+      nextPage: 2,
+      finished: true,
+      scanPaused: false,
+      fetchedAt: '2026-08-01T08:00:00.000Z',
+      stale: false,
+    })
+    mocks.fetchNotices.mockImplementation(() => pendingPromise())
+
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(mocks.readNoticeFeedCache).toHaveBeenCalledOnce()
+    expect(mocks.fetchNotices).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('缓存通知')
+    expect(wrapper.text()).toContain('正在同步最新通知')
+  })
+
+  it('keeps cached Home data visible when the refresh request fails', async () => {
+    mocks.readNoticeFeedCache.mockResolvedValue({
+      key: 'home-cache-key',
+      items: [makeNotice({ title: '离线缓存通知' })],
+      total: 1,
+      nextPage: 2,
+      finished: true,
+      scanPaused: false,
+      fetchedAt: '2026-08-01T08:00:00.000Z',
+      stale: true,
+    })
+    mocks.fetchNotices.mockRejectedValue(new Error('network unavailable'))
+
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('离线缓存通知')
+    expect(wrapper.text()).toContain('当前显示缓存数据')
+    expect(wrapper.text()).toContain('可点击重试')
   })
 
   it('continues Home pagination from the next unrequested page', async () => {

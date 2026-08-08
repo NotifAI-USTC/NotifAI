@@ -14,6 +14,7 @@ import type { SearchFilters, TriStateFilter } from '../components/AdvancedSearch
 import { useWindowSize } from '../composables/useWindowSize'
 import { isOffsetPageExhausted, isOffsetPageInconsistent } from '../utils/pagination'
 import { calculateRemainingDays } from '../utils/date'
+import { readNoticeFeedCache, writeNoticeFeedCache } from '../utils/noticeFeedCache'
 
 const PAGE_SIZE = 15
 const MAX_PAGES_PER_BATCH = 5
@@ -56,11 +57,13 @@ const loading = ref(false)
 const finished = ref(false)
 const scanPaused = ref(false)
 const refreshing = ref(false)
+const backgroundRefreshing = ref(false)
 const nextPage = ref(1)
 const loadedTotal = ref<number | null>(null)
 const initialLoading = ref(true)
 const requestError = ref('')
 const retryAction = ref<RetryAction>('refresh')
+const cacheStatusMessage = ref('')
 const showAdvancedSearch = ref(false)
 const advancedFilters = ref<SearchFilters | null>(null)
 const noticeGrid = ref<HTMLElement | null>(null)
@@ -72,6 +75,7 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null
 let requestController: AbortController | null = null
 let statsController: AbortController | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let loadSequence = 0
 
 const serverStats = ref<StatsResponse | null>(null)
 const newNoticeCount = ref(0)
@@ -226,24 +230,85 @@ async function fetchBatch(context: QueryContext, page: number): Promise<FetchBat
   }
 }
 
-async function loadInitial(): Promise<void> {
+interface LoadInitialOptions {
+  allowCache?: boolean
+  force?: boolean
+}
+
+function formatCacheTimestamp(timestamp: string): string {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return '未知时间'
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
+  const sequence = ++loadSequence
   const context = buildQueryContext()
   const queryKey = getQueryKey(context)
+  const force = options.force === true
+  const hasCurrentData = queryKey === loadedQueryKey && loadedTotal.value !== null
 
-  if (queryKey === loadedQueryKey && notices.value.length > 0) {
+  if (!force && hasCurrentData) {
     return
   }
 
-  loading.value = true
   requestError.value = ''
-  nextPage.value = 1
-  finished.value = false
-  scanPaused.value = false
-  notices.value = []
+  let hasVisibleData = hasCurrentData
+  let showingCachedData = false
+  let cachedFetchedAt: string | null = null
+
+  if (!hasVisibleData && options.allowCache) {
+    try {
+      const cached = await readNoticeFeedCache(queryKey)
+      if (sequence !== loadSequence) return
+      if (cached) {
+        notices.value = cached.items
+        nextPage.value = cached.nextPage
+        finished.value = cached.finished
+        scanPaused.value = cached.scanPaused
+        loadedTotal.value = cached.total
+        loadedQueryKey = queryKey
+        hasVisibleData = true
+        showingCachedData = true
+        cachedFetchedAt = cached.fetchedAt
+        cacheStatusMessage.value = cached.stale
+          ? `当前显示的是较旧缓存（${formatCacheTimestamp(cached.fetchedAt)}），正在同步最新通知。`
+          : `已显示缓存数据（${formatCacheTimestamp(cached.fetchedAt)}），正在同步最新通知。`
+        store.cacheNotices(cached.items)
+      }
+    } catch {
+      // IndexedDB 不可用或缓存损坏时，继续正常请求最新数据。
+    }
+  }
+
+  if (sequence !== loadSequence) return
+
+  if (!hasVisibleData) {
+    loading.value = true
+    initialLoading.value = true
+    nextPage.value = 1
+    finished.value = false
+    scanPaused.value = false
+    loadedTotal.value = null
+    notices.value = []
+    cacheStatusMessage.value = ''
+  } else {
+    // 有缓存或当前数据时保留卡片，网络请求只显示顶部的轻量进度条。
+    loading.value = false
+    initialLoading.value = false
+    if (force) cacheStatusMessage.value = ''
+  }
+  backgroundRefreshing.value = hasVisibleData
 
   try {
     const result = await fetchBatch(context, 1)
-    if (result.stale) return
+    if (result.stale || sequence !== loadSequence) return
 
     // 分页一致性：非最后一页必须返回满页，否则视为数据源异常
     if (
@@ -254,7 +319,10 @@ async function loadInitial(): Promise<void> {
         total: result.total,
       })
     ) {
-      requestError.value = '通知加载失败'
+      cacheStatusMessage.value = ''
+      requestError.value = hasVisibleData
+        ? '最新通知加载失败，继续显示现有数据；可点击重试。'
+        : '通知加载失败'
       retryAction.value = 'refresh'
       return
     }
@@ -265,24 +333,58 @@ async function loadInitial(): Promise<void> {
     scanPaused.value = result.scanPaused
     loadedTotal.value = result.total
     loadedQueryKey = queryKey
+    store.cacheNotices(result.items)
+    cacheStatusMessage.value = ''
+    cachedFetchedAt = null
+    void writeNoticeFeedCache({
+      key: queryKey,
+      items: result.items,
+      total: result.total,
+      nextPage: result.nextPage,
+      finished: result.finished,
+      scanPaused: result.scanPaused,
+      fetchedAt: new Date().toISOString(),
+    })
     void loadServerStats()
     markNoticesSeen()
   } catch (error) {
-    if (error instanceof ApiConfigurationError) {
+    if (sequence !== loadSequence || (error instanceof Error && error.name === 'AbortError')) return
+
+    const errorMessage =
+      error instanceof ApiConfigurationError
+        ? error.message
+        : error instanceof Error
+          ? error.message || '加载失败，请重试'
+          : '加载失败，请重试'
+
+    if (hasVisibleData) {
+      cacheStatusMessage.value = ''
+      const dataSourceMessage = showingCachedData
+        ? `当前显示缓存数据（最后更新于 ${cachedFetchedAt ? formatCacheTimestamp(cachedFetchedAt) : '未知时间'}）`
+        : '当前继续显示上一次加载的数据'
+      requestError.value = `${errorMessage}，${dataSourceMessage}；可点击重试。`
+      retryAction.value = 'refresh'
+    } else if (error instanceof ApiConfigurationError) {
       requestError.value = error.message
-    } else if (error instanceof Error && error.name !== 'AbortError') {
+    } else if (error instanceof Error) {
       requestError.value = error.message || '加载失败，请重试'
       console.error('[NotifAI] 通知加载失败:', error)
       retryAction.value = 'refresh'
+    } else {
+      requestError.value = '加载失败，请重试'
+      retryAction.value = 'refresh'
     }
   } finally {
-    loading.value = false
-    initialLoading.value = false
+    if (sequence === loadSequence) {
+      loading.value = false
+      backgroundRefreshing.value = false
+      initialLoading.value = false
+    }
   }
 }
 
 async function loadMore(): Promise<void> {
-  if (loading.value || finished.value) return
+  if (loading.value || backgroundRefreshing.value || finished.value) return
 
   const context = buildQueryContext()
   loading.value = true
@@ -324,11 +426,10 @@ async function refresh(): Promise<void> {
 
   refreshing.value = true
   requestError.value = ''
-  loadedQueryKey = ''
   newNoticeCount.value = 0
 
   try {
-    await loadInitial()
+    await loadInitial({ force: true })
   } finally {
     refreshing.value = false
   }
@@ -512,7 +613,6 @@ async function checkNewNotices(): Promise<void> {
 watch(
   () => store.subscriptionMode,
   () => {
-    loadedQueryKey = ''
     refresh()
   },
 )
@@ -523,7 +623,6 @@ watch(
 watch(
   () => store.subscribedDepts.join('\u0000'),
   () => {
-    loadedQueryKey = ''
     refresh()
   },
 )
@@ -531,7 +630,6 @@ watch(
 watch(
   () => store.blacklistKeywords.join('\u0000'),
   () => {
-    loadedQueryKey = ''
     refresh()
   },
 )
@@ -539,13 +637,14 @@ watch(
 onMounted(() => {
   initialLoading.value = true
   if (!lastSeenAt.value) markNoticesSeen()
-  void loadInitial()
+  void loadInitial({ allowCache: true })
   pollTimer = setInterval(() => {
     void checkNewNotices()
   }, NEW_NOTICE_POLL_MS)
 })
 
 onBeforeUnmount(() => {
+  loadSequence += 1
   requestController?.abort()
   statsController?.abort()
   if (pollTimer) clearInterval(pollTimer)
@@ -642,7 +741,11 @@ onBeforeUnmount(() => {
       </span>
     </v-alert>
 
-    <v-progress-linear v-if="refreshing && !initialLoading" indeterminate color="primary" />
+    <v-progress-linear
+      v-if="(refreshing || backgroundRefreshing) && !initialLoading"
+      indeterminate
+      color="primary"
+    />
 
     <!-- 初始加载骨架屏 -->
     <SkeletonLoader v-if="initialLoading" type="card" />
@@ -669,6 +772,17 @@ onBeforeUnmount(() => {
           $refresh
         </v-icon>
       </div>
+
+      <v-alert
+        v-if="cacheStatusMessage"
+        type="info"
+        variant="tonal"
+        density="compact"
+        class="mb-4"
+        role="status"
+      >
+        {{ cacheStatusMessage }}
+      </v-alert>
 
       <v-alert
         v-if="requestError"
