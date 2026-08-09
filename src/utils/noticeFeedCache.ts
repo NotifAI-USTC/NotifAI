@@ -7,7 +7,7 @@ import { parseNoticeItem } from './validation'
  * 缓存只用于加速首屏和网络失败时的兜底，不替代服务端数据。IndexedDB
  * 不可用、配额不足或缓存损坏时，调用方应继续走正常网络请求。
  */
-const CACHE_SCHEMA_VERSION = 1
+const CACHE_SCHEMA_VERSION = 2
 const DATABASE_NAME = 'notifai-cache'
 const DATABASE_VERSION = 1
 const STORE_NAME = 'notice-feeds'

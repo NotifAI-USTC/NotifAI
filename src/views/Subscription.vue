@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
-import { fetchSources } from '../utils/request'
-import { DEPARTMENTS } from '../types/notice'
-import type { SourceItem } from '../types/notice'
+import { fetchCategories, fetchSources } from '../utils/request'
+import { DEPARTMENTS, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
+import type { NoticeCategoryItem, SourceItem } from '../types/notice'
 
 const store = useUserSettingsStore()
 const router = useRouter()
@@ -13,6 +13,11 @@ const newKeyword = ref('')
 const sources = ref<SourceItem[] | null>(null)
 const loading = ref(true)
 const loadError = ref('')
+const categories = ref<NoticeCategoryItem[] | null>(null)
+const categoriesLoading = ref(true)
+const categoriesError = ref('')
+let sourceController: AbortController | null = null
+let categoryController: AbortController | null = null
 const sourceGroupOrder = ['校级部门', '二级学院', '其他'] as const
 const sourceGroupRank = new Map<string, number>(
   sourceGroupOrder.map((group, index) => [group, index]),
@@ -22,8 +27,7 @@ const sourceGroupRank = new Map<string, number>(
 const groupedSources = computed(() => {
   const groups = new Map<string, SourceItem[]>()
   const list =
-    sources.value ??
-    DEPARTMENTS.map((d) => ({ name: d.name, group: d.group, noticeCount: 0 }))
+    sources.value ?? DEPARTMENTS.map((d) => ({ name: d.name, group: d.group, noticeCount: 0 }))
   for (const item of list) {
     const group = item.group || '其他'
     const arr = groups.get(group) ?? []
@@ -41,18 +45,53 @@ const groupedSources = computed(() => {
 })
 
 async function loadSources(): Promise<void> {
+  sourceController?.abort()
+  const controller = new AbortController()
+  sourceController = controller
   loading.value = true
   loadError.value = ''
   try {
-    const loadedSources = await fetchSources()
+    const loadedSources = await fetchSources(controller.signal)
+    if (controller.signal.aborted) return
     store.registerSources(loadedSources.map((source) => source.name))
     sources.value = loadedSources
   } catch (error) {
+    if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return
     sources.value = null
-    loadError.value =
-      error instanceof Error ? error.message : '来源列表加载失败，已展示内置部门'
+    loadError.value = error instanceof Error ? error.message : '来源列表加载失败，已展示内置部门'
   } finally {
-    loading.value = false
+    if (sourceController === controller) {
+      sourceController = null
+      loading.value = false
+    }
+  }
+}
+
+const categoryOptions = computed<NoticeCategoryItem[]>(() => {
+  if (categories.value) return categories.value
+  return NOTICE_CATEGORY_DEFINITIONS.map((category) => ({ ...category, noticeCount: 0 }))
+})
+
+async function loadCategories(): Promise<void> {
+  categoryController?.abort()
+  const controller = new AbortController()
+  categoryController = controller
+  categoriesLoading.value = true
+  categoriesError.value = ''
+  try {
+    const loadedCategories = await fetchCategories(controller.signal)
+    if (controller.signal.aborted) return
+    categories.value = loadedCategories
+  } catch (error) {
+    if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return
+    categories.value = null
+    categoriesError.value =
+      error instanceof Error ? error.message : '分类列表加载失败，已展示内置分类'
+  } finally {
+    if (categoryController === controller) {
+      categoryController = null
+      categoriesLoading.value = false
+    }
   }
 }
 
@@ -65,6 +104,12 @@ function onAddKeyword(): void {
 
 onMounted(() => {
   void loadSources()
+  void loadCategories()
+})
+
+onBeforeUnmount(() => {
+  sourceController?.abort()
+  categoryController?.abort()
 })
 </script>
 
@@ -131,6 +176,86 @@ onMounted(() => {
             </template>
           </v-list-item>
         </v-list>
+      </v-card>
+
+      <!-- AI 通知分类 -->
+      <v-card class="mb-4">
+        <v-card-title class="d-flex align-center text-subtitle-1 font-weight-bold">
+          通知分类
+          <v-spacer />
+          <v-btn
+            v-if="store.categoryMode === 'custom'"
+            variant="text"
+            size="small"
+            @click="store.subscribeAllCategories"
+          >
+            显示全部
+          </v-btn>
+        </v-card-title>
+        <v-card-subtitle class="pb-3">
+          多个分类之间为“或”；分类筛选会与来源订阅同时生效。
+        </v-card-subtitle>
+        <v-divider />
+
+        <v-progress-circular
+          v-if="categoriesLoading"
+          indeterminate
+          color="primary"
+          class="d-block mx-auto my-8"
+          aria-label="正在加载通知分类"
+        />
+
+        <template v-else>
+          <v-alert
+            v-if="categoriesError"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="ma-4 mb-0"
+            role="status"
+          >
+            {{ categoriesError }}，已展示内置分类列表。
+            <template #append>
+              <v-btn
+                prepend-icon="$refresh"
+                variant="text"
+                size="small"
+                aria-label="重试加载分类列表"
+                @click="loadCategories"
+              >
+                重试
+              </v-btn>
+            </template>
+          </v-alert>
+
+          <v-list>
+            <v-list-item
+              v-for="category in categoryOptions"
+              :key="category.key"
+              :title="category.name"
+              :subtitle="
+                categories
+                  ? `${category.description} · ${category.noticeCount} 条通知`
+                  : category.description
+              "
+            >
+              <template #append>
+                <v-switch
+                  :model-value="store.isCategorySubscribed(category.key)"
+                  :disabled="
+                    store.categoryMode === 'custom' &&
+                    store.subscribedCategories.length === 1 &&
+                    store.isCategorySubscribed(category.key)
+                  "
+                  color="primary"
+                  hide-details
+                  :aria-label="`关注${category.name}`"
+                  @update:model-value="store.toggleCategory(category.key)"
+                />
+              </template>
+            </v-list-item>
+          </v-list>
+        </template>
       </v-card>
 
       <!-- 黑名单关键词 -->

@@ -25,6 +25,7 @@ function makeNotice(id: string, deadline: string | null = null): NoticeItem {
     id,
     title: id,
     source: '教务处',
+    categories: [],
     publishDate: '2026-08-01',
     aiSummary: '',
     deadline,

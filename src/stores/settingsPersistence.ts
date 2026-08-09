@@ -1,4 +1,10 @@
-import { DEPARTMENTS, normalizeNoticeSource } from '../types/notice'
+import {
+  DEPARTMENTS,
+  isNoticeCategoryKey,
+  normalizeNoticeSource,
+  NOTICE_CATEGORY_DEFINITIONS,
+} from '../types/notice'
+import type { NoticeCategoryKey } from '../types/notice'
 import type { Folder } from '../types/folder'
 import { DEFAULT_FOLDERS } from '../types/folder'
 import { isValidNoticeId } from '../utils/validation'
@@ -6,7 +12,7 @@ import { isValidNoticeId } from '../utils/validation'
 export const USER_SETTINGS_STORAGE_KEY = 'notifai-user-settings'
 export const USER_SETTINGS_JOURNAL_NAMESPACE = `${USER_SETTINGS_STORAGE_KEY}:journal:`
 export const USER_SETTINGS_JOURNAL_PREFIX = `${USER_SETTINGS_STORAGE_KEY}:journal:1:`
-export const USER_SETTINGS_SCHEMA_VERSION = 2
+export const USER_SETTINGS_SCHEMA_VERSION = 3
 export const USER_FOLDER_LIMIT = 100
 
 export const MAX_STORED_ITEMS = 10_000
@@ -20,7 +26,14 @@ export const SETTINGS_JOURNAL_SCHEMA_VERSION = 1
 export const SETTINGS_WRITE_LOCK_NAME = 'notifai-user-settings-writer'
 export const SYNC_CLIENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
 export const FUTURE_SCHEMA_ERROR = '本机设置由更新版本创建，当前版本已转为只读以避免覆盖'
-export const FOLDER_ICON_ALIASES = new Set(['$star', '$school', '$trophy', '$flask', '$domain', '$folder'])
+export const FOLDER_ICON_ALIASES = new Set([
+  '$star',
+  '$school',
+  '$trophy',
+  '$flask',
+  '$domain',
+  '$folder',
+])
 const LEGACY_FOLDER_ICONS: Readonly<Record<string, string>> = {
   'mdi-star': '$star',
   'mdi-school': '$school',
@@ -33,6 +46,7 @@ export const VALID_DEPARTMENT_ORDER = Array.from(
   new Set(DEPARTMENTS.map((department) => normalizeNoticeSource(department.name))),
 )
 export const VALID_DEPARTMENT_NAMES = new Set(VALID_DEPARTMENT_ORDER)
+export const VALID_CATEGORY_ORDER = NOTICE_CATEGORY_DEFINITIONS.map(({ key }) => key)
 
 /**
  * Source names are supplied by the backend and may change without a frontend
@@ -54,6 +68,17 @@ function orderDepartmentNames(names: Iterable<string>): string[] {
   })
 }
 
+export function normalizeCategoryKey(value: unknown): NoticeCategoryKey | null {
+  return isNoticeCategoryKey(value) ? value : null
+}
+
+function orderCategoryKeys(names: Iterable<NoticeCategoryKey>): NoticeCategoryKey[] {
+  const order = new Map(VALID_CATEGORY_ORDER.map((name, index) => [name, index]))
+  return [...new Set(names)].sort(
+    (first, second) => (order.get(first) ?? 0) - (order.get(second) ?? 0),
+  )
+}
+
 export type DarkMode = 'auto' | 'light' | 'dark'
 export type SubscriptionMode = 'all' | 'custom'
 
@@ -63,6 +88,8 @@ export interface StoredSettings {
   syncWriter: string
   subscriptionMode: SubscriptionMode
   subscribedDepts: string[]
+  categoryMode: SubscriptionMode
+  subscribedCategories: NoticeCategoryKey[]
   blacklistKeywords: string[]
   starredIds: string[]
   starredFolderMap: Record<string, string>
@@ -125,6 +152,7 @@ export interface SettingsJournal {
   clientId: string
   dependencyClock: Record<string, number>
   subscriptions: SequencedPresenceIntent[]
+  categorySubscriptions: SequencedPresenceIntent[]
   blacklistKeywords: SequencedPresenceIntent[]
   starredIds: SequencedPresenceIntent[]
   readIds: SequencedPresenceIntent[]
@@ -160,6 +188,8 @@ export interface ParsedSettings {
 const STORED_SETTINGS_FIELDS: readonly StoredSettingsField[] = [
   'subscriptionMode',
   'subscribedDepts',
+  'categoryMode',
+  'subscribedCategories',
   'blacklistKeywords',
   'starredIds',
   'starredFolderMap',
@@ -183,6 +213,8 @@ export function createDefaultSettings(): StoredSettings {
     syncWriter: '',
     subscriptionMode: 'all',
     subscribedDepts: [],
+    categoryMode: 'all',
+    subscribedCategories: [],
     blacklistKeywords: [],
     starredIds: [],
     starredFolderMap: Object.create(null) as Record<string, string>,
@@ -210,6 +242,8 @@ export function cloneStoredSettings(settings: StoredSettings): StoredSettings {
     syncWriter: settings.syncWriter,
     subscriptionMode: settings.subscriptionMode,
     subscribedDepts: [...settings.subscribedDepts],
+    categoryMode: settings.categoryMode,
+    subscribedCategories: [...settings.subscribedCategories],
     blacklistKeywords: [...settings.blacklistKeywords],
     starredIds: [...settings.starredIds],
     starredFolderMap,
@@ -241,6 +275,7 @@ export function createSettingsJournal(clientId: string): SettingsJournal {
     clientId,
     dependencyClock: Object.create(null) as Record<string, number>,
     subscriptions: [],
+    categorySubscriptions: [],
     blacklistKeywords: [],
     starredIds: [],
     readIds: [],
@@ -264,6 +299,7 @@ export function cloneSettingsJournal(journal: SettingsJournal): SettingsJournal 
       journal.dependencyClock,
     ),
     subscriptions: journal.subscriptions.map((intent) => ({ ...intent })),
+    categorySubscriptions: journal.categorySubscriptions.map((intent) => ({ ...intent })),
     blacklistKeywords: journal.blacklistKeywords.map((intent) => ({ ...intent })),
     starredIds: journal.starredIds.map((intent) => ({ ...intent })),
     readIds: journal.readIds.map((intent) => ({ ...intent })),
@@ -284,6 +320,7 @@ export function cloneSettingsJournal(journal: SettingsJournal): SettingsJournal 
 export function settingsJournalDecisionCount(journal: SettingsJournal): number {
   return (
     journal.subscriptions.length +
+    journal.categorySubscriptions.length +
     journal.blacklistKeywords.length +
     journal.starredIds.length +
     journal.readIds.length +
@@ -303,6 +340,7 @@ export function settingsJournalSequence(journal: SettingsJournal): number {
     if (intent.sequence > sequence) sequence = intent.sequence
   }
   journal.subscriptions.forEach(updateSequence)
+  journal.categorySubscriptions.forEach(updateSequence)
   journal.blacklistKeywords.forEach(updateSequence)
   journal.starredIds.forEach(updateSequence)
   journal.readIds.forEach(updateSequence)
@@ -428,6 +466,14 @@ export function appendOperationToJournal(
       sequence,
     )
   }
+  if (dirtyFields.has('categoryMode') || dirtyFields.has('subscribedCategories')) {
+    next.categorySubscriptions = updatePresenceIntents(
+      next.categorySubscriptions,
+      effectiveSubscribedCategories(baseline),
+      effectiveSubscribedCategories(settings),
+      sequence,
+    )
+  }
   if (dirtyFields.has('blacklistKeywords')) {
     next.blacklistKeywords = updatePresenceIntents(
       next.blacklistKeywords,
@@ -520,6 +566,10 @@ export function rebaseSettingsJournal(
     journal.subscriptions,
     effectiveSubscribedDepartments(settings),
   )
+  rebased.categorySubscriptions = rebasePresence(
+    journal.categorySubscriptions,
+    effectiveSubscribedCategories(settings),
+  )
   rebased.blacklistKeywords = rebasePresence(journal.blacklistKeywords, settings.blacklistKeywords)
   rebased.starredIds = rebasePresence(journal.starredIds, settings.starredIds)
   rebased.readIds = rebasePresence(journal.readIds, settings.readIds)
@@ -575,6 +625,9 @@ export function pruneSettingsJournal(
 ): SettingsJournal {
   const next = cloneSettingsJournal(journal)
   next.subscriptions = next.subscriptions.filter((intent) => intent.sequence > acknowledgedSequence)
+  next.categorySubscriptions = next.categorySubscriptions.filter(
+    (intent) => intent.sequence > acknowledgedSequence,
+  )
   next.blacklistKeywords = next.blacklistKeywords.filter(
     (intent) => intent.sequence > acknowledgedSequence,
   )
@@ -631,6 +684,23 @@ export function materializeSettingsJournal(
     subscriptions.forEach(updateSequence)
     dirtyFields.add('subscriptionMode')
     dirtyFields.add('subscribedDepts')
+  }
+
+  const categorySubscriptions = journal.categorySubscriptions.filter(isPending)
+  if (categorySubscriptions.length > 0) {
+    baseline.categoryMode = 'custom'
+    baseline.subscribedCategories = categorySubscriptions
+      .filter((intent) => !intent.present)
+      .map((intent) => normalizeCategoryKey(intent.item))
+      .filter((category): category is NoticeCategoryKey => category !== null)
+    settings.categoryMode = 'custom'
+    settings.subscribedCategories = categorySubscriptions
+      .filter((intent) => intent.present)
+      .map((intent) => normalizeCategoryKey(intent.item))
+      .filter((category): category is NoticeCategoryKey => category !== null)
+    categorySubscriptions.forEach(updateSequence)
+    dirtyFields.add('categoryMode')
+    dirtyFields.add('subscribedCategories')
   }
 
   assignPresence('blacklistKeywords', journal.blacklistKeywords)
@@ -768,7 +838,10 @@ export function clockStrictlyDominates(
   return strictlyNewer
 }
 
-export function clocksEqual(first: Record<string, number>, second: Record<string, number>): boolean {
+export function clocksEqual(
+  first: Record<string, number>,
+  second: Record<string, number>,
+): boolean {
   const clientIds = new Set([...Object.keys(first), ...Object.keys(second)])
   for (const clientId of clientIds) {
     if (syncSequence(first, clientId) !== syncSequence(second, clientId)) return false
@@ -830,6 +903,10 @@ export function getDirtyFields(
     dirty.add('subscriptionMode')
     dirty.add('subscribedDepts')
   }
+  if (dirty.has('categoryMode') || dirty.has('subscribedCategories')) {
+    dirty.add('categoryMode')
+    dirty.add('subscribedCategories')
+  }
   if (dirty.has('starredIds') || dirty.has('starredFolderMap') || dirty.has('folders')) {
     dirty.add('starredIds')
     dirty.add('starredFolderMap')
@@ -862,6 +939,17 @@ export function effectiveSubscribedDepartments(
     settings.subscribedDepts
       .map(normalizeDepartmentName)
       .filter((department): department is string => department !== null),
+  )
+}
+
+export function effectiveSubscribedCategories(
+  settings: Pick<StoredSettings, 'categoryMode' | 'subscribedCategories'>,
+): NoticeCategoryKey[] {
+  if (settings.categoryMode === 'all') return [...VALID_CATEGORY_ORDER]
+  return orderCategoryKeys(
+    settings.subscribedCategories
+      .map(normalizeCategoryKey)
+      .filter((category): category is NoticeCategoryKey => category !== null),
   )
 }
 
@@ -900,6 +988,32 @@ export function mergeSubscriptions(
     return { subscriptionMode: 'all', subscribedDepts: [] }
   }
   return { subscriptionMode: 'custom', subscribedDepts }
+}
+
+export function mergeCategorySubscriptions(
+  baseline: StoredSettings,
+  local: StoredSettings,
+  remote: StoredSettings,
+  changed: boolean,
+): Pick<StoredSettings, 'categoryMode' | 'subscribedCategories'> {
+  if (!changed) {
+    return {
+      categoryMode: remote.categoryMode,
+      subscribedCategories: [...remote.subscribedCategories],
+    }
+  }
+
+  const subscribedCategories = orderCategoryKeys(
+    mergeStringSet(
+      effectiveSubscribedCategories(baseline),
+      effectiveSubscribedCategories(local),
+      effectiveSubscribedCategories(remote),
+    ).filter((category): category is NoticeCategoryKey => isNoticeCategoryKey(category)),
+  )
+  if (subscribedCategories.length === VALID_CATEGORY_ORDER.length) {
+    return { categoryMode: 'all', subscribedCategories: [] }
+  }
+  return { categoryMode: 'custom', subscribedCategories }
 }
 
 export function mergeFolders(baseline: Folder[], local: Folder[], remote: Folder[]): Folder[] {
@@ -967,6 +1081,13 @@ export function mergeStoredSettings(
 ): StoredSettings {
   const subscriptionChanged = dirty.has('subscriptionMode') || dirty.has('subscribedDepts')
   const subscription = mergeSubscriptions(baseline, local, remote, subscriptionChanged)
+  const categorySubscriptionChanged = dirty.has('categoryMode') || dirty.has('subscribedCategories')
+  const categorySubscription = mergeCategorySubscriptions(
+    baseline,
+    local,
+    remote,
+    categorySubscriptionChanged,
+  )
   const starredChanged =
     dirty.has('starredIds') || dirty.has('starredFolderMap') || dirty.has('folders')
   const folders = starredChanged
@@ -989,6 +1110,8 @@ export function mergeStoredSettings(
     syncWriter: local.syncWriter,
     subscriptionMode: subscription.subscriptionMode,
     subscribedDepts: subscription.subscribedDepts,
+    categoryMode: categorySubscription.categoryMode,
+    subscribedCategories: categorySubscription.subscribedCategories,
     blacklistKeywords: dirty.has('blacklistKeywords')
       ? mergeStringSet(
           baseline.blacklistKeywords,
@@ -1129,6 +1252,19 @@ export function normalizeStoredSettings(parsed: Record<string, unknown>): Stored
       : subscribedDepts.length === 0
         ? 'all'
         : 'custom'
+  const subscribedCategories = normalizeStringArray(parsed.subscribedCategories, {
+    maxLength: 100,
+    maxItems: VALID_CATEGORY_ORDER.length,
+    validate: isNoticeCategoryKey,
+  })
+    .map(normalizeCategoryKey)
+    .filter((category): category is NoticeCategoryKey => category !== null)
+  const categoryMode: SubscriptionMode =
+    parsed.categoryMode === 'all' || parsed.categoryMode === 'custom'
+      ? parsed.categoryMode
+      : subscribedCategories.length === 0
+        ? 'all'
+        : 'custom'
   const starredIds = normalizeNoticeIds(parsed.starredIds)
   const folders = normalizeFolders(parsed.folders)
   const validFolderIds = new Set(folders.map((folder) => folder.id))
@@ -1149,6 +1285,8 @@ export function normalizeStoredSettings(parsed: Record<string, unknown>): Stored
         : '',
     subscriptionMode,
     subscribedDepts: Array.from(new Set(subscribedDepts)),
+    categoryMode,
+    subscribedCategories: orderCategoryKeys(subscribedCategories),
     blacklistKeywords: normalizeStringArray(parsed.blacklistKeywords, { maxLength: 200 }),
     starredIds,
     starredFolderMap,
@@ -1201,7 +1339,9 @@ export function classifySettingsJournalKey(key: string): 'current' | 'future' | 
   return version === SETTINGS_JOURNAL_SCHEMA_VERSION ? 'current' : 'invalid'
 }
 
-export function parseSettingsJournalKey(key: string): { clientId: string; sequence: number } | null {
+export function parseSettingsJournalKey(
+  key: string,
+): { clientId: string; sequence: number } | null {
   if (!key.startsWith(USER_SETTINGS_JOURNAL_PREFIX)) return null
   const suffix = key.slice(USER_SETTINGS_JOURNAL_PREFIX.length)
   const separatorIndex = suffix.lastIndexOf(':')
@@ -1265,7 +1405,9 @@ export function parseSettingsJournal(
   }
   if (
     parsed.schemaVersion !== SETTINGS_JOURNAL_SCHEMA_VERSION ||
-    parsed.settingsSchemaVersion !== USER_SETTINGS_SCHEMA_VERSION ||
+    typeof parsed.settingsSchemaVersion !== 'number' ||
+    !Number.isSafeInteger(parsed.settingsSchemaVersion) ||
+    parsed.settingsSchemaVersion < 1 ||
     parsed.clientId !== expectedClientId ||
     !SYNC_CLIENT_ID_PATTERN.test(expectedClientId)
   ) {
@@ -1282,10 +1424,15 @@ export function parseSettingsJournal(
   const normalizeDepartment = (value: unknown) => {
     return normalizeDepartmentName(value)
   }
+  const normalizeCategory = (value: unknown) => normalizeCategoryKey(value)
 
   const journal = createSettingsJournal(expectedClientId)
   journal.dependencyClock = normalizeSyncClock(parsed.dependencyClock)
   journal.subscriptions = normalizeJournalPresenceIntents(parsed.subscriptions, normalizeDepartment)
+  journal.categorySubscriptions = normalizeJournalPresenceIntents(
+    parsed.categorySubscriptions,
+    normalizeCategory,
+  )
   journal.blacklistKeywords = normalizeJournalPresenceIntents(
     parsed.blacklistKeywords,
     normalizeKeyword,

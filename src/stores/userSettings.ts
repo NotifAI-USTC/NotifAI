@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref } from 'vue'
-import type { NoticeItem } from '../types/notice'
-import { DEPARTMENTS } from '../types/notice'
+import type { NoticeCategoryKey, NoticeItem } from '../types/notice'
+import { DEPARTMENTS, isNoticeCategoryKey } from '../types/notice'
 import { isValidNoticeId } from '../utils/validation'
 import type { Folder } from '../types/folder'
 import {
@@ -17,6 +17,7 @@ import {
   USER_SETTINGS_JOURNAL_PREFIX,
   USER_SETTINGS_SCHEMA_VERSION,
   USER_SETTINGS_STORAGE_KEY,
+  VALID_CATEGORY_ORDER,
   appendOperationToJournal,
   clockStrictlyDominates,
   clocksEqual,
@@ -70,12 +71,14 @@ export type OnboardingIdentity = 'freshman' | 'undergraduate' | 'postgraduate' |
 export interface OnboardingConfig {
   identity: OnboardingIdentity
   channels: string[]
+  categories: NoticeCategoryKey[]
   keywords: string[]
 }
 
 export const ONBOARDING_FLAG_STORAGE_KEY = 'notifai_has_onboarded'
 export const ONBOARDING_IDENTITY_STORAGE_KEY = 'notifai_user_identity'
 export const ONBOARDING_CHANNELS_STORAGE_KEY = 'notifai_subscribed_channels'
+export const ONBOARDING_CATEGORIES_STORAGE_KEY = 'notifai_subscribed_categories'
 export const ONBOARDING_KEYWORDS_STORAGE_KEY = 'notifai_black_keywords'
 
 function readOnboardingFlag(): boolean {
@@ -157,6 +160,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   // ---- 状态 ----
   const subscriptionMode = ref<SubscriptionMode>(saved.subscriptionMode)
   const subscribedDepts = ref<string[]>(saved.subscribedDepts)
+  const categoryMode = ref<SubscriptionMode>(saved.categoryMode)
+  const subscribedCategories = ref<NoticeCategoryKey[]>(saved.subscribedCategories)
   const blacklistKeywords = ref<string[]>(saved.blacklistKeywords)
   const starredIds = ref<string[]>(saved.starredIds)
   const starredFolderMap = ref<Record<string, string>>(saved.starredFolderMap)
@@ -196,6 +201,10 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       (normalizedDept !== null && subscribedDepts.value.includes(normalizedDept))
     )
   })
+  const isCategorySubscribed = computed(
+    () => (category: NoticeCategoryKey) =>
+      categoryMode.value === 'all' || subscribedCategories.value.includes(category),
+  )
   const isStarred = computed(() => (id: string) => starredIds.value.includes(id))
   const isRead = computed(() => (id: string) => readIds.value.includes(id))
   const isPinned = computed(() => (id: string) => pinnedIds.value.includes(id))
@@ -230,6 +239,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       syncWriter: currentSyncWriter,
       subscriptionMode: subscriptionMode.value,
       subscribedDepts: subscribedDepts.value,
+      categoryMode: categoryMode.value,
+      subscribedCategories: subscribedCategories.value,
       blacklistKeywords: blacklistKeywords.value,
       starredIds: starredIds.value,
       starredFolderMap: starredFolderMap.value,
@@ -870,6 +881,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     currentSyncWriter = settings.syncWriter
     subscriptionMode.value = settings.subscriptionMode
     subscribedDepts.value = [...settings.subscribedDepts]
+    categoryMode.value = settings.categoryMode
+    subscribedCategories.value = [...settings.subscribedCategories]
     blacklistKeywords.value = [...settings.blacklistKeywords]
     starredIds.value = [...settings.starredIds]
     starredFolderMap.value = Object.assign(Object.create(null), settings.starredFolderMap)
@@ -1062,11 +1075,20 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
           .filter((keyword) => keyword.length > 0 && keyword.length <= 200),
       ),
     ).slice(0, MAX_STORED_ITEMS)
+    const categories = Array.from(
+      new Set(
+        (Array.isArray(config.categories) ? config.categories : []).filter(
+          (category): category is NoticeCategoryKey => isNoticeCategoryKey(category),
+        ),
+      ),
+    )
 
     registerSources(channels)
     markSettingsDirtyForImmediatePersistence()
     subscriptionMode.value = channels.length === 0 ? 'all' : 'custom'
     subscribedDepts.value = channels
+    categoryMode.value = categories.length === 0 ? 'all' : 'custom'
+    subscribedCategories.value = categories
     blacklistKeywords.value = keywords
     userIdentity.value = identity
     hasOnboarded.value = true
@@ -1075,6 +1097,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       writeOnboardingItem(ONBOARDING_FLAG_STORAGE_KEY, 'true'),
       writeOnboardingItem(ONBOARDING_IDENTITY_STORAGE_KEY, identity),
       writeOnboardingItem(ONBOARDING_CHANNELS_STORAGE_KEY, JSON.stringify(channels)),
+      writeOnboardingItem(ONBOARDING_CATEGORIES_STORAGE_KEY, JSON.stringify(categories)),
       writeOnboardingItem(ONBOARDING_KEYWORDS_STORAGE_KEY, JSON.stringify(keywords)),
     ].every(Boolean)
     const settingsStored = persistImmediate()
@@ -1091,12 +1114,15 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     // 收藏、已读、置顶、重要通知和收藏夹属于独立的用户数据，必须保留。
     subscriptionMode.value = 'all'
     subscribedDepts.value = []
+    categoryMode.value = 'all'
+    subscribedCategories.value = []
     blacklistKeywords.value = []
 
     const onboardingCleared = [
       ONBOARDING_FLAG_STORAGE_KEY,
       ONBOARDING_IDENTITY_STORAGE_KEY,
       ONBOARDING_CHANNELS_STORAGE_KEY,
+      ONBOARDING_CATEGORIES_STORAGE_KEY,
       ONBOARDING_KEYWORDS_STORAGE_KEY,
     ]
       .map(removeOnboardingItem)
@@ -1130,6 +1156,35 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     } else {
       subscribedDepts.value.push(normalizedDept)
     }
+    persist()
+  }
+
+  function toggleCategory(category: NoticeCategoryKey): void {
+    if (!isNoticeCategoryKey(category)) return
+    if (categoryMode.value === 'all') {
+      categoryMode.value = 'custom'
+      subscribedCategories.value = VALID_CATEGORY_ORDER.filter((item) => item !== category)
+      persist()
+      return
+    }
+
+    const index = subscribedCategories.value.indexOf(category)
+    if (index >= 0) {
+      if (subscribedCategories.value.length === 1) return
+      subscribedCategories.value.splice(index, 1)
+    } else subscribedCategories.value.push(category)
+
+    if (subscribedCategories.value.length === VALID_CATEGORY_ORDER.length) {
+      categoryMode.value = 'all'
+      subscribedCategories.value = []
+    }
+    persist()
+  }
+
+  function subscribeAllCategories(): void {
+    if (categoryMode.value === 'all') return
+    categoryMode.value = 'all'
+    subscribedCategories.value = []
     persist()
   }
 
@@ -1346,6 +1401,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       exportedAt: new Date().toISOString(),
       subscriptionMode: subscriptionMode.value,
       subscribedDepts: [...subscribedDepts.value],
+      categoryMode: categoryMode.value,
+      subscribedCategories: [...subscribedCategories.value],
       blacklistKeywords: [...blacklistKeywords.value],
       starredIds: [...starredIds.value],
       starredFolderMap: Object.assign({}, starredFolderMap.value),
@@ -1439,6 +1496,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     // 状态
     subscriptionMode,
     subscribedDepts,
+    categoryMode,
+    subscribedCategories,
     blacklistKeywords,
     starredIds,
     starredFolderMap,
@@ -1457,6 +1516,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     noticeCache,
     // 查询
     isSubscribed,
+    isCategorySubscribed,
     isStarred,
     isRead,
     isPinned,
@@ -1469,6 +1529,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     resetOnboarding,
     registerSources,
     toggleDepartment,
+    toggleCategory,
+    subscribeAllCategories,
     addKeyword,
     removeKeyword,
     toggleStar,

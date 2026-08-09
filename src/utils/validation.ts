@@ -1,11 +1,13 @@
 import type {
   CalendarItem,
+  NoticeCategoryItem,
   NoticeBatchResponse,
   NoticeItem,
   NoticeListResponse,
   SourceItem,
   StatsResponse,
 } from '../types/notice'
+import { isNoticeCategoryKey, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
 
 const LIMITS = {
   id: 128,
@@ -17,6 +19,7 @@ const LIMITS = {
   url: 4_096,
   attachmentName: 500,
   attachments: 50,
+  categoriesPerNotice: 3,
   notices: 1_000,
   total: 10_000_000,
 } as const
@@ -163,6 +166,7 @@ function parseNoticeFields(record: Record<string, unknown>, path: string): Notic
     id: assertNoticeId(record.id, `${path}.id`),
     title: expectString(record.title, `${path}.title`, LIMITS.title),
     source: expectString(record.source, `${path}.source`, LIMITS.source),
+    categories: parseNoticeCategories(record.categories, `${path}.categories`),
     publishDate: expectDate(record.publishDate, `${path}.publishDate`),
     aiSummary: optionalString(record.aiSummary, LIMITS.summary),
     deadline: record.deadline == null ? null : expectDate(record.deadline, `${path}.deadline`),
@@ -172,6 +176,26 @@ function parseNoticeFields(record: Record<string, unknown>, path: string): Notic
     cleanContent: optionalString(record.cleanContent, LIMITS.html),
     attachments: [],
   }
+}
+
+function parseNoticeCategories(value: unknown, path: string): NoticeItem['categories'] {
+  if (!Array.isArray(value) || value.length > LIMITS.categoriesPerNotice) {
+    throw new DataValidationError(`${path} 必须是至多 ${LIMITS.categoriesPerNotice} 项的数组`)
+  }
+
+  const categories: NoticeItem['categories'] = []
+  const seen = new Set<string>()
+  value.forEach((key, index) => {
+    if (!isNoticeCategoryKey(key)) {
+      throw new DataValidationError(`${path}[${index}] 不是支持的分类 key`)
+    }
+    if (seen.has(key)) {
+      throw new DataValidationError(`${path}[${index}] 存在重复分类`)
+    }
+    seen.add(key)
+    categories.push(key)
+  })
+  return categories
 }
 
 function parseAttachments(
@@ -358,6 +382,44 @@ export function parseSourceListResponse(value: unknown): SourceItem[] {
     }
     return { name, group, noticeCount }
   })
+}
+
+/** 解析分类列表响应（GET /categories）。 */
+export function parseCategoryListResponse(value: unknown): NoticeCategoryItem[] {
+  if (!Array.isArray(value) || value.length !== NOTICE_CATEGORY_DEFINITIONS.length) {
+    throw new DataValidationError(
+      `categories 必须是包含 ${NOTICE_CATEGORY_DEFINITIONS.length} 项的数组`,
+    )
+  }
+
+  const categories: NoticeCategoryItem[] = []
+  const seen = new Set<string>()
+  value.forEach((item, index) => {
+    const record = expectRecord(item, `categories[${index}]`)
+    if (!isNoticeCategoryKey(record.key)) {
+      throw new DataValidationError(`categories[${index}].key 不是支持的分类 key`)
+    }
+    if (seen.has(record.key)) {
+      throw new DataValidationError(`categories[${index}].key 存在重复分类`)
+    }
+    seen.add(record.key)
+
+    const noticeCount = record.noticeCount
+    if (typeof noticeCount !== 'number' || !Number.isInteger(noticeCount) || noticeCount < 0) {
+      throw new DataValidationError(`categories[${index}].noticeCount 必须是非负整数`)
+    }
+    categories.push({
+      key: record.key,
+      name: expectString(record.name, `categories[${index}].name`, LIMITS.source),
+      description: expectString(
+        record.description,
+        `categories[${index}].description`,
+        LIMITS.detail,
+      ),
+      noticeCount,
+    })
+  })
+  return categories
 }
 
 /** 解析聚合统计响应（GET /stats）。 */

@@ -57,6 +57,8 @@ test('persists a favorite and supports calendar and theme workflows', async ({ p
   await page.getByText('订阅与屏蔽', { exact: true }).click()
   await expect(page).toHaveURL(/#\/user\/subscription$/)
   await expect(page.locator('.v-app-bar-title', { hasText: '订阅与屏蔽' })).toBeVisible()
+  await expect(page.getByText('通知分类', { exact: true })).toBeVisible()
+  await expect(page.getByText('考试安排', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '返回个人中心' }).click()
   await expect(page).toHaveURL(/#\/user$/)
 

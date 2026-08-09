@@ -4,8 +4,8 @@ import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
 import { ApiConfigurationError, fetchNotices, fetchStats } from '../utils/request'
 import type { FetchNoticesParams } from '../utils/request'
-import type { NoticeItem, StatsResponse } from '../types/notice'
-import { normalizeNoticeSource } from '../types/notice'
+import type { NoticeCategoryKey, NoticeItem, StatsResponse } from '../types/notice'
+import { getNoticeCategoryName, normalizeNoticeSource } from '../types/notice'
 import NoticeCard from '../components/NoticeCard.vue'
 import DdlNoticeBar from '../components/DdlNoticeBar.vue'
 import SkeletonLoader from '../components/SkeletonLoader.vue'
@@ -23,6 +23,7 @@ const PULL_THRESHOLD = 72
 interface QueryContext {
   keyword: string
   source: string
+  categories: NoticeCategoryKey[]
   dateFrom: string
   dateTo: string
   hasDeadline?: boolean
@@ -103,10 +104,14 @@ function buildQueryContext(): QueryContext {
     store.subscriptionMode === 'custom'
       ? Array.from(new Set(store.subscribedDepts.map(normalizeNoticeSource)))
       : undefined
+  const preferredCategories = store.categoryMode === 'custom' ? [...store.subscribedCategories] : []
+  // 打开高级搜索后，其分类选择（包括空数组=全部分类）临时覆盖长期偏好。
+  const selectedCategories = filters ? [...filters.categories] : preferredCategories
 
   return {
     keyword: (filters ? filters.keyword : searchQuery.value).trim().toLocaleLowerCase(),
     source: filters?.source ? normalizeNoticeSource(filters.source) : '',
+    categories: selectedCategories,
     dateFrom: filters?.dateFrom || '',
     dateTo: filters?.dateTo || '',
     hasDeadline: triStateBoolean(filters?.hasDeadline ?? 'any'),
@@ -122,6 +127,7 @@ function buildServerParams(context: QueryContext, page: number): FetchNoticesPar
   return {
     keyword: context.keyword || undefined,
     source: context.source || undefined,
+    categories: context.categories.length > 0 ? context.categories : undefined,
     sources: context.subscribedSources,
     dateFrom: context.dateFrom || undefined,
     dateTo: context.dateTo || undefined,
@@ -138,6 +144,12 @@ function getQueryKey(context: QueryContext): string {
 function matchesLocalFilters(notice: NoticeItem, context: QueryContext): boolean {
   const source = normalizeNoticeSource(notice.source)
   if (context.source && source !== context.source) return false
+  if (
+    context.categories.length > 0 &&
+    !notice.categories.some((category) => context.categories.includes(category))
+  ) {
+    return false
+  }
   if (context.dateFrom && notice.publishDate < context.dateFrom) return false
   if (context.dateTo && notice.publishDate > context.dateTo) return false
   if (context.hasDeadline !== undefined && Boolean(notice.deadline) !== context.hasDeadline) {
@@ -726,6 +738,20 @@ watch(
   },
 )
 
+watch(
+  () => store.categoryMode,
+  () => {
+    refresh()
+  },
+)
+
+watch(
+  () => store.subscribedCategories.join('\u0000'),
+  () => {
+    refresh()
+  },
+)
+
 onMounted(() => {
   initialLoading.value = true
   void loadInitial({ allowCache: true })
@@ -809,6 +835,10 @@ onBeforeUnmount(() => {
       <span class="text-caption">
         高级搜索已启用
         <span v-if="advancedFilters.keyword">· 关键词: {{ advancedFilters.keyword }}</span>
+        <span v-if="advancedFilters.categories.length">
+          · 分类:
+          {{ advancedFilters.categories.map(getNoticeCategoryName).join('、') }}
+        </span>
       </span>
     </v-alert>
 

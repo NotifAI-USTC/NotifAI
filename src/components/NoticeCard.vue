@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useUserSettingsStore } from '../stores/userSettings'
+import { getNoticeCategoryName } from '../types/notice'
 import type { NoticeItem } from '../types/notice'
 import { isUrgent, formatRemaining } from '../utils/date'
 import { hapticStar, hapticRead, hapticMedium } from '../utils/haptics'
@@ -116,6 +117,16 @@ function addCustomTag() {
       <v-chip-group column class="pa-0">
         <v-chip size="small" color="primary" variant="tonal">
           {{ notice.source }}
+        </v-chip>
+
+        <v-chip
+          v-for="category in notice.categories"
+          :key="category"
+          size="small"
+          color="secondary"
+          variant="outlined"
+        >
+          {{ getNoticeCategoryName(category) }}
         </v-chip>
 
         <v-chip

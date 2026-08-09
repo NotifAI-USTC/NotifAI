@@ -6,9 +6,12 @@
 
 ## 已实现能力
 
-- 分类通知流、分页、刷新、服务端关键词与日期筛选
+- 通知流、分页、刷新、服务端关键词、来源、AI 分类与日期筛选
+- 通知卡片和详情页展示 AI 分类，高级搜索分类选项由 `GET /categories` 动态提供
+- 四步入门引导会根据身份预设自动配置来源与关注分类，分类无需单独选择
 - 通知详情、经过净化的原文、官网原文入口和附件链接复制
 - 部门订阅、关键词屏蔽、已读、收藏、置顶、重要标记和收藏夹
+- 分类订阅：入门引导按身份自动设置，也可在“订阅与屏蔽”中调整关注类别
 - 独立"我的收藏"页：与首页一致的卡片网格，支持按收藏夹筛选
 - 个人中心 DDL 倒计时基于"重要"标记而非收藏
 - 截止日期倒计时、月历/周历视图与 ICS 日历导出
@@ -83,13 +86,13 @@ npm run check
 
 ## 页面路由
 
-| 路由                   | 页面                                   |
-| ---------------------- | -------------------------------------- |
-| `/#/`                  | 通知流、搜索和高级筛选                 |
-| `/#/detail/:id`        | AI 摘要、原文和附件                    |
-| `/#/calendar`          | 通知与截止日期月历                     |
-| `/#/user/subscription` | 部门订阅和关键词屏蔽（从个人中心进入） |
-| `/#/user`              | 收藏、DDL 和本地设置                   |
+| 路由                   | 页面                                             |
+| ---------------------- | ------------------------------------------------ |
+| `/#/`                  | 通知流、搜索和高级筛选                           |
+| `/#/detail/:id`        | AI 摘要、原文和附件                              |
+| `/#/calendar`          | 通知与截止日期月历                               |
+| `/#/user/subscription` | 来源订阅、分类偏好和关键词屏蔽（从个人中心进入） |
+| `/#/user`              | 收藏、DDL 和本地设置                             |
 
 旧地址 `/#/subscription` 会自动跳转到 `/#/user/subscription`。
 
@@ -110,6 +113,7 @@ interface NoticeItem {
   id: string // 通知唯一 MD5/ID
   title: string // 原始标题
   source: string // 发布来源，如 "教务处"、"计算机学院"
+  categories: string[] // 0~3 个 AI 分类英文 key
   publishDate: string // 发布日期 YYYY-MM-DD
   aiSummary: string // AI 提炼的一句话摘要，可为空字符串
   deadline: string | null // 截止日期 YYYY-MM-DD，无则为 null
@@ -127,6 +131,7 @@ interface NoticeItem {
 | ----------------------- | --------------------------------------------------------------------------- |
 | `keyword`               | 标题、来源和摘要关键词                                                      |
 | `source` / `sources[]`  | 单个或多个来源                                                              |
+| `categories[]`          | 一个或多个 AI 分类 key；多项为 OR 语义                                      |
 | `dateFrom` / `dateTo`   | 发布日期范围，格式为 `YYYY-MM-DD`                                           |
 | `rangeFrom` / `rangeTo` | 日历范围；发布日或截止日任一命中即返回                                      |
 | `hasDeadline`           | 是否具有截止日期                                                            |
@@ -146,11 +151,13 @@ interface NoticeItem {
 | `POST /notices/batch`   | 批量详情：收藏页与个人中心 DDL，替代 N+1 逐条请求，最多 500 个 ID            |
 | `GET /notices/calendar` | 日历轻量视图：`month=YYYY-MM` 或 `week=YYYY-Www`，返回精简字段，替代分页循环 |
 | `GET /sources`          | 来源列表：个人中心订阅页与首页来源下拉动态化，含分组与通知数                 |
+| `GET /categories`       | 17 个 AI 分类及通知数：高级搜索分类多选和分类名称展示                        |
 | `GET /stats`            | 聚合统计：首页统计条与数据新鲜度提示                                         |
 
 - 批量详情请求体为 `{ "ids": string[] }`，响应 `{ "items": NoticeItem[], "missing": string[] }`，`items` 按发布日期倒序，重复 ID 自动去重。
 - 日历轻量条目仅含 `id` / `title` / `source` / `publishDate` / `deadline`，发布日或截止日命中即返回，上限 500 条。
 - 来源条目为 `{ name, group, noticeCount }`，`group` 如「校级部门」「二级学院」「其他」。
+- 分类条目为 `{ key, name, description, noticeCount }`；通知中的 `categories` 只保存英文 key，前端映射为中文名称。
 - 统计响应为 `{ total, sourceCount, last7DaysDdl, last24hNew, lastCrawlAt }`，`lastCrawlAt` 可为 `null`。
 - 首页使用 `since` 每 60 秒轮询一次，有新通知时显示「有 N 条新通知，点击刷新」提示条。
 

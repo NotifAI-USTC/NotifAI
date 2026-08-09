@@ -7,6 +7,7 @@ function notice(overrides: Partial<NoticeItem> = {}): NoticeItem {
     id: 'notice-1',
     title: '普通公告',
     source: '教务处',
+    categories: [],
 
     publishDate: '2026-07-31',
     aiSummary: '',

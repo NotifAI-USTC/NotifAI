@@ -5,6 +5,8 @@ import type { NoticeItem } from '../types/notice'
 interface MockSettingsStore {
   subscriptionMode: string
   subscribedDepts: string[]
+  categoryMode: string
+  subscribedCategories: string[]
   blacklistKeywords: string[]
   customTags: Record<string, string[]>
   starredIds: string[]
@@ -65,6 +67,8 @@ vi.mock('../stores/userSettings', async () => {
   const storeState = reactive({
     subscriptionMode: 'all',
     subscribedDepts: [] as string[],
+    categoryMode: 'all',
+    subscribedCategories: [] as string[],
     blacklistKeywords: [] as string[],
     customTags: Object.create(null) as Record<string, string[]>,
     starredIds: ['notice-1'],
@@ -109,6 +113,7 @@ function makeNotice(overrides: Partial<NoticeItem> = {}): NoticeItem {
     id: 'notice-1',
     title: '测试通知',
     source: '教务处',
+    categories: [],
     publishDate: '2026-07-30',
     aiSummary: '测试摘要',
     deadline: '2026-08-10',
@@ -227,6 +232,50 @@ describe('view request lifecycle', () => {
 
     expect(mocks.fetchNotices).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('通知加载失败')
+  })
+
+  it('applies persisted category preferences to the Home API request', async () => {
+    const storeState = mocks.storeState!
+    storeState.categoryMode = 'custom'
+    storeState.subscribedCategories = ['exam']
+    mocks.fetchNotices.mockResolvedValue({
+      items: Array.from({ length: 15 }, (_, index) =>
+        makeNotice({ id: `notice-${index + 1}`, categories: ['exam'] }),
+      ),
+      total: 15,
+    })
+
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(mocks.fetchNotices).toHaveBeenCalledWith(
+      expect.objectContaining({ categories: ['exam'] }),
+      expect.any(AbortSignal),
+    )
+
+    await wrapper.find('[title="高级搜索"]').trigger('click')
+    wrapper.findComponent({ name: 'AdvancedSearch' }).vm.$emit('search', {
+      keyword: '',
+      source: '',
+      categories: [],
+      dateFrom: '',
+      dateTo: '',
+      hasDeadline: 'any',
+      isRead: 'any',
+      isStarred: 'any',
+      tags: [],
+    })
+    await flushPromises()
+    expect(mocks.fetchNotices).toHaveBeenLastCalledWith(
+      expect.objectContaining({ categories: undefined }),
+      expect.any(AbortSignal),
+    )
+
+    wrapper.unmount()
+    wrappers.splice(wrappers.indexOf(wrapper), 1)
+    storeState.categoryMode = 'all'
+    storeState.subscribedCategories = []
   })
 
   it('shows a persisted Home cache immediately while refreshing in the background', async () => {
@@ -392,6 +441,7 @@ describe('view request lifecycle', () => {
     // 修复前这会触发 deep watch 导致 refresh() 重新加载首页。
     const storeState = mocks.storeState!
     storeState.subscribedDepts = [...storeState.subscribedDepts]
+    storeState.subscribedCategories = [...storeState.subscribedCategories]
     storeState.blacklistKeywords = [...storeState.blacklistKeywords]
     await flushPromises()
 
@@ -414,5 +464,29 @@ describe('view request lifecycle', () => {
     await flushPromises()
 
     expect(mocks.fetchNotices).toHaveBeenCalledTimes(2)
+  })
+
+  it('reloads Home when the persisted category selection changes', async () => {
+    mocks.fetchNotices.mockResolvedValue({
+      items: Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
+      total: 15,
+    })
+
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+    expect(mocks.fetchNotices).toHaveBeenCalledOnce()
+
+    const storeState = mocks.storeState!
+    storeState.categoryMode = 'custom'
+    storeState.subscribedCategories = ['exam']
+    await flushPromises()
+
+    expect(mocks.fetchNotices).toHaveBeenCalledTimes(2)
+
+    wrapper.unmount()
+    wrappers.splice(wrappers.indexOf(wrapper), 1)
+    storeState.categoryMode = 'all'
+    storeState.subscribedCategories = []
   })
 })

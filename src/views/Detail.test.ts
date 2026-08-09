@@ -52,6 +52,7 @@ function createNotice(id: string): NoticeItem {
     id,
     title: `Notice ${id}`,
     source: '教务处',
+    categories: [],
 
     publishDate: '2026-08-01',
     aiSummary: '摘要',
@@ -90,6 +91,7 @@ const componentStubs = {
   VCardText: slotStub,
   VCardActions: slotStub,
   VCardSubtitle: slotStub,
+  VChip: slotStub,
   VAlert: slotStub,
   VProgressLinear: true,
   VList: slotStub,
@@ -225,5 +227,24 @@ describe('Detail request lifecycle', () => {
     expect(wrapper.text()).toContain('摘要')
     expect(wrapper.text()).toContain('当前显示缓存数据')
     expect(wrapper.text()).not.toContain('通知数据校验失败')
+  })
+
+  it('renders the notice title, source, date, and category names', async () => {
+    const loadedNotice = createNotice('notice-1')
+    loadedNotice.categories = ['exam', 'course_info']
+    mocks.fetchNoticeById.mockResolvedValue(loadedNotice)
+
+    const router = createTestRouter()
+    await router.push('/detail/notice-1')
+    const wrapper = shallowMount(Detail, {
+      global: { plugins: [router], stubs: componentStubs },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Notice notice-1')
+    expect(wrapper.text()).toContain('教务处 · 2026-08-01')
+    expect(wrapper.text()).toContain('考试安排')
+    expect(wrapper.text()).toContain('教学安排')
   })
 })

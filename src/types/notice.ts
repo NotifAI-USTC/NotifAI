@@ -3,6 +3,7 @@ export interface NoticeItem {
   id: string // 通知唯一MD5/ID
   title: string // 原始标题
   source: string // 发布来源,如 "教务处", "计算机学院"
+  categories: NoticeCategoryKey[] // AI 分类，最多 3 项
   publishDate: string // 发布日期 YYYY-MM-DD
   aiSummary: string // AI 提炼的 40 字以内一句话摘要
   deadline: string | null // 格式化截止时间,无则为 null
@@ -11,6 +12,45 @@ export interface NoticeItem {
   originUrl: string // 官网原始链接
   cleanContent: string // 通知原文：Markdown/轻量HTML/纯文本，详情页按 Markdown 渲染
   attachments: Array<{ name: string; url: string }> // 附件列表
+}
+
+/** 后端 AI 流水线使用的固定分类 key。 */
+export const NOTICE_CATEGORY_DEFINITIONS = [
+  { key: 'course_selection', name: '选课通知', description: '选课、退课、补选、重修选课' },
+  { key: 'exam', name: '考试安排', description: '期末、补考、缓考、四六级' },
+  { key: 'scholarship', name: '奖学金', description: '申请、评审、公示、助学金' },
+  { key: 'academic_lecture', name: '学术讲座', description: '报告、讲座、研讨会' },
+  { key: 'campus_event', name: '校园活动', description: '文化活动、社团、文体赛事' },
+  { key: 'enrollment', name: '招生信息', description: '本科生、研究生、留学生招生' },
+  { key: 'course_info', name: '教学安排', description: '教学计划、调停课、教室借用' },
+  { key: 'graduation', name: '毕业相关', description: '论文、答辩、学位授予、离校' },
+  { key: 'internship_job', name: '实习就业', description: '实习、招聘、宣讲会' },
+  { key: 'library', name: '图书馆通知', description: '服务、资源、开放时间' },
+  { key: 'admin', name: '行政通知', description: '综合行政、办公室、院系管理' },
+  { key: 'research', name: '科研通知', description: '科研项目、基金申请' },
+  { key: 'competition', name: '竞赛通知', description: '学科竞赛、挑战杯' },
+  { key: 'abroad', name: '国际交流', description: '交换生、留学项目' },
+  { key: 'party', name: '党建团学', description: '党建、团组织、思政' },
+  { key: 'logistics', name: '后勤服务', description: '食堂、宿舍、班车、医疗' },
+  { key: 'other', name: '其他通知', description: '其他校园通知' },
+] as const
+
+export type NoticeCategoryKey = (typeof NOTICE_CATEGORY_DEFINITIONS)[number]['key']
+
+const NOTICE_CATEGORY_NAME_MAP = Object.fromEntries(
+  NOTICE_CATEGORY_DEFINITIONS.map(({ key, name }) => [key, name]),
+) as Readonly<Record<NoticeCategoryKey, string>>
+
+export const NOTICE_CATEGORY_KEYS = new Set<NoticeCategoryKey>(
+  NOTICE_CATEGORY_DEFINITIONS.map(({ key }) => key),
+)
+
+export function isNoticeCategoryKey(value: unknown): value is NoticeCategoryKey {
+  return typeof value === 'string' && NOTICE_CATEGORY_KEYS.has(value as NoticeCategoryKey)
+}
+
+export function getNoticeCategoryName(key: NoticeCategoryKey): string {
+  return NOTICE_CATEGORY_NAME_MAP[key]
 }
 
 /** 通知列表 API 响应 */
@@ -111,6 +151,14 @@ export interface NoticeBatchResponse {
 export interface SourceItem {
   name: string
   group: string
+  noticeCount: number
+}
+
+/** 通知分类条目（GET /categories） */
+export interface NoticeCategoryItem {
+  key: NoticeCategoryKey
+  name: string
+  description: string
   noticeCount: number
 }
 

@@ -1,14 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { DEPARTMENTS } from '../types/notice'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { DEPARTMENTS, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
 import { useUserSettingsStore } from '../stores/userSettings'
-import { fetchSources } from '../utils/request'
-import type { SourceItem } from '../types/notice'
-import {
-  clearSearchHistory,
-  loadSearchHistory,
-  recordSearchHistory,
-} from '../utils/searchHistory'
+import { fetchCategories, fetchSources } from '../utils/request'
+import type { NoticeCategoryItem, NoticeCategoryKey, SourceItem } from '../types/notice'
+import { clearSearchHistory, loadSearchHistory, recordSearchHistory } from '../utils/searchHistory'
 
 const emit = defineEmits<{
   search: [filters: SearchFilters]
@@ -24,6 +20,7 @@ export type TriStateFilter = 'any' | 'yes' | 'no'
 export interface SearchFilters {
   keyword: string
   source: string
+  categories: NoticeCategoryKey[]
   dateFrom: string
   dateTo: string
   hasDeadline: TriStateFilter
@@ -38,6 +35,7 @@ function emptyFilters(): SearchFilters {
   return {
     keyword: '',
     source: '',
+    categories: [],
     dateFrom: '',
     dateTo: '',
     hasDeadline: 'any',
@@ -49,13 +47,19 @@ function emptyFilters(): SearchFilters {
 
 const filters = ref<SearchFilters>(
   props.initialFilters
-    ? { ...props.initialFilters, tags: [...props.initialFilters.tags] }
+    ? {
+        ...props.initialFilters,
+        categories: [...props.initialFilters.categories],
+        tags: [...props.initialFilters.tags],
+      }
     : emptyFilters(),
 )
 
 const newTag = ref('')
 
 const sourceItems = ref<SourceItem[] | null>(null)
+const categoryItems = ref<NoticeCategoryItem[] | null>(null)
+let metadataController: AbortController | null = null
 
 /** 来源下拉项：优先使用后端 GET /sources（含分组），加载中/失败时回退到内置部门表 */
 const sources = computed(() => {
@@ -69,9 +73,10 @@ const sources = computed(() => {
   return DEPARTMENTS.map((d) => ({ title: d.name, value: d.name, group: d.group }))
 })
 
-async function loadSources(): Promise<void> {
+async function loadSources(signal: AbortSignal): Promise<void> {
   try {
-    const loadedSources = await fetchSources()
+    const loadedSources = await fetchSources(signal)
+    if (signal.aborted) return
     store.registerSources(loadedSources.map((source) => source.name))
     sourceItems.value = loadedSources
   } catch {
@@ -80,8 +85,42 @@ async function loadSources(): Promise<void> {
   }
 }
 
+const categories = computed(() => {
+  if (categoryItems.value) {
+    return categoryItems.value.map((item) => ({
+      title: `${item.name}（${item.noticeCount}）`,
+      value: item.key,
+      subtitle: item.description,
+    }))
+  }
+  return NOTICE_CATEGORY_DEFINITIONS.map((item) => ({
+    title: item.name,
+    value: item.key,
+    subtitle: item.description,
+  }))
+})
+
+async function loadCategories(signal: AbortSignal): Promise<void> {
+  try {
+    const loadedCategories = await fetchCategories(signal)
+    if (signal.aborted) return
+    categoryItems.value = loadedCategories
+  } catch {
+    // 分类接口失败时保留完整的内置分类表，筛选功能仍可使用。
+    categoryItems.value = null
+  }
+}
+
 onMounted(() => {
-  void loadSources()
+  const controller = new AbortController()
+  metadataController = controller
+  void loadSources(controller.signal)
+  void loadCategories(controller.signal)
+})
+
+onBeforeUnmount(() => {
+  metadataController?.abort()
+  metadataController = null
 })
 
 // 搜索历史（带校验的 LocalStorage 存储）
@@ -114,7 +153,11 @@ function removeTag(tag: string) {
 
 function handleSearch() {
   saveSearchHistory(filters.value.keyword)
-  emit('search', { ...filters.value, tags: [...filters.value.tags] })
+  emit('search', {
+    ...filters.value,
+    categories: [...filters.value.categories],
+    tags: [...filters.value.tags],
+  })
 }
 
 function resetFilters() {
@@ -146,6 +189,19 @@ function resetFilters() {
 
         <!-- 来源 -->
         <v-select v-model="filters.source" :items="sources" label="来源" clearable />
+
+        <!-- AI 分类（多选为 OR 语义） -->
+        <v-autocomplete
+          v-model="filters.categories"
+          :items="categories"
+          label="通知分类"
+          hint="可多选，命中任一分类即显示；不选则临时查看全部分类"
+          persistent-hint
+          multiple
+          chips
+          closable-chips
+          clearable
+        />
 
         <!-- 日期范围 -->
         <div class="d-flex ga-4">

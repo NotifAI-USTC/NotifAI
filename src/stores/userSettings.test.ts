@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NoticeItem } from '../types/notice'
 import {
+  ONBOARDING_CATEGORIES_STORAGE_KEY,
   ONBOARDING_CHANNELS_STORAGE_KEY,
   ONBOARDING_FLAG_STORAGE_KEY,
   ONBOARDING_IDENTITY_STORAGE_KEY,
@@ -19,6 +20,7 @@ function createNotice(index: number): NoticeItem {
     id: `notice-${index}`,
     title: `Notice ${index}`,
     source: '教务处',
+    categories: [],
     publishDate: '2026-07-31',
     aiSummary: '',
     deadline: null,
@@ -50,6 +52,7 @@ function createStoredJournal(
     clientId,
     dependencyClock: options.dependencyClock ?? {},
     subscriptions: [],
+    categorySubscriptions: [],
     blacklistKeywords: [],
     starredIds: [],
     readIds: [],
@@ -121,6 +124,8 @@ describe('user settings store', () => {
     store = useUserSettingsStore()
 
     expect(store.subscriptionMode).toBe('custom')
+    expect(store.categoryMode).toBe('all')
+    expect(store.subscribedCategories).toEqual([])
     expect(store.subscribedDepts).toEqual(['计算机学院'])
     expect(store.starredIds).toEqual(['notice-1', 'constructor'])
     expect(store.starredFolderMap['notice-1']).toBe('default')
@@ -143,6 +148,28 @@ describe('user settings store', () => {
     expect(store.starredIds).toEqual([])
     expect(store.folders[0]?.id).toBe('default')
     expect(store.persistenceError).toContain('已使用默认值')
+  })
+
+  it('migrates schema v2 settings to all categories by default', () => {
+    window.localStorage.setItem(
+      USER_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        schemaVersion: 2,
+        subscriptionMode: 'custom',
+        subscribedDepts: ['教务处'],
+      }),
+    )
+
+    store = useUserSettingsStore()
+    expect(store.categoryMode).toBe('all')
+    expect(store.subscribedCategories).toEqual([])
+    expect(store.isCategorySubscribed('exam')).toBe(true)
+    expect(store.persistImmediate()).toBe(true)
+
+    const persisted = JSON.parse(window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY) ?? '{}')
+    expect(persisted.schemaVersion).toBe(USER_SETTINGS_SCHEMA_VERSION)
+    expect(persisted.categoryMode).toBe('all')
+    expect(persisted.subscribedCategories).toEqual([])
   })
 
   it('keeps settings from a future schema read-only without rewriting them', () => {
@@ -191,6 +218,8 @@ describe('user settings store', () => {
       schemaVersion: USER_SETTINGS_SCHEMA_VERSION,
       subscriptionMode: 'custom',
       subscribedDepts: ['教务处'],
+      categoryMode: 'custom',
+      subscribedCategories: ['exam', 'research'],
       blacklistKeywords: [],
       starredIds: ['notice-2'],
       starredFolderMap: { 'notice-2': 'default' },
@@ -213,6 +242,8 @@ describe('user settings store', () => {
     expect(store.darkMode).toBe('dark')
     expect(store.starredIds).toEqual(['notice-2'])
     expect(store.readIds).toEqual(['notice-2'])
+    expect(store.categoryMode).toBe('custom')
+    expect(store.subscribedCategories).toEqual(['exam', 'research'])
 
     window.dispatchEvent(
       new StorageEvent('storage', {
@@ -972,8 +1003,10 @@ describe('user settings store', () => {
 
     try {
       firstStore.toggleDepartment('教务处')
+      firstStore.toggleCategory('exam')
       expect(firstStore.persistImmediate()).toBe(true)
       secondStore.toggleDepartment('本科生院')
+      secondStore.toggleCategory('research')
       expect(secondStore.persistImmediate()).toBe(true)
 
       storageListeners[0]?.(
@@ -993,9 +1026,15 @@ describe('user settings store', () => {
       expect(firstStore.isSubscribed('本科生院')).toBe(false)
       expect(secondStore.isSubscribed('教务处')).toBe(false)
       expect(secondStore.isSubscribed('本科生院')).toBe(false)
+      expect(firstStore.isCategorySubscribed('exam')).toBe(false)
+      expect(firstStore.isCategorySubscribed('research')).toBe(false)
+      expect(secondStore.isCategorySubscribed('exam')).toBe(false)
+      expect(secondStore.isCategorySubscribed('research')).toBe(false)
       const persisted = JSON.parse(window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY) ?? '{}')
       expect(persisted.subscribedDepts).not.toContain('教务处')
       expect(persisted.subscribedDepts).not.toContain('本科生院')
+      expect(persisted.subscribedCategories).not.toContain('exam')
+      expect(persisted.subscribedCategories).not.toContain('research')
     } finally {
       firstStore.$dispose()
       secondStore.$dispose()
@@ -1199,6 +1238,28 @@ describe('user settings store', () => {
     expect(store.starredFolderMap['notice-3']).toBe('default')
   })
 
+  it('persists category subscriptions and restores the all-categories mode', () => {
+    store = useUserSettingsStore()
+    store.toggleCategory('exam')
+
+    expect(store.categoryMode).toBe('custom')
+    expect(store.isCategorySubscribed('exam')).toBe(false)
+    expect(store.subscribedCategories).toHaveLength(16)
+    expect(store.persistImmediate()).toBe(true)
+
+    store.$dispose()
+    store = null
+    setActivePinia(createPinia())
+    store = useUserSettingsStore()
+    expect(store.categoryMode).toBe('custom')
+    expect(store.isCategorySubscribed('exam')).toBe(false)
+
+    store.subscribeAllCategories()
+    expect(store.categoryMode).toBe('all')
+    expect(store.subscribedCategories).toEqual([])
+    expect(store.isCategorySubscribed('exam')).toBe(true)
+  })
+
   it('accepts and persists sources discovered from the backend', () => {
     store = useUserSettingsStore()
     store.registerSources(['新成立研究院'])
@@ -1229,6 +1290,7 @@ describe('user settings store', () => {
     store.completeOnboarding({
       identity: 'freshman',
       channels: ['教务处', '迎新特辑'],
+      categories: ['course_selection', 'exam'],
       keywords: ['考研', '考研'],
     })
 
@@ -1237,11 +1299,15 @@ describe('user settings store', () => {
     expect(store.subscribedChannels).toEqual(['教务处', '迎新特辑'])
     expect(store.blackKeywords).toEqual(['考研'])
     expect(store.subscriptionMode).toBe('custom')
+    expect(store.categoryMode).toBe('custom')
+    expect(store.subscribedCategories).toEqual(['course_selection', 'exam'])
     expect(
       JSON.parse(window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY) ?? '{}'),
     ).toMatchObject({
       subscriptionMode: 'custom',
       subscribedDepts: ['教务处', '迎新特辑'],
+      categoryMode: 'custom',
+      subscribedCategories: ['course_selection', 'exam'],
       blacklistKeywords: ['考研'],
     })
     expect(window.localStorage.getItem(ONBOARDING_FLAG_STORAGE_KEY)).toBe('true')
@@ -1249,6 +1315,9 @@ describe('user settings store', () => {
     expect(
       JSON.parse(window.localStorage.getItem(ONBOARDING_CHANNELS_STORAGE_KEY) ?? '[]'),
     ).toEqual(['教务处', '迎新特辑'])
+    expect(
+      JSON.parse(window.localStorage.getItem(ONBOARDING_CATEGORIES_STORAGE_KEY) ?? '[]'),
+    ).toEqual(['course_selection', 'exam'])
     expect(
       JSON.parse(window.localStorage.getItem(ONBOARDING_KEYWORDS_STORAGE_KEY) ?? '[]'),
     ).toEqual(['考研'])
@@ -1258,10 +1327,13 @@ describe('user settings store', () => {
     expect(store.userIdentity).toBe('freshman')
     expect(store.subscriptionMode).toBe('all')
     expect(store.subscribedDepts).toEqual([])
+    expect(store.categoryMode).toBe('all')
+    expect(store.subscribedCategories).toEqual([])
     expect(store.blacklistKeywords).toEqual([])
     expect(window.localStorage.getItem(ONBOARDING_FLAG_STORAGE_KEY)).toBeNull()
     expect(window.localStorage.getItem(ONBOARDING_IDENTITY_STORAGE_KEY)).toBeNull()
     expect(window.localStorage.getItem(ONBOARDING_CHANNELS_STORAGE_KEY)).toBeNull()
+    expect(window.localStorage.getItem(ONBOARDING_CATEGORIES_STORAGE_KEY)).toBeNull()
     expect(window.localStorage.getItem(ONBOARDING_KEYWORDS_STORAGE_KEY)).toBeNull()
   })
 
@@ -1412,6 +1484,7 @@ describe('settings export / import and read history', () => {
     store.toggleStar('notice-1')
     store.addKeyword('考研')
     store.addCustomTag('notice-1', '重要')
+    store.toggleCategory('exam')
 
     const exported = store.exportSettings()
     const parsed = JSON.parse(exported)
@@ -1419,6 +1492,8 @@ describe('settings export / import and read history', () => {
     expect(parsed.starredIds).toContain('notice-1')
     expect(parsed.blacklistKeywords).toContain('考研')
     expect(parsed.customTags['notice-1']).toContain('重要')
+    expect(parsed.categoryMode).toBe('custom')
+    expect(parsed.subscribedCategories).not.toContain('exam')
 
     // 导入到全新 store，验证恢复
     store?.$dispose()
@@ -1428,6 +1503,8 @@ describe('settings export / import and read history', () => {
     expect(store.isStarred('notice-1')).toBe(true)
     expect(store.blacklistKeywords).toContain('考研')
     expect(store.customTags['notice-1']).toContain('重要')
+    expect(store.categoryMode).toBe('custom')
+    expect(store.isCategorySubscribed('exam')).toBe(false)
     const persisted = JSON.parse(window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY) ?? '{}')
     expect(persisted.starredIds).toContain('notice-1')
   })

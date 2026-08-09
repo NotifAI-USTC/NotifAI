@@ -13,6 +13,7 @@ function validNotice() {
     id: 'notice-001',
     title: '选课通知',
     source: '教务处',
+    categories: ['course_selection'] as const,
     publishDate: '2026-07-31',
     aiSummary: '请按时完成选课。',
     deadline: '2026-08-05',
@@ -84,6 +85,20 @@ it('rejects impossible dates and oversized strings or arrays', () => {
   oversizedSummary.aiSummary = 'x'.repeat(20_000)
   const parsed = parseNoticeListResponse({ items: [oversizedSummary], total: 1 })
   assert.equal(parsed.items[0].aiSummary.length, 10_000)
+})
+
+it('validates notice category keys, limits, and duplicates', () => {
+  const unknownCategory = { ...validNotice(), categories: ['not-a-category'] }
+  assert.throws(() => parseNoticeItem(unknownCategory), DataValidationError)
+
+  const duplicateCategory = { ...validNotice(), categories: ['exam', 'exam'] }
+  assert.throws(() => parseNoticeItem(duplicateCategory), DataValidationError)
+
+  const tooManyCategories = {
+    ...validNotice(),
+    categories: ['exam', 'course_info', 'admin', 'other'],
+  }
+  assert.throws(() => parseNoticeItem(tooManyCategories), DataValidationError)
 })
 
 it('rejects malformed list metadata, oversized result sets, and duplicate IDs', () => {

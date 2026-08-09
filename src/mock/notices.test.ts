@@ -4,6 +4,7 @@ import { calculateRemainingDays, getIsoWeek, getLocalToday } from '../utils/date
 import { parseNoticeItem } from '../utils/validation'
 import {
   mockFetchCalendarNotices,
+  mockFetchCategories,
   mockFetchNotices,
   mockFetchNoticesByIds,
   mockFetchSources,
@@ -102,8 +103,21 @@ describe('mock notice API', () => {
     expect(response.items.every((notice) => notice.source === target.source)).toBe(true)
     expect(response.items.every((notice) => notice.publishDate === target.publishDate)).toBe(true)
   })
-})
 
+  it('filters by multiple categories with OR semantics', () => {
+    const response = mockFetchNotices({
+      categories: ['exam', 'graduation'],
+      pageSize: 1_000,
+    })
+
+    expect(response.items.length).toBeGreaterThan(0)
+    expect(
+      response.items.every((notice) =>
+        notice.categories.some((category) => ['exam', 'graduation'].includes(category)),
+      ),
+    ).toBe(true)
+  })
+})
 
 describe('mock new endpoints', () => {
   it('batch returns matching items (newest first) and reports missing ids', () => {
@@ -113,9 +127,10 @@ describe('mock new endpoints', () => {
     expect(result.items.map((notice) => notice.id)).toEqual(
       [...ids].sort(
         (a, b) =>
-          mockNotices.find((n) => n.id === b)!.publishDate.localeCompare(
-            mockNotices.find((n) => n.id === a)!.publishDate,
-          ) || a.localeCompare(b),
+          mockNotices
+            .find((n) => n.id === b)!
+            .publishDate.localeCompare(mockNotices.find((n) => n.id === a)!.publishDate) ||
+          a.localeCompare(b),
       ),
     )
     expect(result.missing).toEqual(['does-not-exist'])
@@ -158,6 +173,16 @@ describe('mock new endpoints', () => {
       new Set(mockNotices.map((notice) => notice.source)),
     )
     expect(sources.every((source) => source.noticeCount > 0)).toBe(true)
+  })
+
+  it('categories returns all predefined categories with matching counts', () => {
+    const categories = mockFetchCategories()
+    expect(categories).toHaveLength(17)
+    for (const category of categories) {
+      expect(category.noticeCount).toBe(
+        mockNotices.filter((notice) => notice.categories.includes(category.key)).length,
+      )
+    }
   })
 
   it('stats match the mock dataset', () => {

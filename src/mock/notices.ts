@@ -1,5 +1,10 @@
-import { DEPARTMENTS } from '../types/notice'
-import type { NoticeItem, NoticeListResponse } from '../types/notice'
+import { DEPARTMENTS, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
+import type {
+  NoticeCategoryItem,
+  NoticeCategoryKey,
+  NoticeItem,
+  NoticeListResponse,
+} from '../types/notice'
 import { getLocalToday } from '../utils/date'
 
 // 获取今天和未来几天的日期
@@ -23,8 +28,38 @@ function formatLocalDate(date: Date): string {
   return `${year}-${month}-${day}`
 }
 
+const MOCK_CATEGORY_RULES: ReadonlyArray<{
+  key: NoticeCategoryKey
+  pattern: RegExp
+}> = [
+  { key: 'course_selection', pattern: /选课|退课|补选|重修/ },
+  { key: 'exam', pattern: /考试|考场|成绩复核|四六级/ },
+  { key: 'scholarship', pattern: /奖学金|助学金|资助|绿色通道/ },
+  { key: 'academic_lecture', pattern: /讲座|论坛|学术沙龙|名家讲堂/ },
+  { key: 'campus_event', pattern: /活动|工作坊|团体辅导|主题月/ },
+  { key: 'enrollment', pattern: /新生|招生|报到|迎新/ },
+  { key: 'course_info', pattern: /教材|课程表|教学安排|调课|停课/ },
+  { key: 'graduation', pattern: /毕业|论文|答辩|学位|离校/ },
+  { key: 'internship_job', pattern: /招聘|就业|实习|宣讲会/ },
+  { key: 'library', pattern: /图书馆|图书|借阅/ },
+  { key: 'research', pattern: /科研|实验室|基金|项目申报/ },
+  { key: 'competition', pattern: /竞赛|挑战杯|校赛|选拔赛/ },
+  { key: 'abroad', pattern: /海外|国际交流|交换学习|留学/ },
+  { key: 'party', pattern: /党建|团委|团学|思政/ },
+  { key: 'logistics', pattern: /食堂|宿舍|浴室|充电桩|供水|体检|后勤/ },
+  { key: 'admin', pattern: /通知|公示|安排/ },
+]
+
+function inferMockCategories(notice: Omit<NoticeItem, 'categories'>): NoticeCategoryKey[] {
+  const text = `${notice.title} ${notice.source} ${notice.aiSummary}`
+  const categories = MOCK_CATEGORY_RULES.filter(({ pattern }) => pattern.test(text))
+    .map(({ key }) => key)
+    .slice(0, 3)
+  return categories.length > 0 ? categories : ['other']
+}
+
 /** 模拟通知数据 */
-export const mockNotices: NoticeItem[] = [
+const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   // ===== 教务通知 =====
   {
     id: 'edu-001',
@@ -998,11 +1033,17 @@ export const mockNotices: NoticeItem[] = [
   },
 ]
 
+export const mockNotices: NoticeItem[] = mockNoticeFixtures.map((notice) => ({
+  ...notice,
+  categories: inferMockCategories(notice),
+}))
+
 /** 模拟获取通知列表的 API */
 export function mockFetchNotices(params: {
   keyword?: string
   source?: string
   sources?: string[]
+  categories?: NoticeCategoryKey[]
   dateFrom?: string
   dateTo?: string
   rangeFrom?: string
@@ -1016,6 +1057,7 @@ export function mockFetchNotices(params: {
     keyword,
     source,
     sources,
+    categories,
     dateFrom,
     dateTo,
     rangeFrom,
@@ -1042,6 +1084,11 @@ export function mockFetchNotices(params: {
   }
   if (source) filtered = filtered.filter((notice) => notice.source === source)
   if (sources) filtered = filtered.filter((notice) => sources.includes(notice.source))
+  if (categories?.length) {
+    filtered = filtered.filter((notice) =>
+      notice.categories.some((category) => categories.includes(category)),
+    )
+  }
   if (dateFrom) filtered = filtered.filter((notice) => notice.publishDate >= dateFrom)
   if (dateTo) filtered = filtered.filter((notice) => notice.publishDate <= dateTo)
   if (rangeFrom || rangeTo) {
@@ -1108,10 +1155,15 @@ function isoWeekStart(year: number, week: number): Date | null {
 }
 
 /** 模拟获取日历轻量视图（GET /notices/calendar） */
-export function mockFetchCalendarNotices(params: {
-  month?: string
-  week?: string
-}): { items: Array<{ id: string; title: string; source: string; publishDate: string; deadline: string | null }> } {
+export function mockFetchCalendarNotices(params: { month?: string; week?: string }): {
+  items: Array<{
+    id: string
+    title: string
+    source: string
+    publishDate: string
+    deadline: string | null
+  }>
+} {
   let start: Date
   let end: Date
 
@@ -1167,6 +1219,16 @@ export function mockFetchSources(): Array<{ name: string; group: string; noticeC
     return { name, group: dept?.group ?? '其他', noticeCount }
   })
   return sources.sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+}
+
+/** 模拟获取分类列表（GET /categories） */
+export function mockFetchCategories(): NoticeCategoryItem[] {
+  return NOTICE_CATEGORY_DEFINITIONS.map(({ key, name, description }) => ({
+    key,
+    name,
+    description,
+    noticeCount: mockNotices.filter((notice) => notice.categories.includes(key)).length,
+  }))
 }
 
 /** 模拟获取聚合统计（GET /stats） */

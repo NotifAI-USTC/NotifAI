@@ -72,9 +72,12 @@ describe('OnboardingModal', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('学生事务中心')
     await findButton(wrapper, '本科生关注教务、本科生院等本科培养信息').trigger('click')
+    expect(wrapper.text()).toContain('该身份预设自动关注的通知分类')
+    expect(wrapper.text()).toContain('选课通知')
     await findButton(wrapper, '下一步：选择二级学院').trigger('click')
     await flushPromises()
     await findButton(wrapper, '下一步：AI 过滤设置').trigger('click')
+    await flushPromises()
     await findButton(wrapper, '开启我的智能看板').trigger('click')
     await flushPromises()
 
@@ -82,6 +85,14 @@ describe('OnboardingModal', () => {
     expect(store.hasOnboarded).toBe(true)
     expect(store.userIdentity).toBe('undergraduate')
     expect(store.subscribedChannels).toEqual(['教务处'])
+    expect(store.subscribedCategories).toEqual([
+      'course_selection',
+      'exam',
+      'scholarship',
+      'internship_job',
+      'competition',
+      'abroad',
+    ])
   })
 
   it('loads secondary schools from the API and supports multiple selections', async () => {
@@ -108,14 +119,18 @@ describe('OnboardingModal', () => {
     const wrapper = mountModal()
 
     await findButton(wrapper, '开始个性化配置').trigger('click')
-    await findButton(wrapper, '新生').trigger('click')
+    await findButton(wrapper, '全部').trigger('click')
     await findButton(wrapper, '下一步：选择二级学院').trigger('click')
     await flushPromises()
     await findButton(wrapper, '下一步：AI 过滤设置').trigger('click')
+    await flushPromises()
     await findButton(wrapper, '开启我的智能看板').trigger('click')
     await flushPromises()
 
     const store = useUserSettingsStore()
-    expect(store.subscribedChannels).toEqual(['教务处'])
+    expect(store.subscriptionMode).toBe('all')
+    expect(store.subscribedChannels).toEqual([])
+    expect(store.categoryMode).toBe('all')
+    expect(store.subscribedCategories).toEqual([])
   })
 })

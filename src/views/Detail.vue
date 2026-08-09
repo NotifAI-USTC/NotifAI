@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
 import { ApiConfigurationError, fetchNoticeById } from '../utils/request'
+import { getNoticeCategoryName } from '../types/notice'
 import type { NoticeItem } from '../types/notice'
 import ShareDialog from '../components/ShareDialog.vue'
 import ImagePreview from '../components/ImagePreview.vue'
@@ -206,6 +207,24 @@ function handleContentKeydown(event: KeyboardEvent): void {
             </template>
           </v-alert>
 
+          <v-card class="mb-6" variant="flat">
+            <v-card-title class="detail-title text-h5 text-wrap">{{ notice.title }}</v-card-title>
+            <v-card-subtitle class="pb-2">
+              {{ notice.source }} · {{ notice.publishDate }}
+            </v-card-subtitle>
+            <v-card-text v-if="notice.categories.length" class="d-flex flex-wrap ga-2 pt-2">
+              <v-chip
+                v-for="category in notice.categories"
+                :key="category"
+                color="secondary"
+                variant="tonal"
+                size="small"
+              >
+                {{ getNoticeCategoryName(category) }}
+              </v-chip>
+            </v-card-text>
+          </v-card>
+
           <!-- AI 智能提炼卡片 -->
           <v-card class="mb-6 ai-card" variant="outlined">
             <v-card-title class="d-flex align-center ga-2">
@@ -330,6 +349,10 @@ function handleContentKeydown(event: KeyboardEvent): void {
 <style scoped>
 .summary-text {
   line-height: 1.8;
+}
+
+.detail-title {
+  line-height: 1.45;
 }
 
 .detail-page {

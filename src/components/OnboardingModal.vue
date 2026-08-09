@@ -4,8 +4,8 @@ import { useUserSettingsStore } from '../stores/userSettings'
 import type { OnboardingIdentity } from '../stores/userSettings'
 import { useWindowSize } from '../composables/useWindowSize'
 import { fetchSources } from '../utils/request'
-import { DEPARTMENTS } from '../types/notice'
-import type { SourceItem } from '../types/notice'
+import { DEPARTMENTS, getNoticeCategoryName } from '../types/notice'
+import type { NoticeCategoryKey, SourceItem } from '../types/notice'
 
 interface ChannelOption {
   name: string
@@ -19,6 +19,7 @@ interface IdentityPreset {
   description: string
   icon: string
   channels: string[]
+  categories: NoticeCategoryKey[]
   selectAll?: boolean
 }
 
@@ -51,6 +52,29 @@ const FALLBACK_SECONDARY_OPTIONS: readonly ChannelOption[] = DEPARTMENTS.filter(
 const FRESHMAN_CHANNELS = ['教务处', '本科生院', '迎新特辑']
 const UNDERGRADUATE_CHANNELS = ['教务处', '本科生院']
 const POSTGRADUATE_CHANNELS = ['科研部']
+const FRESHMAN_CATEGORIES: NoticeCategoryKey[] = [
+  'course_selection',
+  'exam',
+  'scholarship',
+  'course_info',
+  'campus_event',
+  'logistics',
+]
+const UNDERGRADUATE_CATEGORIES: NoticeCategoryKey[] = [
+  'course_selection',
+  'exam',
+  'scholarship',
+  'competition',
+  'abroad',
+  'internship_job',
+]
+const POSTGRADUATE_CATEGORIES: NoticeCategoryKey[] = [
+  'academic_lecture',
+  'research',
+  'graduation',
+  'internship_job',
+  'abroad',
+]
 
 const store = useUserSettingsStore()
 const { isMobile } = useWindowSize()
@@ -62,6 +86,7 @@ const identityPresets: readonly IdentityPreset[] = [
     description: '优先关注教务、本科生院与迎新信息',
     icon: '$school',
     channels: FRESHMAN_CHANNELS,
+    categories: FRESHMAN_CATEGORIES,
   },
   {
     value: 'undergraduate',
@@ -69,6 +94,7 @@ const identityPresets: readonly IdentityPreset[] = [
     description: '关注教务、本科生院等本科培养信息',
     icon: '$domain',
     channels: UNDERGRADUATE_CHANNELS,
+    categories: UNDERGRADUATE_CATEGORIES,
   },
   {
     value: 'postgraduate',
@@ -76,6 +102,7 @@ const identityPresets: readonly IdentityPreset[] = [
     description: '关注科研与研究生相关信息',
     icon: '$flask',
     channels: POSTGRADUATE_CHANNELS,
+    categories: POSTGRADUATE_CATEGORIES,
   },
   {
     value: 'custom',
@@ -83,6 +110,7 @@ const identityPresets: readonly IdentityPreset[] = [
     description: '关注所有来源，之后可自行调整',
     icon: '$accountGroup',
     channels: [],
+    categories: [],
     selectAll: true,
   },
 ]
@@ -92,6 +120,9 @@ const draftIdentity = ref<OnboardingIdentity>(store.userIdentity)
 const draftSelectAll = ref(store.subscriptionMode === 'all')
 const draftChannels = ref<string[]>(
   store.subscribedChannels.length > 0 ? [...store.subscribedChannels] : [...FRESHMAN_CHANNELS],
+)
+const draftCategories = ref<NoticeCategoryKey[]>(
+  store.categoryMode === 'custom' ? [...store.subscribedCategories] : [...FRESHMAN_CATEGORIES],
 )
 const draftKeywords = ref<string[]>([...store.blackKeywords])
 const newKeyword = ref('')
@@ -144,6 +175,10 @@ const selectedSecondaryCount = computed(() => {
   const selected = new Set(draftChannels.value)
   return secondaryOptions.value.filter((channel) => selected.has(channel.name)).length
 })
+const selectedCategorySummary = computed(() => {
+  if (draftCategories.value.length === 0) return '全部分类'
+  return draftCategories.value.map(getNoticeCategoryName).join('、')
+})
 
 function selectedIdentity(value: OnboardingIdentity): boolean {
   return draftIdentity.value === value
@@ -159,6 +194,7 @@ function selectIdentity(preset: IdentityPreset): void {
   draftIdentity.value = preset.value
   draftSelectAll.value = Boolean(preset.selectAll)
   draftChannels.value = resolvePresetChannels(preset.channels)
+  draftCategories.value = [...preset.categories]
 }
 
 function isChannelSelected(channel: string): boolean {
@@ -169,7 +205,6 @@ function toggleChannel(channel: string): void {
   if (draftSelectAll.value) {
     draftSelectAll.value = false
     draftChannels.value = allChannelNames.value.filter((name) => name !== channel)
-    draftIdentity.value = 'custom'
     return
   }
 
@@ -179,7 +214,6 @@ function toggleChannel(channel: string): void {
   } else {
     draftChannels.value.push(channel)
   }
-  draftIdentity.value = 'custom'
 }
 
 async function loadSources(force = false): Promise<void> {
@@ -255,6 +289,7 @@ function complete(): void {
   store.completeOnboarding({
     identity: draftIdentity.value,
     channels: draftSelectAll.value ? [] : [...draftChannels.value],
+    categories: [...draftCategories.value],
     keywords: [...draftKeywords.value],
   })
 }
@@ -354,6 +389,14 @@ onBeforeUnmount(() => {
               <v-icon v-if="selectedIdentity(preset.value)" end>$check</v-icon>
             </v-btn>
           </div>
+
+          <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+            <div class="text-caption text-medium-emphasis">该身份预设自动关注的通知分类</div>
+            <div class="text-body-2 mt-1">{{ selectedCategorySummary }}</div>
+            <div class="text-caption text-medium-emphasis mt-1">
+              完成引导后，可以在个人中心的“订阅与屏蔽”中修改。
+            </div>
+          </v-alert>
 
           <v-alert v-if="sourcesError" type="warning" variant="tonal" class="mb-4" role="status">
             {{ sourcesError }}
@@ -492,7 +535,7 @@ onBeforeUnmount(() => {
         <section v-else aria-labelledby="onboarding-filter-title">
           <h3 id="onboarding-filter-title" class="text-h6 mb-2">设置 AI 过滤关键词</h3>
           <p class="text-body-2 text-medium-emphasis mb-4">
-            添加你暂时不关心的主题，首页会自动减少相关通知。
+            添加你暂时不关心的主题，首页会自动减少相关通知；也可以直接跳过。
           </p>
 
           <v-text-field
@@ -520,7 +563,7 @@ onBeforeUnmount(() => {
             </v-chip>
           </div>
           <v-alert v-else type="info" variant="tonal" density="compact" class="mt-2">
-            不设置也可以，之后可在个人中心的“订阅与屏蔽”中随时修改。
+            不设置关键词也可以，之后可在个人中心的“订阅与屏蔽”中随时修改。
           </v-alert>
         </section>
       </v-card-text>

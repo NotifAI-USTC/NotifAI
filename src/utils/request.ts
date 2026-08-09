@@ -1,6 +1,8 @@
 import axios from 'axios'
 import type {
   CalendarItem,
+  NoticeCategoryItem,
+  NoticeCategoryKey,
   NoticeBatchResponse,
   NoticeItem,
   NoticeListResponse,
@@ -13,12 +15,14 @@ import {
   assertDateOnly,
   assertNoticeId,
   parseCalendarListResponse,
+  parseCategoryListResponse,
   parseNoticeBatchResponse,
   parseNoticeItem,
   parseNoticeListResponse,
   parseSourceListResponse,
   parseStatsResponse,
 } from './validation'
+import { isNoticeCategoryKey } from '../types/notice'
 import { isValidApiBaseUrl } from './apiBaseUrl'
 
 declare module 'axios' {
@@ -103,6 +107,8 @@ export interface FetchNoticesParams {
   keyword?: string
   source?: string
   sources?: string[]
+  /** AI 分类 key；多项为 OR 语义。 */
+  categories?: NoticeCategoryKey[]
   dateFrom?: string
   dateTo?: string
   /** Match notices whose publish date or deadline overlaps this date-only range. */
@@ -182,6 +188,16 @@ export async function fetchNotices(
     }
     params.sources.forEach((item, index) => validateOptionalText(item, `sources[${index}]`, 200))
   }
+  if (params.categories !== undefined) {
+    if (!Array.isArray(params.categories) || params.categories.length > 17) {
+      throw new DataValidationError('categories 必须是至多 17 项的分类 key 数组')
+    }
+    params.categories.forEach((item, index) => {
+      if (!isNoticeCategoryKey(item)) {
+        throw new DataValidationError(`categories[${index}] 不是支持的分类 key`)
+      }
+    })
+  }
   const dateFrom =
     params.dateFrom === undefined ? undefined : assertDateOnly(params.dateFrom, 'dateFrom')
   const dateTo = params.dateTo === undefined ? undefined : assertDateOnly(params.dateTo, 'dateTo')
@@ -204,6 +220,7 @@ export async function fetchNotices(
     keyword,
     source,
     sources: params.sources ? [...new Set(params.sources)] : undefined,
+    categories: params.categories ? [...new Set(params.categories)] : undefined,
     dateFrom,
     dateTo,
     rangeFrom,
@@ -223,6 +240,7 @@ export async function fetchNotices(
   const res = await request.get<unknown>('/notices', {
     maxContentLength: MAX_NOTICE_LIST_RESPONSE_BYTES,
     params: validatedParams,
+    paramsSerializer: { indexes: false },
     signal,
     suppressGlobalError: true,
   })
@@ -250,7 +268,6 @@ export async function fetchNoticeById(id: string, signal?: AbortSignal): Promise
   })
   return parseNoticeItem(res.data)
 }
-
 
 const MAX_BATCH_IDS = 500
 
@@ -328,6 +345,22 @@ export async function fetchSources(signal?: AbortSignal): Promise<SourceItem[]> 
     suppressGlobalError: true,
   })
   return parseSourceListResponse(res.data)
+}
+
+/** 获取 AI 通知分类列表（GET /categories）。 */
+export async function fetchCategories(signal?: AbortSignal): Promise<NoticeCategoryItem[]> {
+  const useMock = shouldUseMock()
+  if (import.meta.env.DEV && useMock) {
+    const { mockFetchCategories } = await import('../mock/notices')
+    await waitForMockDelay(150 + Math.random() * 250, signal)
+    return parseCategoryListResponse(mockFetchCategories())
+  }
+  const res = await request.get<unknown>('/categories', {
+    maxContentLength: MAX_NOTICE_LIST_RESPONSE_BYTES,
+    signal,
+    suppressGlobalError: true,
+  })
+  return parseCategoryListResponse(res.data)
 }
 
 /** 获取聚合统计（GET /stats）。 */

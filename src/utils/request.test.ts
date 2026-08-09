@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type { AxiosResponse } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
 import type { NoticeItem } from '../types/notice'
 
 const snackbar = vi.hoisted(() => ({
@@ -13,6 +14,7 @@ vi.mock('../composables/useSnackbar', () => ({
 
 import request, {
   fetchCalendarNotices,
+  fetchCategories,
   fetchNoticeById,
   fetchNotices,
   fetchNoticesByIds,
@@ -25,6 +27,7 @@ function createNotice(id: string): NoticeItem {
     id,
     title: `Notice ${id}`,
     source: '教务处',
+    categories: [],
 
     publishDate: '2026-08-01',
     aiSummary: '摘要',
@@ -143,7 +146,6 @@ describe('request cancellation', () => {
   })
 })
 
-
 describe('new API endpoints', () => {
   it('fetches notices in batch via POST /notices/batch', async () => {
     const notice = createNotice('notice-1')
@@ -217,11 +219,17 @@ describe('new API endpoints', () => {
     await expect(fetchCalendarNotices({ week: '2026-08' })).rejects.toThrow(/YYYY-W/)
   })
 
-  it('fetches sources and stats', async () => {
+  it('fetches sources, categories, and stats', async () => {
     const get = vi
       .spyOn(request, 'get')
       .mockResolvedValueOnce({
         data: [{ name: '教务处', group: '校级部门', noticeCount: 10 }],
+      } as AxiosResponse<unknown>)
+      .mockResolvedValueOnce({
+        data: NOTICE_CATEGORY_DEFINITIONS.map((category) => ({
+          ...category,
+          noticeCount: category.key === 'exam' ? 17 : 0,
+        })),
       } as AxiosResponse<unknown>)
       .mockResolvedValueOnce({
         data: {
@@ -236,6 +244,11 @@ describe('new API endpoints', () => {
     const sources = await fetchSources()
     expect(sources).toEqual([{ name: '教务处', group: '校级部门', noticeCount: 10 }])
     expect(get).toHaveBeenCalledWith('/sources', expect.anything())
+
+    const categories = await fetchCategories()
+    expect(categories).toHaveLength(17)
+    expect(categories.find((category) => category.key === 'exam')?.noticeCount).toBe(17)
+    expect(get).toHaveBeenCalledWith('/categories', expect.anything())
 
     const stats = await fetchStats()
     expect(stats.total).toBe(73)
@@ -261,5 +274,49 @@ describe('new API endpoints', () => {
     )
 
     await expect(fetchNotices({ since: 'not-a-date' })).rejects.toThrow(/ISO8601/)
+  })
+
+  it('forwards category filters using repeated bracket parameters', async () => {
+    const get = vi.spyOn(request, 'get').mockResolvedValueOnce({
+      data: { items: [], total: 0 },
+    } as AxiosResponse<unknown>)
+
+    await fetchNotices({ categories: ['exam', 'graduation'], pageSize: 20 })
+
+    expect(get).toHaveBeenCalledWith(
+      '/notices',
+      expect.objectContaining({
+        params: expect.objectContaining({ categories: ['exam', 'graduation'] }),
+        paramsSerializer: { indexes: false },
+      }),
+    )
+    const requestConfig = get.mock.calls[0]?.[1]
+    expect(
+      request.getUri({
+        url: '/notices',
+        params: requestConfig?.params,
+        paramsSerializer: requestConfig?.paramsSerializer,
+      }),
+    ).toContain('categories%5B%5D=exam&categories%5B%5D=graduation')
+    await expect(fetchNotices({ categories: ['not-a-category'] as never[] })).rejects.toThrow(
+      /分类 key/,
+    )
+  })
+
+  it('rejects malformed category metadata and notice category payloads', async () => {
+    vi.spyOn(request, 'get')
+      .mockResolvedValueOnce({
+        data: NOTICE_CATEGORY_DEFINITIONS.map((category, index) => ({
+          ...category,
+          key: index === 0 ? 'invalid' : category.key,
+          noticeCount: 0,
+        })),
+      } as AxiosResponse<unknown>)
+      .mockResolvedValueOnce({
+        data: { ...createNotice('notice-1'), categories: ['exam', 'exam'] },
+      } as AxiosResponse<unknown>)
+
+    await expect(fetchCategories()).rejects.toThrow(/分类 key/)
+    await expect(fetchNoticeById('notice-1')).rejects.toThrow(/重复分类/)
   })
 })
