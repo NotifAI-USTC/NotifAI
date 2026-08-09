@@ -1522,6 +1522,77 @@ describe('settings export / import and read history', () => {
     expect(futureResult.ok).toBe(false)
   })
 
+  it('makes imported settings supersede existing recovery journals', () => {
+    const staleClientId = 'stale-import-client'
+    const staleJournalKey = `${USER_SETTINGS_JOURNAL_PREFIX}${staleClientId}:1`
+    window.localStorage.setItem(
+      staleJournalKey,
+      JSON.stringify({
+        ...createStoredJournal(staleClientId, 1),
+        starredIds: [{ item: 'stale-star', present: true, sequence: 1 }],
+      }),
+    )
+    store = useUserSettingsStore()
+    expect(store.starredIds).toContain('stale-star')
+
+    const result = store.importSettings(
+      JSON.stringify({
+        schemaVersion: USER_SETTINGS_SCHEMA_VERSION,
+        starredIds: [],
+      }),
+    )
+
+    expect(result.ok).toBe(true)
+    expect(store.starredIds).toEqual([])
+    expect(window.localStorage.getItem(staleJournalKey)).toBeNull()
+    const persisted = JSON.parse(window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY) ?? '{}')
+    expect(persisted.starredIds).toEqual([])
+    expect(persisted.syncClock[staleClientId]).toBe(1)
+
+    store.$dispose()
+    setActivePinia(createPinia())
+    store = useUserSettingsStore()
+    expect(store.starredIds).toEqual([])
+  })
+
+  it('does not replay an imported-over journal when cleanup fails', () => {
+    const staleClientId = 'undeletable-import-client'
+    const staleJournalKey = `${USER_SETTINGS_JOURNAL_PREFIX}${staleClientId}:1`
+    window.localStorage.setItem(
+      staleJournalKey,
+      JSON.stringify({
+        ...createStoredJournal(staleClientId, 1),
+        pinnedIds: [{ item: 'stale-pin', present: true, sequence: 1 }],
+      }),
+    )
+    store = useUserSettingsStore()
+    expect(store.pinnedIds).toContain('stale-pin')
+
+    const originalRemoveItem = window.localStorage.removeItem.bind(window.localStorage)
+    const removeItem = vi
+      .spyOn(window.localStorage, 'removeItem')
+      .mockImplementation((key: string) => {
+        if (key === staleJournalKey) throw new DOMException('denied', 'SecurityError')
+        originalRemoveItem(key)
+      })
+
+    const result = store.importSettings(
+      JSON.stringify({
+        schemaVersion: USER_SETTINGS_SCHEMA_VERSION,
+        pinnedIds: [],
+      }),
+    )
+    expect(result.ok).toBe(true)
+    expect(store.pinnedIds).toEqual([])
+    expect(window.localStorage.getItem(staleJournalKey)).not.toBeNull()
+
+    removeItem.mockRestore()
+    store.$dispose()
+    setActivePinia(createPinia())
+    store = useUserSettingsStore()
+    expect(store.pinnedIds).toEqual([])
+  })
+
   it('clears read history and survives a reload', () => {
     store = useUserSettingsStore()
     store.markRead('notice-1')

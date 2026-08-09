@@ -9,6 +9,7 @@ import {
   MAX_JOURNAL_BYTES,
   MAX_JOURNAL_RECORDS,
   MAX_NOTICE_CACHE_ITEMS,
+  MAX_SYNC_CLIENTS,
   MAX_STORED_ITEMS,
   MAX_TAGS_PER_NOTICE,
   SETTINGS_WRITE_LOCK_NAME,
@@ -1427,25 +1428,86 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       if (storageReadOnly || typeof window === 'undefined') {
         return { ok: false, message: FUTURE_SCHEMA_ERROR }
       }
-      const settings = parsed.settings
-      window.localStorage.setItem(USER_SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+
+      const stored = readSettingsForWrite()
+      if (stored.readOnly) {
+        enterReadOnly(stored.settings)
+        return { ok: false, message: FUTURE_SCHEMA_ERROR }
+      }
+      const scan = readStoredSettingsJournals()
+      if (scan.future) {
+        enterReadOnly(stored.settings)
+        return { ok: false, message: FUTURE_SCHEMA_ERROR }
+      }
+
+      // 导入是“替换”而不是普通的增量修改。先让新快照确认所有已存在的
+      // 合法日志，再删除这些日志；即使清理失败，旧操作也不会在重载时复活。
+      const settings = cloneStoredSettings(parsed.settings)
+      let acknowledgedClock = mergeSyncClocks(settings.syncClock, currentSyncClock)
+      acknowledgedClock = mergeSyncClocks(acknowledgedClock, stored.settings.syncClock)
+      for (const { journal } of scan.records) {
+        acknowledgedClock = mergeSyncClocks(acknowledgedClock, journal.dependencyClock)
+        acknowledgedClock[journal.clientId] = Math.max(
+          syncSequence(acknowledgedClock, journal.clientId),
+          settingsJournalSequence(journal),
+        )
+      }
+      if (!Object.hasOwn(acknowledgedClock, syncClientId)) {
+        acknowledgedClock[syncClientId] = 0
+      }
+      if (Object.keys(acknowledgedClock).length > MAX_SYNC_CLIENTS) {
+        throw new RangeError('设置同步记录过多，无法安全导入')
+      }
+      const acknowledgedLocalSequence = Math.max(
+        localSequence,
+        syncSequence(acknowledgedClock, syncClientId),
+      )
+      if (acknowledgedLocalSequence >= Number.MAX_SAFE_INTEGER) {
+        throw new RangeError('设置同步序号已达到上限，无法安全导入')
+      }
+      const nextSequence = acknowledgedLocalSequence + 1
+      acknowledgedClock[syncClientId] = nextSequence
+      settings.syncClock = acknowledgedClock
+      settings.syncWriter = syncClientId
+
+      const serialized = JSON.stringify(settings)
+      window.localStorage.setItem(USER_SETTINGS_STORAGE_KEY, serialized)
+      if (window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY) !== serialized) {
+        throw new Error('导入设置写入后校验失败')
+      }
+
+      if (persistTimer) {
+        clearTimeout(persistTimer)
+        persistTimer = null
+      }
       applySettings(settings)
-      // 重置本地同步状态，使导入内容成为新的基线
-      localSequence = syncSequence(settings.syncClock, syncClientId)
+      settings.subscribedDepts.forEach((source) => availableSourceNames.add(source))
+      // 重置本地同步状态，使导入内容成为新的基线。
+      localSequence = nextSequence
       lastSyncedSettings = cloneStoredSettings(settings)
       stableViewSettings = cloneStoredSettings(settings)
-      currentSyncClock = Object.assign(
-        Object.create(null) as Record<string, number>,
-        settings.syncClock,
-      )
-      currentSyncWriter = settings.syncWriter
       localJournal = createSettingsJournal(syncClientId)
       localJournalNeedsWrite = false
       persistedLocalJournalKey = null
       persistedLocalJournalRaw = null
       supersededLocalJournalKeys.clear()
       unflushedBaseline = null
+      pendingCheckpointCandidate = null
       needsMigration = false
+      journalCleanupBlocked = scan.invalid
+      persistenceError.value = scan.invalid
+        ? '设置同步日志损坏，已保留损坏记录并导入新的设置快照'
+        : ''
+
+      for (const record of scan.records) {
+        try {
+          if (window.localStorage.getItem(record.key) === record.raw) {
+            window.localStorage.removeItem(record.key)
+          }
+        } catch {
+          // 新快照已经确认该日志；残留记录不会再次被回放。
+        }
+      }
       return {
         ok: true,
         message: parsed.needsMigration ? '已导入并迁移到当前版本' : '偏好设置已导入',

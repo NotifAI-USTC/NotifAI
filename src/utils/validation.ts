@@ -36,6 +36,16 @@ export class DataValidationError extends Error {
   }
 }
 
+/**
+ * 通知列表通过运行时校验后的结果。
+ *
+ * rawItemCount 是服务端原始 items 数量，包含被跳过的非法条目。它不是后端
+ * API 字段，只用于让分页逻辑仍按服务端偏移量推进。
+ */
+export interface ValidatedNoticeListResponse extends NoticeListResponse {
+  rawItemCount: number
+}
+
 function expectRecord(value: unknown, path: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new DataValidationError(`${path} 必须是对象`)
@@ -231,7 +241,7 @@ export function parseNoticeItem(value: unknown, path = 'notice'): NoticeItem {
  * 对于单条非法记录，默认跳过并记录 console.warn，而不是让整页失败，
  * 这样后端个别脏数据不会阻塞整个通知流。
  */
-export function parseNoticeListResponse(value: unknown): NoticeListResponse {
+export function parseNoticeListResponse(value: unknown): ValidatedNoticeListResponse {
   const record = expectRecord(value, 'response')
 
   if (!Array.isArray(record.items)) {
@@ -264,16 +274,22 @@ export function parseNoticeListResponse(value: unknown): NoticeListResponse {
     items.push(parsed)
   })
 
-  if (typeof record.total !== 'number' || record.total < 0 || record.total > LIMITS.total) {
+  if (
+    typeof record.total !== 'number' ||
+    !Number.isSafeInteger(record.total) ||
+    record.total < 0 ||
+    record.total > LIMITS.total
+  ) {
     throw new DataValidationError('response.total 无效')
   }
-  if (record.total < items.length) {
+  if (record.total < record.items.length) {
     throw new DataValidationError('response.total 小于实际返回的通知数量')
   }
 
   return {
     items,
     total: record.total,
+    rawItemCount: record.items.length,
   }
 }
 

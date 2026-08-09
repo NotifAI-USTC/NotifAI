@@ -224,6 +224,7 @@ describe('view request lifecycle', () => {
     mocks.fetchNotices.mockResolvedValue({
       items: Array.from({ length: 10 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 30,
+      rawItemCount: 10,
     })
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -232,6 +233,22 @@ describe('view request lifecycle', () => {
 
     expect(mocks.fetchNotices).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('通知加载失败')
+  })
+
+  it('uses the raw Home page size when validation skips a malformed notice', async () => {
+    mocks.fetchNotices.mockResolvedValue({
+      items: Array.from({ length: 14 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
+      total: 30,
+      rawItemCount: 15,
+    })
+
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(mocks.fetchNotices).toHaveBeenCalledOnce()
+    expect(wrapper.text()).not.toContain('通知加载失败')
+    expect(wrapper.findAll('.notice-card-stub')).toHaveLength(14)
   })
 
   it('applies persisted category preferences to the Home API request', async () => {
@@ -243,6 +260,7 @@ describe('view request lifecycle', () => {
         makeNotice({ id: `notice-${index + 1}`, categories: ['exam'] }),
       ),
       total: 15,
+      rawItemCount: 15,
     })
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -329,6 +347,7 @@ describe('view request lifecycle', () => {
         makeNotice({ id: `notice-${(params.page ?? 1) * 100 + index}` }),
       ),
       total: 45,
+      rawItemCount: 15,
     }))
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -352,6 +371,7 @@ describe('view request lifecycle', () => {
         }),
       ),
       total: 30,
+      rawItemCount: 15,
     }))
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -374,6 +394,7 @@ describe('view request lifecycle', () => {
           ? Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 15}` }))
           : Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 30,
+      rawItemCount: 15,
     }))
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -429,6 +450,7 @@ describe('view request lifecycle', () => {
     mocks.fetchNotices.mockResolvedValue({
       items: Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 15,
+      rawItemCount: 15,
     })
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -452,6 +474,7 @@ describe('view request lifecycle', () => {
     mocks.fetchNotices.mockResolvedValue({
       items: Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 15,
+      rawItemCount: 15,
     })
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -470,6 +493,7 @@ describe('view request lifecycle', () => {
     mocks.fetchNotices.mockResolvedValue({
       items: Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 15,
+      rawItemCount: 15,
     })
 
     const wrapper = shallowMount(Home, { global: { stubs } })

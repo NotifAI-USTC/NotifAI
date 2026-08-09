@@ -33,6 +33,7 @@ it('accepts a bounded notice response and returns a fresh object', () => {
   assert.notEqual(parsed.items[0], source)
   assert.equal('cleanContent' in parsed.items[0], true)
   assert.equal('attachments' in parsed.items[0], true)
+  assert.equal(parsed.rawItemCount, 1)
 })
 
 it('rejects route traversal and reserved characters in notice IDs', () => {
@@ -102,6 +103,12 @@ it('validates notice category keys, limits, and duplicates', () => {
 })
 
 it('rejects malformed list metadata, oversized result sets, and duplicate IDs', () => {
+  for (const total of [Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+    assert.throws(
+      () => parseNoticeListResponse({ items: [validNotice()], total }),
+      DataValidationError,
+    )
+  }
   assert.throws(
     () => parseNoticeListResponse({ items: [validNotice()], total: 0 }),
     DataValidationError,
@@ -129,4 +136,5 @@ it('skips a single malformed item without failing the whole page', () => {
   const parsed = parseNoticeListResponse({ items: [bad, good], total: 2 })
   assert.equal(parsed.items.length, 1)
   assert.equal(parsed.items[0].id, 'notice-002')
+  assert.equal(parsed.rawItemCount, 2)
 })

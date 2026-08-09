@@ -5,7 +5,6 @@ import type {
   NoticeCategoryKey,
   NoticeBatchResponse,
   NoticeItem,
-  NoticeListResponse,
   SourceItem,
   StatsResponse,
 } from '../types/notice'
@@ -22,6 +21,7 @@ import {
   parseSourceListResponse,
   parseStatsResponse,
 } from './validation'
+import type { ValidatedNoticeListResponse } from './validation'
 import { isNoticeCategoryKey } from '../types/notice'
 import { isValidApiBaseUrl } from './apiBaseUrl'
 
@@ -170,7 +170,7 @@ function waitForMockDelay(delay: number, signal?: AbortSignal): Promise<void> {
 export async function fetchNotices(
   params: FetchNoticesParams = {},
   signal?: AbortSignal,
-): Promise<NoticeListResponse> {
+): Promise<ValidatedNoticeListResponse> {
   const useMock = shouldUseMock()
   const page = params.page ?? 1
   const pageSize = params.pageSize ?? 15

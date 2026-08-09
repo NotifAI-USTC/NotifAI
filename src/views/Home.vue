@@ -259,8 +259,9 @@ async function fetchPage(
 
     const filtered = applyClientFilters(response.items, context)
     const total = response.total
+    const rawItemCount = response.rawItemCount
     const exhausted = isOffsetPageExhausted({
-      itemCount: response.items.length,
+      itemCount: rawItemCount,
       page,
       pageSize: PAGE_SIZE,
       total,
@@ -268,14 +269,14 @@ async function fetchPage(
 
     return {
       items: filtered,
-      rawCount: response.items.length,
+      rawCount: rawItemCount,
       rawIds: response.items.map((notice) => notice.id),
       page,
       finished: exhausted,
       stale: false,
       total,
       inconsistent: isOffsetPageInconsistent({
-        itemCount: response.items.length,
+        itemCount: rawItemCount,
         page,
         pageSize: PAGE_SIZE,
         total,
