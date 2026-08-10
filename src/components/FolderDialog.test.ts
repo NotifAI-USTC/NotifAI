@@ -1,5 +1,6 @@
 import { shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { NoticeItem } from '../types/notice'
 
 const store = vi.hoisted(() => ({
   folders: [] as Array<{ id: string; name: string; icon: string; createdAt: number }>,
@@ -7,6 +8,7 @@ const store = vi.hoisted(() => ({
   persistenceError: '',
   addFolder: vi.fn(),
   getStarredInFolder: vi.fn(() => [] as string[]),
+  isStarred: vi.fn(() => false),
   moveToFolder: vi.fn(),
   renameFolder: vi.fn(),
   removeFolder: vi.fn(),
@@ -20,10 +22,26 @@ vi.mock('../stores/userSettings', () => ({
 import FolderDialog from './FolderDialog.vue'
 
 const containerStub = { template: '<div><slot /><slot name="append" /></div>' }
+const notice: NoticeItem = {
+  id: 'notice-1',
+  title: '测试通知',
+  source: '教务处',
+  categories: ['other'],
+  publishDate: '2026-08-10',
+  aiSummary: '测试摘要',
+  deadline: null,
+  targetAudience: '',
+  coreAction: '',
+  originUrl: 'https://example.com/notice-1',
+  cleanContent: '测试正文',
+  attachments: [],
+}
 
-function mountDialog() {
+function mountDialog(
+  props: { mode: 'select' | 'manage'; notice?: NoticeItem } = { mode: 'manage' },
+) {
   return shallowMount(FolderDialog, {
-    props: { mode: 'manage' },
+    props,
     global: {
       stubs: {
         VDialog: containerStub,
@@ -62,6 +80,7 @@ describe('FolderDialog', () => {
     vi.clearAllMocks()
     store.folders = [{ id: 'default', name: '默认收藏', icon: '$star', createdAt: 0 }]
     store.persistenceError = ''
+    store.isStarred.mockReturnValue(false)
   })
 
   it('shows the folder limit and disables creation at capacity', () => {
@@ -93,5 +112,17 @@ describe('FolderDialog', () => {
     expect(store.addFolder).toHaveBeenCalledWith('课程', '$folder')
     expect(wrapper.get('[role="alert"]').text()).toContain('本机设置为只读')
     expect(wrapper.find('input[aria-label="收藏夹名称"]').exists()).toBe(true)
+  })
+
+  it('offers removal when managing an already starred notice', async () => {
+    store.isStarred.mockReturnValue(true)
+    const wrapper = mountDialog({ mode: 'select', notice })
+    const removeButton = wrapper.findAll('button').find((button) => button.text() === '取消收藏')
+
+    expect(removeButton).toBeDefined()
+    await removeButton?.trigger('click')
+
+    expect(wrapper.emitted('remove')).toHaveLength(1)
+    expect(wrapper.emitted('close')).toHaveLength(1)
   })
 })

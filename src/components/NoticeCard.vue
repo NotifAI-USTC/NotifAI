@@ -5,7 +5,7 @@ import { getNoticeCategoryName } from '../types/notice'
 import type { NoticeItem } from '../types/notice'
 import { isUrgent, formatRemaining } from '../utils/date'
 import { hapticStar, hapticRead, hapticMedium } from '../utils/haptics'
-import { recommendTags, getTagColor } from '../utils/tags'
+import { getTagColor } from '../utils/tags'
 import ShareDialog from './ShareDialog.vue'
 import FolderDialog from './FolderDialog.vue'
 
@@ -27,15 +27,13 @@ const remainingText = computed(() => formatRemaining(props.notice.deadline))
 
 const showShare = ref(false)
 const showFolder = ref(false)
-const showTagMenu = ref(false)
-const newTag = ref('')
 
 const isPinned = computed(() => store.isPinned(props.notice.id))
 const isImportant = computed(() => store.isImportant(props.notice.id))
+const isStarred = computed(() => store.isStarred(props.notice.id))
 const noticeTags = computed(() =>
   Object.hasOwn(store.customTags, props.notice.id) ? store.customTags[props.notice.id] : [],
 )
-const recommendedTags = computed(() => recommendTags(props.notice))
 
 const cardClasses = computed(() => ({
   'notice-card': true,
@@ -53,7 +51,11 @@ function handleRead() {
   emit('read', props.notice.id)
 }
 
-function handleStar() {
+function handleFolderSelected() {
+  hapticStar()
+}
+
+function handleRemoveFavorite() {
   hapticStar()
   emit('star', props.notice.id)
 }
@@ -68,19 +70,8 @@ function handleImportant() {
   store.toggleImportant(props.notice.id)
 }
 
-function addTag(tag: string) {
-  store.addCustomTag(props.notice.id, tag)
-}
-
 function removeTag(tag: string) {
   store.removeCustomTag(props.notice.id, tag)
-}
-
-function addCustomTag() {
-  if (newTag.value.trim()) {
-    addTag(newTag.value.trim())
-    newTag.value = ''
-  }
 }
 </script>
 
@@ -200,34 +191,14 @@ function addCustomTag() {
         icon
         size="small"
         variant="text"
-        :color="store.isStarred(notice.id) ? 'amber' : 'default'"
-        :aria-label="store.isStarred(notice.id) ? '取消收藏通知' : '收藏通知'"
-        @click.stop="handleStar"
-      >
-        <v-icon>{{ store.isStarred(notice.id) ? '$star' : '$starOutline' }}</v-icon>
-        <v-tooltip activator="parent" location="top">
-          {{ store.isStarred(notice.id) ? '取消收藏' : '收藏' }}
-        </v-tooltip>
-      </v-btn>
-      <v-btn
-        icon
-        size="small"
-        variant="text"
-        aria-label="选择收藏夹"
+        :color="isStarred ? 'amber' : 'default'"
+        :aria-label="isStarred ? '管理通知收藏' : '收藏通知'"
         @click.stop="showFolder = true"
       >
-        <v-icon>$folderStarOutline</v-icon>
-        <v-tooltip activator="parent" location="top">选择收藏夹</v-tooltip>
-      </v-btn>
-      <v-btn
-        icon
-        size="small"
-        variant="text"
-        aria-label="为通知添加标签"
-        @click.stop="showTagMenu = true"
-      >
-        <v-icon>$tagPlus</v-icon>
-        <v-tooltip activator="parent" location="top">添加标签</v-tooltip>
+        <v-icon>{{ isStarred ? '$star' : '$starOutline' }}</v-icon>
+        <v-tooltip activator="parent" location="top">
+          {{ isStarred ? '管理收藏' : '收藏' }}
+        </v-tooltip>
       </v-btn>
       <v-btn icon size="small" variant="text" aria-label="分享通知" @click.stop="showShare = true">
         <v-icon>$shareVariant</v-icon>
@@ -240,67 +211,14 @@ function addCustomTag() {
   <ShareDialog v-if="showShare" :notice="notice" @close="showShare = false" />
 
   <!-- 收藏夹对话框 -->
-  <FolderDialog v-if="showFolder" :notice="notice" mode="select" @close="showFolder = false" />
-
-  <!-- 标签菜单 -->
-  <v-dialog v-model="showTagMenu" max-width="400">
-    <v-card>
-      <v-card-title>添加标签</v-card-title>
-      <v-divider />
-      <v-card-text>
-        <!-- 推荐标签 -->
-        <div v-if="recommendedTags.length > 0" class="mb-4">
-          <div class="text-caption text-medium-emphasis mb-2">推荐标签</div>
-          <div class="d-flex flex-wrap ga-2">
-            <v-chip
-              v-for="tag in recommendedTags"
-              :key="tag"
-              size="small"
-              :color="getTagColor(tag)"
-              variant="outlined"
-              @click="addTag(tag)"
-            >
-              <v-icon start size="small">$plus</v-icon>
-              {{ tag }}
-            </v-chip>
-          </div>
-        </div>
-
-        <!-- 自定义标签输入 -->
-        <div class="d-flex ga-2">
-          <v-text-field
-            v-model="newTag"
-            label="自定义标签"
-            density="compact"
-            hide-details
-            @keyup.enter="addCustomTag"
-          />
-          <v-btn color="primary" @click="addCustomTag">添加</v-btn>
-        </div>
-
-        <!-- 已添加标签 -->
-        <div v-if="noticeTags.length > 0" class="mt-4">
-          <div class="text-caption text-medium-emphasis mb-2">已添加标签</div>
-          <div class="d-flex flex-wrap ga-2">
-            <v-chip
-              v-for="tag in noticeTags"
-              :key="tag"
-              size="small"
-              :color="getTagColor(tag)"
-              closable
-              @click:close="removeTag(tag)"
-            >
-              {{ tag }}
-            </v-chip>
-          </div>
-        </div>
-      </v-card-text>
-      <v-card-actions>
-        <v-spacer />
-        <v-btn @click="showTagMenu = false">关闭</v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
+  <FolderDialog
+    v-if="showFolder"
+    :notice="notice"
+    mode="select"
+    @select="handleFolderSelected"
+    @remove="handleRemoveFavorite"
+    @close="showFolder = false"
+  />
 </template>
 
 <style scoped>
