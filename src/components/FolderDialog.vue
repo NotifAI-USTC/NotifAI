@@ -11,6 +11,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   select: [folderId: string]
+  remove: []
 }>()
 
 const store = useUserSettingsStore()
@@ -29,12 +30,22 @@ const currentFolder = computed(() => {
   return 'default'
 })
 
+const isNoticeStarred = computed(
+  () => props.notice !== undefined && store.isStarred(props.notice.id),
+)
+
 function selectFolder(folderId: string) {
   if (props.mode === 'select' && props.notice) {
     store.moveToFolder(props.notice.id, folderId)
     emit('select', folderId)
     emit('close')
   }
+}
+
+function removeFavorite() {
+  if (props.mode !== 'select' || !isNoticeStarred.value) return
+  emit('close')
+  emit('remove')
 }
 
 function createFolder() {
@@ -172,9 +183,18 @@ function deleteFolder(folderId: string) {
         </div>
       </v-card-text>
 
-      <v-card-actions v-if="mode === 'manage'">
+      <v-card-actions v-if="mode === 'manage' || isNoticeStarred">
+        <v-btn
+          v-if="mode === 'select' && isNoticeStarred"
+          color="error"
+          variant="text"
+          prepend-icon="$starOutline"
+          @click="removeFavorite"
+        >
+          取消收藏
+        </v-btn>
         <span
-          v-if="store.folders.length >= USER_FOLDER_LIMIT"
+          v-if="mode === 'manage' && store.folders.length >= USER_FOLDER_LIMIT"
           class="text-caption text-error px-2"
           role="status"
         >
@@ -182,6 +202,7 @@ function deleteFolder(folderId: string) {
         </span>
         <v-spacer />
         <v-btn
+          v-if="mode === 'manage'"
           prepend-icon="$plus"
           :disabled="store.folders.length >= USER_FOLDER_LIMIT"
           @click="openNewFolder"

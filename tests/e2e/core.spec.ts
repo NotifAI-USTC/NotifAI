@@ -41,7 +41,9 @@ test('persists a favorite and supports calendar and theme workflows', async ({ p
   expect(noticeLabel).toBeTruthy()
 
   await firstCard.getByRole('button', { name: '收藏通知' }).click()
-  await expect(firstCard.getByRole('button', { name: '取消收藏通知' })).toBeVisible()
+  await expect(page.getByText('选择收藏夹', { exact: true })).toBeVisible()
+  await page.getByText('默认收藏', { exact: true }).click()
+  await expect(firstCard.getByRole('button', { name: '管理通知收藏' })).toBeVisible()
 
   await page.reload()
   const persistedNotice = page.getByRole('link', { name: noticeLabel ?? '' })
@@ -49,7 +51,7 @@ test('persists a favorite and supports calendar and theme workflows', async ({ p
   const persistedCard = persistedNotice.locator(
     'xpath=ancestor::*[contains(@class, "notice-card")][1]',
   )
-  await expect(persistedCard.getByRole('button', { name: '取消收藏通知' })).toBeVisible()
+  await expect(persistedCard.getByRole('button', { name: '管理通知收藏' })).toBeVisible()
 
   await page.goto('/#/user')
   await expect(page.locator('.v-app-bar-title', { hasText: '个人中心' })).toBeVisible()
