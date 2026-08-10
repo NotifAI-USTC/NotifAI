@@ -390,7 +390,7 @@ onBeforeUnmount(() => {
             </v-btn>
           </div>
 
-          <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+          <v-alert type="info" variant="tonal" density="compact" class="mt-4 mb-4">
             <div class="text-caption text-medium-emphasis">该身份预设自动关注的通知分类</div>
             <div class="text-body-2 mt-1">{{ selectedCategorySummary }}</div>
             <div class="text-caption text-medium-emphasis mt-1">
@@ -431,7 +431,7 @@ onBeforeUnmount(() => {
 
             <div
               v-if="schoolOptions.length > 0"
-              class="d-flex flex-wrap ga-2 mb-3"
+              class="d-flex flex-wrap ga-2 mb-3 channel-chips"
               role="group"
               aria-label="校级部门订阅"
             >
@@ -501,7 +501,7 @@ onBeforeUnmount(() => {
 
             <div
               v-if="secondaryOptions.length > 0"
-              class="d-flex flex-wrap ga-2"
+              class="d-flex flex-wrap ga-2 channel-chips"
               role="group"
               aria-label="二级学院订阅"
             >
@@ -646,6 +646,14 @@ onBeforeUnmount(() => {
   justify-content: flex-start;
   min-height: 72px;
   padding: 10px 12px;
+  white-space: normal;
+  height: auto;
+  text-align: left;
+}
+
+.identity-option :deep(.v-btn__content) {
+  white-space: normal;
+  overflow: visible;
 }
 
 .identity-option small {
@@ -653,6 +661,12 @@ onBeforeUnmount(() => {
   color: rgb(var(--v-theme-on-surface-variant));
   font-weight: 400;
   line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.channel-chips :deep(.v-chip--variant-tonal) {
+  border: thin solid transparent;
 }
 
 .onboarding-actions {
