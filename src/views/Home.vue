@@ -17,7 +17,6 @@ import SkeletonLoader from '../components/SkeletonLoader.vue'
 import AdvancedSearch from '../components/AdvancedSearch.vue'
 import type { SearchFilters, TriStateFilter } from '../components/AdvancedSearch.vue'
 import { useWindowSize } from '../composables/useWindowSize'
-import { isOffsetPageExhausted, isOffsetPageInconsistent } from '../utils/pagination'
 import { calculateRemainingDays } from '../utils/date'
 import { readNoticeFeedCache, writeNoticeFeedCache } from '../utils/noticeFeedCache'
 
@@ -46,6 +45,7 @@ interface FetchBatchResult {
   rawCount: number
   rawIds: string[]
   nextPage: number
+  nextCursor: string | null
   finished: boolean
   scanPaused: boolean
   stale: boolean
@@ -59,6 +59,7 @@ interface FetchPageResult {
   rawCount: number
   rawIds: string[]
   page: number
+  nextCursor: string | null
   finished: boolean
   stale: boolean
   total: number
@@ -79,6 +80,7 @@ const scanPaused = ref(false)
 const refreshing = ref(false)
 const backgroundRefreshing = ref(false)
 const nextPage = ref(1)
+const nextCursor = ref<string | null>(null)
 const loadedTotal = ref<number | null>(null)
 const initialLoading = ref(true)
 const requestError = ref('')
@@ -95,7 +97,6 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null
 let requestController: AbortController | null = null
 let statsController: AbortController | null = null
 let loadSequence = 0
-const loadedRawIds = new Set<string>()
 
 const serverStats = ref<StatsResponse | null>(null)
 const urgentDeadlines = ref<DeadlineItem[]>([])
@@ -133,7 +134,19 @@ function buildQueryContext(): QueryContext {
   }
 }
 
-function buildServerParams(context: QueryContext, page: number): FetchNoticesParams {
+function buildServerParams(
+  context: QueryContext,
+  cursor: string | null,
+  page: number,
+): FetchNoticesParams {
+  const excludeIds = new Set<string>()
+  if (context.isRead === 'no') {
+    store.readIds.forEach((id) => excludeIds.add(id))
+  }
+  if (context.isStarred === 'no') {
+    store.starredIds.forEach((id) => excludeIds.add(id))
+  }
+
   return {
     keyword: context.keyword || undefined,
     source: context.source || undefined,
@@ -142,6 +155,9 @@ function buildServerParams(context: QueryContext, page: number): FetchNoticesPar
     dateFrom: context.dateFrom || undefined,
     dateTo: context.dateTo || undefined,
     hasDeadline: context.hasDeadline,
+    light: true,
+    excludeIds: excludeIds.size > 0 ? [...excludeIds] : undefined,
+    cursor: cursor ?? undefined,
     page,
     pageSize: PAGE_SIZE,
   }
@@ -227,12 +243,13 @@ function mergeUniqueNotices(existing: NoticeItem[], incoming: NoticeItem[]): Not
   return merged
 }
 
-function staleBatchResult(page: number): FetchBatchResult {
+function staleBatchResult(cursor: string | null): FetchBatchResult {
   return {
     items: [],
     rawCount: 0,
     rawIds: [],
-    nextPage: page,
+    nextPage: 1,
+    nextCursor: cursor,
     finished: true,
     scanPaused: false,
     stale: true,
@@ -242,12 +259,13 @@ function staleBatchResult(page: number): FetchBatchResult {
   }
 }
 
-function stalePageResult(page: number): FetchPageResult {
+function stalePageResult(cursor: string | null, page: number): FetchPageResult {
   return {
     items: [],
     rawCount: 0,
     rawIds: [],
     page,
+    nextCursor: cursor,
     finished: true,
     stale: true,
     total: 0,
@@ -257,10 +275,11 @@ function stalePageResult(page: number): FetchPageResult {
 
 async function fetchPage(
   context: QueryContext,
+  cursor: string | null,
   page: number,
   signal: AbortSignal,
 ): Promise<FetchPageResult> {
-  const params = buildServerParams(context, page)
+  const params = buildServerParams(context, cursor, page)
 
   try {
     const response = await fetchNotices(params, signal)
@@ -270,6 +289,7 @@ async function fetchPage(
         rawCount: 0,
         rawIds: [],
         page,
+        nextCursor: cursor,
         finished: true,
         stale: true,
         total: 0,
@@ -278,32 +298,21 @@ async function fetchPage(
     }
 
     const filtered = applyClientFilters(response.items, context)
-    const total = response.total
-    const rawItemCount = response.rawItemCount
-    const exhausted = isOffsetPageExhausted({
-      itemCount: rawItemCount,
-      page,
-      pageSize: PAGE_SIZE,
-      total,
-    })
-
     return {
       items: filtered,
-      rawCount: rawItemCount,
+      rawCount: response.rawItemCount,
       rawIds: response.items.map((notice) => notice.id),
       page,
-      finished: exhausted,
+      nextCursor: response.nextCursor ?? null,
+      finished:
+        response.items.length === 0 ||
+        (cursor !== null ? response.nextCursor === null : page * PAGE_SIZE >= response.total),
       stale: false,
-      total,
-      inconsistent: isOffsetPageInconsistent({
-        itemCount: rawItemCount,
-        page,
-        pageSize: PAGE_SIZE,
-        total,
-      }),
+      total: response.total,
+      inconsistent: false,
     }
   } catch (error) {
-    if (signal.aborted) return stalePageResult(page)
+    if (signal.aborted) return stalePageResult(cursor, page)
     throw error
   }
 }
@@ -315,63 +324,51 @@ async function fetchPage(
  */
 async function fetchBatch(
   context: QueryContext,
+  startCursor: string | null,
   startPage: number,
   signal: AbortSignal,
 ): Promise<FetchBatchResult> {
   const shouldScan = hasLocalFilters(context)
   const maxPages = shouldScan ? MAX_PAGES_PER_BATCH : 1
+  let cursor = startCursor
   let page = startPage
   let total = 0
-  let firstRawCount = 0
   let finished = false
   let scanPaused = false
-  let inconsistent = false
-  let overlap = false
   let pagesFetched = 0
   let items: NoticeItem[] = []
   const rawIds: string[] = []
-  const seenRawIds = new Set<string>()
 
   for (; pagesFetched < maxPages; pagesFetched += 1) {
-    const result = await fetchPage(context, page, signal)
-    if (result.stale) return staleBatchResult(page)
+    const result = await fetchPage(context, cursor, page, signal)
+    if (result.stale) return staleBatchResult(cursor)
 
-    if (pagesFetched === 0) {
-      firstRawCount = result.rawCount
-      total = result.total
-    } else if (result.total !== total) {
-      // total 在一次逻辑加载中变化通常意味着数据源排序/快照不稳定。
-      inconsistent = true
-    }
-
-    if (result.inconsistent) inconsistent = true
-    for (const id of result.rawIds) {
-      if (seenRawIds.has(id)) overlap = true
-      seenRawIds.add(id)
-      rawIds.push(id)
-    }
+    rawIds.push(...result.rawIds)
     items = mergeUniqueNotices(items, result.items)
     finished = result.finished
+    cursor = result.nextCursor
     page = result.page + 1
+    total = result.total
 
-    if (inconsistent || finished || !shouldScan || items.length > 0) break
+    if (finished || !shouldScan || items.length > 0) break
   }
 
-  if (shouldScan && items.length === 0 && !finished && !inconsistent) {
+  if (shouldScan && items.length === 0 && !finished) {
     scanPaused = pagesFetched >= maxPages
   }
 
   return {
     items,
-    rawCount: firstRawCount,
+    rawCount: rawIds.length,
     rawIds,
     nextPage: page,
+    nextCursor: cursor,
     finished,
     scanPaused,
     stale: false,
     total,
-    inconsistent,
-    overlap,
+    inconsistent: false,
+    overlap: false,
   }
 }
 
@@ -424,12 +421,11 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
       if (cached) {
         notices.value = cached.items
         nextPage.value = cached.nextPage
+        nextCursor.value = cached.nextCursor ?? null
         finished.value = cached.finished
         scanPaused.value = cached.scanPaused
         loadedTotal.value = cached.total
         loadedQueryKey = queryKey
-        loadedRawIds.clear()
-        for (const item of cached.items) loadedRawIds.add(item.id)
         hasVisibleData = true
         showingCachedData = true
         cachedFetchedAt = cached.fetchedAt
@@ -449,11 +445,11 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
     loading.value = true
     initialLoading.value = true
     nextPage.value = 1
+    nextCursor.value = null
     finished.value = false
     scanPaused.value = false
     loadedTotal.value = null
     notices.value = []
-    loadedRawIds.clear()
     cacheStatusMessage.value = ''
   } else {
     // 有缓存或当前数据时保留卡片，网络请求只显示顶部的轻量进度条。
@@ -464,27 +460,16 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
   backgroundRefreshing.value = hasVisibleData
 
   try {
-    const result = await fetchBatch(context, 1, controller.signal)
+    const result = await fetchBatch(context, null, 1, controller.signal)
     if (result.stale || sequence !== loadSequence) return
-
-    // 分页一致性：非最后一页必须返回满页，否则视为数据源异常
-    if (result.inconsistent || result.overlap) {
-      cacheStatusMessage.value = ''
-      requestError.value = hasVisibleData
-        ? '最新通知加载失败，继续显示现有数据；可点击重试。'
-        : '通知加载失败'
-      retryAction.value = 'refresh'
-      return
-    }
 
     notices.value = result.items
     nextPage.value = result.nextPage
+    nextCursor.value = result.nextCursor
     finished.value = result.finished
     scanPaused.value = result.scanPaused
     loadedTotal.value = result.total
     loadedQueryKey = queryKey
-    loadedRawIds.clear()
-    for (const id of result.rawIds) loadedRawIds.add(id)
     store.cacheNotices(result.items)
     cacheStatusMessage.value = ''
     cachedFetchedAt = null
@@ -493,6 +478,7 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
       items: result.items,
       total: result.total,
       nextPage: result.nextPage,
+      nextCursor: result.nextCursor,
       finished: result.finished,
       scanPaused: result.scanPaused,
       fetchedAt: new Date().toISOString(),
@@ -546,29 +532,15 @@ async function loadMore(): Promise<void> {
   requestError.value = ''
 
   try {
-    const result = await fetchBatch(context, nextPage.value, controller.signal)
+    const result = await fetchBatch(context, nextCursor.value, nextPage.value, controller.signal)
     if (result.stale || sequence !== loadSequence || queryKey !== loadedQueryKey) return
-
-    // 分页一致性：新页与已加载记录重叠，说明数据源排序不稳定
-    const existingIds = new Set(notices.value.map((n) => n.id))
-    const overlap = result.rawIds.some((id) => loadedRawIds.has(id) || existingIds.has(id))
-    if (
-      result.inconsistent ||
-      result.overlap ||
-      overlap ||
-      (loadedTotal.value !== null && result.total !== loadedTotal.value)
-    ) {
-      requestError.value = '更多通知加载失败'
-      retryAction.value = 'load'
-      return
-    }
 
     notices.value = mergeUniqueNotices(notices.value, result.items)
     nextPage.value = result.nextPage
+    nextCursor.value = result.nextCursor
     finished.value = result.finished
     scanPaused.value = result.scanPaused
     loadedTotal.value = result.total
-    for (const id of result.rawIds) loadedRawIds.add(id)
   } catch (error) {
     if (error instanceof ApiConfigurationError) {
       requestError.value = error.message

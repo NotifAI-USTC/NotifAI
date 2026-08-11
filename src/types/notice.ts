@@ -12,6 +12,10 @@ export interface NoticeItem {
   originUrl: string // 官网原始链接
   cleanContent: string // 通知原文：Markdown/轻量HTML/纯文本，详情页按 Markdown 渲染
   attachments: Array<{ name: string; url: string }> // 附件列表
+  /** 首次抓取时间；旧缓存或旧服务端响应可能没有该字段。 */
+  firstSeen?: string | null
+  /** 最近抓取时间；旧缓存或旧服务端响应可能没有该字段。 */
+  lastCrawl?: string | null
 }
 
 /** 后端 AI 流水线使用的固定分类 key。 */
@@ -57,6 +61,7 @@ export function getNoticeCategoryName(key: NoticeCategoryKey): string {
 export interface NoticeListResponse {
   items: NoticeItem[]
   total: number
+  nextCursor: string | null
 }
 
 /** 部门常量 */

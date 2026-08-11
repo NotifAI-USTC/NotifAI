@@ -291,11 +291,12 @@ describe('view request lifecycle', () => {
     expect(deadlineSignal?.aborted).toBe(true)
   })
 
-  it('rejects a short Home page that claims more results remain', async () => {
+  it('accepts a cursor page whose total exceeds the current page', async () => {
     mocks.fetchNotices.mockResolvedValue({
       items: Array.from({ length: 10 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 30,
       rawItemCount: 10,
+      nextCursor: 'cursor-2',
     })
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -303,7 +304,7 @@ describe('view request lifecycle', () => {
     await flushPromises()
 
     expect(mocks.fetchNotices).toHaveBeenCalledOnce()
-    expect(wrapper.text()).toContain('通知加载失败')
+    expect(wrapper.text()).not.toContain('通知加载失败')
   })
 
   it('uses the raw Home page size when validation skips a malformed notice', async () => {
@@ -413,12 +414,13 @@ describe('view request lifecycle', () => {
   })
 
   it('continues Home pagination from the next unrequested page', async () => {
-    mocks.fetchNotices.mockImplementation(async (params: { page?: number }) => ({
+    mocks.fetchNotices.mockImplementation(async (params: { cursor?: string }) => ({
       items: Array.from({ length: 15 }, (_, index) =>
-        makeNotice({ id: `notice-${(params.page ?? 1) * 100 + index}` }),
+        makeNotice({ id: `notice-${params.cursor === 'cursor-2' ? 200 + index : 100 + index}` }),
       ),
       total: 45,
       rawItemCount: 15,
+      nextCursor: params.cursor === 'cursor-2' ? null : 'cursor-2',
     }))
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -428,28 +430,35 @@ describe('view request lifecycle', () => {
     await wrapper.get('.notice-grid').trigger('scroll')
     await flushPromises()
 
-    expect(mocks.fetchNotices.mock.calls.map(([params]) => params.page)).toEqual([1, 2])
+    expect(mocks.fetchNotices.mock.calls.map(([params]) => params.cursor)).toEqual([
+      undefined,
+      'cursor-2',
+    ])
   })
 
   it('scans later Home pages when a local blacklist filters out the first page', async () => {
     const storeState = mocks.storeState!
     storeState.blacklistKeywords = ['屏蔽']
-    mocks.fetchNotices.mockImplementation(async (params: { page?: number }) => ({
+    mocks.fetchNotices.mockImplementation(async (params: { cursor?: string }) => ({
       items: Array.from({ length: 15 }, (_, index) =>
         makeNotice({
-          id: `notice-${(params.page ?? 1) * 100 + index}`,
-          title: params.page === 1 ? '屏蔽通知' : '可见通知',
+          id: `notice-${params.cursor === 'cursor-2' ? 200 + index : 100 + index}`,
+          title: params.cursor === 'cursor-2' ? '可见通知' : '屏蔽通知',
         }),
       ),
       total: 30,
       rawItemCount: 15,
+      nextCursor: params.cursor === 'cursor-2' ? null : 'cursor-2',
     }))
 
     const wrapper = shallowMount(Home, { global: { stubs } })
     wrappers.push(wrapper)
     await flushPromises()
 
-    expect(mocks.fetchNotices.mock.calls.map(([params]) => params.page)).toEqual([1, 2])
+    expect(mocks.fetchNotices.mock.calls.map(([params]) => params.cursor)).toEqual([
+      undefined,
+      'cursor-2',
+    ])
     expect(wrapper.text()).toContain('可见通知')
     expect(wrapper.text()).not.toContain('暂无通知')
 
@@ -458,14 +467,14 @@ describe('view request lifecycle', () => {
     storeState.blacklistKeywords = []
   })
 
-  it('rejects a final Home page that overlaps an earlier page', async () => {
-    mocks.fetchNotices.mockImplementation(async (params: { page?: number }) => ({
-      items:
-        params.page === 2
-          ? Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 15}` }))
-          : Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
+  it('merges cursor pages without requiring offset overlap checks', async () => {
+    mocks.fetchNotices.mockImplementation(async (params: { cursor?: string }) => ({
+      items: params.cursor
+        ? Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 15}` }))
+        : Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 30,
       rawItemCount: 15,
+      nextCursor: params.cursor === 'cursor-2' ? null : 'cursor-2',
     }))
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -474,8 +483,11 @@ describe('view request lifecycle', () => {
     await wrapper.get('.notice-grid').trigger('scroll')
     await flushPromises()
 
-    expect(mocks.fetchNotices.mock.calls.map(([params]) => params.page)).toEqual([1, 2])
-    expect(wrapper.text()).toContain('更多通知加载失败')
+    expect(mocks.fetchNotices.mock.calls.map(([params]) => params.cursor)).toEqual([
+      undefined,
+      'cursor-2',
+    ])
+    expect(wrapper.text()).not.toContain('更多通知加载失败')
   })
 
   it('shows an error when the calendar request fails', async () => {

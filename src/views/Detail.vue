@@ -36,6 +36,19 @@ function getLoadErrorMessage(error: unknown): string {
   return '加载通知详情失败，请检查网络后重试'
 }
 
+function formatCrawlTime(value: string | null | undefined): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 async function loadNotice(): Promise<void> {
   const sequence = ++loadSequence
   loadController?.abort()
@@ -211,6 +224,9 @@ function handleContentKeydown(event: KeyboardEvent): void {
             <v-card-title class="detail-title text-h5 text-wrap">{{ notice.title }}</v-card-title>
             <v-card-subtitle class="pb-2">
               {{ notice.source }} · {{ notice.publishDate }}
+              <span v-if="formatCrawlTime(notice.lastCrawl)" class="text-medium-emphasis">
+                · 最近抓取于 {{ formatCrawlTime(notice.lastCrawl) }}
+              </span>
             </v-card-subtitle>
             <v-card-text v-if="notice.categories.length" class="d-flex flex-wrap ga-2 pt-2">
               <v-chip

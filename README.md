@@ -106,7 +106,7 @@ npm run check
 
 ## 后端 API 契约
 
-`GET /notices` 返回 `{ items: NoticeItem[], total: number }`。列表项与详情均为同一 `NoticeItem` 结构，字段如下：
+`GET /notices` 返回 `{ items: NoticeItem[], total: number, nextCursor: string | null }`。列表项与详情均为同一 `NoticeItem` 结构，字段如下：
 
 ```ts
 interface NoticeItem {
@@ -122,6 +122,8 @@ interface NoticeItem {
   originUrl: string // 官网原始链接（仅 ustc.edu.cn 或其子域的无凭据 HTTPS）
   cleanContent: string // 通知原文：Markdown / 轻量 HTML / 纯文本，可为空字符串（前端按 Markdown 渲染）
   attachments: Array<{ name: string; url: string }> // 附件列表，可为空数组
+  firstSeen: string | null // 首次抓取时间 ISO8601
+  lastCrawl: string | null // 最近抓取时间 ISO8601
 }
 ```
 
@@ -136,11 +138,14 @@ interface NoticeItem {
 | `rangeFrom` / `rangeTo` | 日历范围；发布日或截止日任一命中即返回                                      |
 | `hasDeadline`           | 是否具有截止日期                                                            |
 | `since`                 | ISO8601 增量查询：仅返回 `first_seen >= since` 的通知，用于「有新通知」轮询 |
-| `page` / `pageSize`     | 从 1 开始的分页，`pageSize` 最大 1000                                       |
+| `light`                 | 轻量列表模式；为 `true` 时 `cleanContent` 保留字段但为空字符串              |
+| `excludeIds[]`          | 服务端排除通知 ID，最多 500 项，并参与 `total` 统计                         |
+| `cursor`                | 不透明游标；传入后忽略 `page`                                               |
+| `page` / `pageSize`     | 偏移分页；`page` 从 1 开始，`pageSize` 最大 1000                            |
 
 `GET /notices/:id` 返回完整 `NoticeItem`。`aiSummary`、`targetAudience`、`coreAction`、`cleanContent` 和 `attachments` 为可选字段，缺失时前端按空值处理；日期使用本地日历日字符串；`originUrl` 只接受 `ustc.edu.cn` 或其子域的无凭据 HTTPS 地址，附件 URL 接受无凭据的 HTTP(S) 地址。详细边界见 `src/utils/validation.ts`。
 
-分页结果必须使用稳定排序。除最后一页外，每页必须返回请求的 `pageSize` 条记录，同一轮分页的 `total` 必须保持一致；如果数据源无法提供稳定快照，应改用 cursor 分页，避免插入或删除造成 offset 位移漏项。
+偏移分页的响应 `nextCursor` 固定为 `null`。游标分页在页面满 `pageSize` 时返回下一枚不透明游标，末页返回 `null`；数据量恰好为整页时，最后一个游标请求可以返回空数组后结束。首页使用 `light=true`、游标分页和 `excludeIds[]`，详情页再请求完整正文。
 
 ### 扩展端点
 

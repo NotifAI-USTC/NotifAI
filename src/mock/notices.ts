@@ -1037,7 +1037,28 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
 export const mockNotices: NoticeItem[] = mockNoticeFixtures.map((notice) => ({
   ...notice,
   categories: inferMockCategories(notice),
+  firstSeen: null,
+  lastCrawl: null,
 }))
+
+function encodeMockCursor(notice: NoticeItem): string {
+  const payload = JSON.stringify({ p: notice.publishDate, m: notice.id })
+  return globalThis.btoa(payload).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+}
+
+function decodeMockCursor(cursor: string): string | null {
+  try {
+    const normalized = cursor.replaceAll('-', '+').replaceAll('_', '/')
+    const payload = JSON.parse(
+      globalThis.atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')),
+    ) as {
+      m?: unknown
+    }
+    return typeof payload.m === 'string' ? payload.m : null
+  } catch {
+    return null
+  }
+}
 
 /** 模拟获取通知列表的 API */
 export function mockFetchNotices(params: {
@@ -1051,6 +1072,9 @@ export function mockFetchNotices(params: {
   rangeTo?: string
   hasDeadline?: boolean
   since?: string
+  light?: boolean
+  excludeIds?: string[]
+  cursor?: string
   page?: number
   pageSize?: number
 }): NoticeListResponse {
@@ -1065,6 +1089,9 @@ export function mockFetchNotices(params: {
     rangeTo,
     hasDeadline,
     since,
+    light = false,
+    excludeIds,
+    cursor,
     page = 1,
     pageSize = 15,
   } = params
@@ -1105,18 +1132,33 @@ export function mockFetchNotices(params: {
   if (hasDeadline !== undefined) {
     filtered = filtered.filter((notice) => Boolean(notice.deadline) === hasDeadline)
   }
+  if (excludeIds?.length) {
+    const excluded = new Set(excludeIds)
+    filtered = filtered.filter((notice) => !excluded.has(notice.id))
+  }
 
   filtered = [...filtered].sort(
     (a, b) => b.publishDate.localeCompare(a.publishDate) || a.id.localeCompare(b.id),
   )
 
-  // 分页
-  const start = (page - 1) * pageSize
-  const items = filtered.slice(start, start + pageSize)
+  const cursorMode = cursor !== undefined
+  let start = cursorMode ? 0 : (page - 1) * pageSize
+  if (cursorMode && cursor) {
+    const cursorId = decodeMockCursor(cursor)
+    const cursorIndex = cursorId ? filtered.findIndex((notice) => notice.id === cursorId) : -1
+    start = cursorIndex >= 0 ? cursorIndex + 1 : filtered.length
+  }
+  const items = filtered
+    .slice(start, start + pageSize)
+    .map((notice) => (light ? { ...notice, cleanContent: '' } : { ...notice }))
 
   return {
     items,
     total: filtered.length,
+    nextCursor:
+      cursorMode && items.length === pageSize && items.length > 0
+        ? encodeMockCursor(items[items.length - 1]!)
+        : null,
   }
 }
 

@@ -119,6 +119,12 @@ export interface FetchNoticesParams {
   hasDeadline?: boolean
   /** ISO8601 增量查询：仅返回 first_seen >= since 的通知 */
   since?: string
+  /** 列表轻量模式；省略 cleanContent 正文。 */
+  light?: boolean
+  /** 服务端排除的通知 ID，最多 500 项。 */
+  excludeIds?: string[]
+  /** 不透明光标；传入后服务端忽略 page。 */
+  cursor?: string
   page?: number
   pageSize?: number
 }
@@ -227,6 +233,30 @@ export async function fetchNotices(
     throw new DataValidationError('hasDeadline 必须是布尔值')
   }
   const since = validateOptionalIsoTime(params.since, 'since')
+  if (params.light !== undefined && typeof params.light !== 'boolean') {
+    throw new DataValidationError('light 必须是布尔值')
+  }
+  let excludeIds: string[] | undefined
+  if (params.excludeIds !== undefined) {
+    if (!Array.isArray(params.excludeIds) || params.excludeIds.length > 500) {
+      throw new DataValidationError('excludeIds 必须是至多 500 项的数组')
+    }
+    excludeIds = [
+      ...new Set(
+        params.excludeIds
+          .filter((id) => id !== '')
+          .map((id, index) => assertNoticeId(id, `excludeIds[${index}]`)),
+      ),
+    ]
+  }
+  let cursor: string | undefined
+  if (params.cursor !== undefined) {
+    if (typeof params.cursor !== 'string' || params.cursor.length > 4096) {
+      throw new DataValidationError('cursor 必须是不超过 4096 个字符的字符串')
+    }
+    // 空光标用于显式启动游标分页；后续光标由服务端返回。
+    cursor = params.cursor
+  }
 
   const validatedParams: FetchNoticesParams = {
     keyword,
@@ -239,6 +269,9 @@ export async function fetchNotices(
     rangeTo,
     hasDeadline: params.hasDeadline,
     since,
+    light: params.light,
+    excludeIds,
+    cursor,
     page,
     pageSize,
   }

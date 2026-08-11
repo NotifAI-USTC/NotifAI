@@ -71,6 +71,17 @@ function optionalString(value: unknown, maxLength: number, defaultValue = ''): s
   return value.length > maxLength ? value.slice(0, maxLength) : value
 }
 
+function optionalIsoTimestamp(value: unknown, path: string): string | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string' || value.length === 0 || value.length > 100) {
+    throw new DataValidationError(`${path} 必须是 ISO8601 时间字符串或 null`)
+  }
+  if (Number.isNaN(Date.parse(value))) {
+    throw new DataValidationError(`${path} 必须是合法的 ISO8601 时间字符串`)
+  }
+  return value
+}
+
 function normalizeDateInput(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
@@ -187,6 +198,8 @@ function parseNoticeFields(record: Record<string, unknown>, path: string): Notic
     originUrl: expectTrustedNoticeUrl(record.originUrl, `${path}.originUrl`),
     cleanContent: optionalString(record.cleanContent, LIMITS.html),
     attachments: [],
+    firstSeen: optionalIsoTimestamp(record.firstSeen, `${path}.firstSeen`),
+    lastCrawl: optionalIsoTimestamp(record.lastCrawl, `${path}.lastCrawl`),
   }
 }
 
@@ -288,10 +301,23 @@ export function parseNoticeListResponse(value: unknown): ValidatedNoticeListResp
     throw new DataValidationError('response.total 小于实际返回的通知数量')
   }
 
+  let nextCursor: string | null = null
+  if (record.nextCursor !== undefined && record.nextCursor !== null) {
+    if (
+      typeof record.nextCursor !== 'string' ||
+      record.nextCursor.length === 0 ||
+      record.nextCursor.length > 4096
+    ) {
+      throw new DataValidationError('response.nextCursor 无效')
+    }
+    nextCursor = record.nextCursor
+  }
+
   return {
     items,
     total: record.total,
     rawItemCount: record.items.length,
+    nextCursor,
   }
 }
 

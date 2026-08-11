@@ -23,6 +23,7 @@ export interface NoticeFeedCacheEntry {
   items: NoticeItem[]
   total: number
   nextPage: number
+  nextCursor?: string | null
   finished: boolean
   scanPaused: boolean
   fetchedAt: string
@@ -66,6 +67,14 @@ function parseCacheEntry(value: unknown, expectedKey?: string): StoredNoticeFeed
     return null
   }
   if (typeof value.finished !== 'boolean' || typeof value.scanPaused !== 'boolean') return null
+  if (
+    value.nextCursor !== undefined &&
+    value.nextCursor !== null &&
+    (typeof value.nextCursor !== 'string' ||
+      value.nextCursor.length === 0 ||
+      value.nextCursor.length > 4096)
+  )
+    return null
   if (!isValidIsoTimestamp(value.fetchedAt)) return null
 
   const items: NoticeItem[] = []
@@ -91,6 +100,7 @@ function parseCacheEntry(value: unknown, expectedKey?: string): StoredNoticeFeed
     items,
     total: value.total,
     nextPage: value.nextPage,
+    nextCursor: value.nextCursor ?? null,
     finished: value.finished,
     scanPaused: value.scanPaused,
     fetchedAt: value.fetchedAt,

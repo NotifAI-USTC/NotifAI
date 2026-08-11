@@ -161,7 +161,7 @@ describe('new API endpoints', () => {
       { ids: ['notice-1', 'missing-1'] },
       expect.objectContaining({ suppressGlobalError: true }),
     )
-    expect(result.items).toEqual([notice])
+    expect(result.items).toEqual([{ ...notice, firstSeen: null, lastCrawl: null }])
     expect(result.missing).toEqual(['missing-1'])
   })
 
