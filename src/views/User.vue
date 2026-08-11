@@ -42,7 +42,7 @@ const darkModeLabels: Record<DarkMode, string> = {
 const notificationPermissionLabel = computed(() => {
   if (notificationPermission.value === null) return '当前浏览器不支持网页通知'
   if (notificationPermission.value === 'granted') {
-    return '仅当前设备已授权；提醒需由打开的页面触发'
+    return '仅当前设备已授权；页面打开时提醒订阅来源中即将截止的通知'
   }
   if (notificationPermission.value === 'denied') {
     return '已被浏览器阻止，请在站点设置中修改'

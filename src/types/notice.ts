@@ -141,6 +141,23 @@ export interface CalendarListResponse {
   items: CalendarItem[]
 }
 
+/** 即将截止轻量视图条目（GET /notices/deadlines） */
+export interface DeadlineItem {
+  id: string
+  title: string
+  source: string
+  publishDate: string
+  deadline: string
+  aiSummary: string
+  targetAudience: string
+}
+
+/** 即将截止轻量视图 API 响应 */
+export interface DeadlineListResponse {
+  items: DeadlineItem[]
+  total: number
+}
+
 /** 批量详情 API 响应（POST /notices/batch） */
 export interface NoticeBatchResponse {
   items: NoticeItem[]

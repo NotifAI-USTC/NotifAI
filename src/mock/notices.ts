@@ -1,11 +1,12 @@
 import { DEPARTMENTS, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
 import type {
+  DeadlineListResponse,
   NoticeCategoryItem,
   NoticeCategoryKey,
   NoticeItem,
   NoticeListResponse,
 } from '../types/notice'
-import { getLocalToday } from '../utils/date'
+import { getIsoWeek, getLocalToday } from '../utils/date'
 
 // 获取今天和未来几天的日期
 function getDate(daysFromNow: number): string {
@@ -1144,13 +1145,12 @@ function isoWeekStart(year: number, week: number): Date | null {
   // ISO 周：1 月 4 日必在第 1 周
   const jan4 = new Date(year, 0, 4)
   const jan4Weekday = (jan4.getDay() + 6) % 7 // 周一=0 ... 周日=6
-  const firstMonday = new Date(year, 0, 1 + ((7 - jan4Weekday) % 7 || 7))
-  // 注意：(7 - jan4Weekday) % 7 为 0 时表示 jan4 恰好是周一，firstMonday = 1 月 1 日
-  if ((7 - jan4Weekday) % 7 === 0) {
-    firstMonday.setDate(1)
-  }
+  const firstMonday = new Date(year, 0, 4 - jan4Weekday)
   const start = new Date(firstMonday)
   start.setDate(firstMonday.getDate() + (week - 1) * 7)
+  if (getIsoWeek(formatLocalDate(start)) !== `${year}-W${String(week).padStart(2, '0')}`) {
+    return null
+  }
   return start
 }
 
@@ -1206,6 +1206,41 @@ export function mockFetchCalendarNotices(params: { month?: string; week?: string
     .sort((a, b) => b.publishDate.localeCompare(a.publishDate) || a.id.localeCompare(b.id))
 
   return { items }
+}
+
+/** 模拟获取即将截止轻量列表（GET /notices/deadlines）。 */
+export function mockFetchDeadlineNotices(params: {
+  days?: number
+  sources?: string[]
+  page?: number
+  pageSize?: number
+}): DeadlineListResponse {
+  const { days = 7, sources, page = 1, pageSize = 50 } = params
+  const today = getLocalToday()
+  const end = getDate(days)
+  const filtered = mockNotices
+    .filter(
+      (notice): notice is NoticeItem & { deadline: string } =>
+        notice.deadline !== null &&
+        notice.deadline >= today &&
+        notice.deadline <= end &&
+        (!sources || sources.includes(notice.source)),
+    )
+    .sort((a, b) => a.deadline.localeCompare(b.deadline) || a.id.localeCompare(b.id))
+
+  const start = (page - 1) * pageSize
+  return {
+    items: filtered.slice(start, start + pageSize).map((notice) => ({
+      id: notice.id,
+      title: notice.title,
+      source: notice.source,
+      publishDate: notice.publishDate,
+      deadline: notice.deadline,
+      aiSummary: notice.aiSummary,
+      targetAudience: notice.targetAudience,
+    })),
+    total: filtered.length,
+  }
 }
 
 /** 模拟获取来源列表（GET /sources） */

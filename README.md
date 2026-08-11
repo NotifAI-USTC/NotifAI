@@ -21,7 +21,7 @@
 - 浅色、深色和跟随系统主题
 - 偏好保存在浏览器 LocalStorage，无账号依赖，支持一键导出 / 导入 JSON 备份
 - 已读记录管理（标记已读、一键清空）
-- 前台 DDL 提醒：应用打开期间对近期截止的收藏发浏览器通知（同一通知只提醒一次）
+- 前台 DDL 提醒：应用打开期间通过轻量端点轮询订阅来源的近期截止通知（同一通知只提醒一次）
 - 明确的加载、空数据、配置错误和网络重试状态
 - 首页通知支持 IndexedDB 长效缓存：先展示缓存，再后台同步最新数据，网络失败时保留缓存并提示更新时间
 
@@ -146,20 +146,21 @@ interface NoticeItem {
 
 以下端点已由前端使用：
 
-| 端点                    | 用途                                                                         |
-| ----------------------- | ---------------------------------------------------------------------------- |
-| `POST /notices/batch`   | 批量详情：收藏页与个人中心 DDL，替代 N+1 逐条请求，最多 500 个 ID            |
-| `GET /notices/calendar` | 日历轻量视图：`month=YYYY-MM` 或 `week=YYYY-Www`，返回精简字段，替代分页循环 |
-| `GET /sources`          | 来源列表：个人中心订阅页与首页来源下拉动态化，含分组与通知数                 |
-| `GET /categories`       | 17 个 AI 分类及通知数：高级搜索分类多选和分类名称展示                        |
-| `GET /stats`            | 聚合统计：首页统计条与数据新鲜度提示                                         |
+| 端点                     | 用途                                                                         |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| `POST /notices/batch`    | 批量详情：收藏页与个人中心 DDL，替代 N+1 逐条请求，最多 500 个 ID            |
+| `GET /notices/calendar`  | 日历轻量视图：`month=YYYY-MM` 或 `week=YYYY-Www`，返回精简字段，替代分页循环 |
+| `GET /notices/deadlines` | 即将截止轻量列表：首页紧急 DDL 横幅与前台提醒                                |
+| `GET /sources`           | 来源列表：个人中心订阅页与首页来源下拉动态化，含分组与通知数                 |
+| `GET /categories`        | 17 个 AI 分类及通知数：高级搜索分类多选和分类名称展示                        |
+| `GET /stats`             | 聚合统计：首页统计条与数据新鲜度提示                                         |
 
 - 批量详情请求体为 `{ "ids": string[] }`，响应 `{ "items": NoticeItem[], "missing": string[] }`，`items` 按发布日期倒序，重复 ID 自动去重。
 - 日历轻量条目仅含 `id` / `title` / `source` / `publishDate` / `deadline`，发布日或截止日命中即返回，上限 500 条。
+- 截止日期端点支持 `days=1..365`、`sources[]` 和分页，按截止日升序返回 `{ items, total }`；轻量条目含 `id` / `title` / `source` / `publishDate` / `deadline` / `aiSummary` / `targetAudience`。
 - 来源条目为 `{ name, group, noticeCount }`，`group` 如「校级部门」「二级学院」「其他」。
 - 分类条目为 `{ key, name, description, noticeCount }`；通知中的 `categories` 只保存英文 key，前端映射为中文名称。
 - 统计响应为 `{ total, sourceCount, last7DaysDdl, last24hNew, lastCrawlAt }`，`lastCrawlAt` 可为 `null`。
-- 首页使用 `since` 每 60 秒轮询一次，有新通知时显示「有 N 条新通知，点击刷新」提示条。
 
 ## 目录
 

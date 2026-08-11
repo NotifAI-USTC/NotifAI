@@ -1,18 +1,19 @@
 /**
- * 前台 DDL 提醒：应用打开期间定时扫描"近期截止"的收藏通知，
+ * 前台 DDL 提醒：应用打开期间定时拉取订阅来源中近期截止的通知，
  * 通过浏览器通知提醒一次（同一通知同一截止日只提醒一次）。
  * 不包含后台推送——页面关闭后由浏览器策略决定。
  */
 
 import { onBeforeUnmount, onMounted } from 'vue'
 import { useUserSettingsStore } from '../stores/userSettings'
+import { normalizeNoticeSource } from '../types/notice'
 import { calculateRemainingDays } from '../utils/date'
 import { isNotificationSupported, sendNotification } from '../utils/notification'
-import { loadBatchNotices } from './useBatchNoticeLoader'
+import { fetchDeadlineNotices } from '../utils/request'
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000
 const REMINDER_WINDOW_DAYS = 1
-const MAX_STARRED_TO_SCAN = 20
+const MAX_DEADLINES_TO_SCAN = 50
 const TRACKING_STORAGE_KEY = 'notifai-ddl-reminders'
 const TRACKING_LIMIT = 200
 
@@ -54,8 +55,11 @@ export function useForegroundDdlReminder(): void {
     if (!store.notificationEnabled || !isNotificationSupported()) return
     if (Notification.permission !== 'granted') return
 
-    const ids = store.urgentStarredIds.slice(-MAX_STARRED_TO_SCAN)
-    if (ids.length === 0) return
+    const sources =
+      store.subscriptionMode === 'custom'
+        ? Array.from(new Set(store.subscribedDepts.map(normalizeNoticeSource)))
+        : undefined
+    if (sources?.length === 0) return
 
     if (checking) return
     checking = true
@@ -64,17 +68,30 @@ export function useForegroundDdlReminder(): void {
     controller = requestController
     const tracked = loadTrackedReminders()
     try {
-      const result = await loadBatchNotices(ids, {
-        maxIds: MAX_STARRED_TO_SCAN,
-        signal: requestController.signal,
-      })
+      const result = await fetchDeadlineNotices(
+        {
+          days: REMINDER_WINDOW_DAYS,
+          sources,
+          page: 1,
+          pageSize: MAX_DEADLINES_TO_SCAN,
+        },
+        requestController.signal,
+      )
 
       for (const notice of result.items) {
         if (requestController.signal.aborted) return
 
-        if (!notice.deadline) continue
         const days = calculateRemainingDays(notice.deadline)
         if (days === null || days < 0 || days > REMINDER_WINDOW_DAYS) continue
+        const searchableText =
+          `${notice.title} ${normalizeNoticeSource(notice.source)} ${notice.aiSummary}`.toLocaleLowerCase()
+        if (
+          store.blacklistKeywords.some((keyword) =>
+            searchableText.includes(keyword.toLocaleLowerCase()),
+          )
+        ) {
+          continue
+        }
 
         const key = `${notice.id}:${notice.deadline}`
         if (tracked.has(key)) continue

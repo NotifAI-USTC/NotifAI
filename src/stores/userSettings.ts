@@ -218,9 +218,6 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     return systemPrefersDark.value
   })
 
-  /** 用户主动收藏且未过期的通知 */
-  const urgentStarredIds = computed(() => starredIds.value)
-
   /** 所有自定义标签 */
   const allCustomTags = computed(() => {
     const tags = new Set<string>()
@@ -1584,7 +1581,6 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     isPinned,
     isImportant,
     isDark,
-    urgentStarredIds,
     allCustomTags,
     // 操作
     completeOnboarding,

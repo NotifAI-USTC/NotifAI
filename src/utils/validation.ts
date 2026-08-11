@@ -1,5 +1,7 @@
 import type {
   CalendarItem,
+  DeadlineItem,
+  DeadlineListResponse,
   NoticeCategoryItem,
   NoticeBatchResponse,
   NoticeItem,
@@ -340,6 +342,65 @@ export function parseCalendarListResponse(value: unknown): CalendarItem[] {
     items.push(parsed)
   })
   return items
+}
+
+/** 解析即将截止轻量条目（GET /notices/deadlines）。 */
+export function parseDeadlineItem(value: unknown, path = 'deadlineItem'): DeadlineItem {
+  const record = expectRecord(value, path)
+  return {
+    id: assertNoticeId(record.id, `${path}.id`),
+    title: expectString(record.title, `${path}.title`, LIMITS.title),
+    source: expectString(record.source, `${path}.source`, LIMITS.source),
+    publishDate: expectDate(record.publishDate, `${path}.publishDate`),
+    deadline: expectDate(record.deadline, `${path}.deadline`),
+    aiSummary: optionalString(record.aiSummary, LIMITS.summary),
+    targetAudience: optionalString(record.targetAudience, LIMITS.detail),
+  }
+}
+
+/** 解析即将截止列表响应；跳过单条脏数据，但拒绝重复 ID 和无效分页元数据。 */
+export function parseDeadlineListResponse(value: unknown): DeadlineListResponse {
+  const record = expectRecord(value, 'response')
+  if (!Array.isArray(record.items)) {
+    throw new DataValidationError('response.items 必须是数组')
+  }
+  if (record.items.length > 500) {
+    throw new DataValidationError('response.items 长度不能超过 500')
+  }
+
+  const items: DeadlineItem[] = []
+  const seenIds = new Set<string>()
+  record.items.forEach((item, index) => {
+    let parsed: DeadlineItem
+    try {
+      parsed = parseDeadlineItem(item, `response.items[${index}]`)
+    } catch (error) {
+      console.warn(
+        `[NotifAI] 跳过第 ${index + 1} 条非法截止通知数据:`,
+        error instanceof Error ? error.message : String(error),
+      )
+      return
+    }
+    if (seenIds.has(parsed.id)) {
+      throw new DataValidationError(`response.items[${index}] 存在重复通知 ID: ${parsed.id}`)
+    }
+    seenIds.add(parsed.id)
+    items.push(parsed)
+  })
+
+  if (
+    typeof record.total !== 'number' ||
+    !Number.isSafeInteger(record.total) ||
+    record.total < 0 ||
+    record.total > LIMITS.total
+  ) {
+    throw new DataValidationError('response.total 无效')
+  }
+  if (record.total < record.items.length) {
+    throw new DataValidationError('response.total 小于实际返回的通知数量')
+  }
+
+  return { items, total: record.total }
 }
 
 /** 解析批量详情响应（POST /notices/batch）。 */

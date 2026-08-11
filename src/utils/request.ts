@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type {
   CalendarItem,
+  DeadlineListResponse,
   NoticeCategoryItem,
   NoticeCategoryKey,
   NoticeBatchResponse,
@@ -14,6 +15,7 @@ import {
   assertDateOnly,
   assertNoticeId,
   parseCalendarListResponse,
+  parseDeadlineListResponse,
   parseCategoryListResponse,
   parseNoticeBatchResponse,
   parseNoticeItem,
@@ -127,6 +129,16 @@ export interface FetchCalendarParams {
   month?: string
   /** 周 YYYY-Www，如 2026-W32 */
   week?: string
+}
+
+/** GET /notices/deadlines 查询参数。 */
+export interface FetchDeadlinesParams {
+  /** 从今天起未来 N 天，范围为 1 到 365。 */
+  days?: number
+  /** 来源 OR 过滤。 */
+  sources?: string[]
+  page?: number
+  pageSize?: number
 }
 
 function validateOptionalText(value: unknown, name: string, maxLength = 200): string | undefined {
@@ -329,6 +341,57 @@ export async function fetchCalendarNotices(
     suppressGlobalError: true,
   })
   return parseCalendarListResponse(res.data)
+}
+
+/** 获取即将截止轻量列表（GET /notices/deadlines）。 */
+export async function fetchDeadlineNotices(
+  params: FetchDeadlinesParams = {},
+  signal?: AbortSignal,
+): Promise<DeadlineListResponse> {
+  const useMock = shouldUseMock()
+  const days = params.days ?? 7
+  const page = params.page ?? 1
+  const pageSize = params.pageSize ?? 50
+
+  if (!Number.isSafeInteger(days) || days < 1 || days > 365) {
+    throw new DataValidationError('days 必须是 1 到 365 之间的整数')
+  }
+  if (!Number.isSafeInteger(page) || page < 1) {
+    throw new DataValidationError('page 必须是正整数')
+  }
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 500) {
+    throw new DataValidationError('pageSize 必须是 1 到 500 之间的整数')
+  }
+  if (params.sources !== undefined) {
+    if (
+      !Array.isArray(params.sources) ||
+      params.sources.length === 0 ||
+      params.sources.length > 100
+    ) {
+      throw new DataValidationError('sources 必须是 1 到 100 项的字符串数组')
+    }
+    params.sources.forEach((item, index) => validateOptionalText(item, `sources[${index}]`, 200))
+  }
+
+  const validatedParams: FetchDeadlinesParams = {
+    days,
+    sources: params.sources ? [...new Set(params.sources)] : undefined,
+    page,
+    pageSize,
+  }
+  if (import.meta.env.DEV && useMock) {
+    const { mockFetchDeadlineNotices } = await import('../mock/notices')
+    await waitForMockDelay(150 + Math.random() * 250, signal)
+    return parseDeadlineListResponse(mockFetchDeadlineNotices(validatedParams))
+  }
+  const res = await request.get<unknown>('/notices/deadlines', {
+    params: validatedParams,
+    paramsSerializer: { indexes: false },
+    maxContentLength: MAX_NOTICE_LIST_RESPONSE_BYTES,
+    signal,
+    suppressGlobalError: true,
+  })
+  return parseDeadlineListResponse(res.data)
 }
 
 /** 获取来源列表（GET /sources）。 */

@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import type { NoticeItem } from '../types/notice'
+import type { DeadlineItem } from '../types/notice'
 import { formatRemaining, isUrgent } from '../utils/date'
 
 const props = defineProps<{
-  notices: NoticeItem[]
+  notices: DeadlineItem[]
 }>()
 
 const router = useRouter()

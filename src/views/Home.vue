@@ -2,9 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
-import { ApiConfigurationError, fetchNotices, fetchStats } from '../utils/request'
+import {
+  ApiConfigurationError,
+  fetchDeadlineNotices,
+  fetchNotices,
+  fetchStats,
+} from '../utils/request'
 import type { FetchNoticesParams } from '../utils/request'
-import type { NoticeCategoryKey, NoticeItem, StatsResponse } from '../types/notice'
+import type { DeadlineItem, NoticeCategoryKey, NoticeItem, StatsResponse } from '../types/notice'
 import { getNoticeCategoryName, normalizeNoticeSource } from '../types/notice'
 import NoticeCard from '../components/NoticeCard.vue'
 import DdlNoticeBar from '../components/DdlNoticeBar.vue'
@@ -19,6 +24,8 @@ import { readNoticeFeedCache, writeNoticeFeedCache } from '../utils/noticeFeedCa
 const PAGE_SIZE = 15
 const MAX_PAGES_PER_BATCH = 5
 const PULL_THRESHOLD = 72
+const URGENT_DDL_DAYS = 3
+const URGENT_DDL_LIMIT = 10
 
 interface QueryContext {
   keyword: string
@@ -91,6 +98,9 @@ let loadSequence = 0
 const loadedRawIds = new Set<string>()
 
 const serverStats = ref<StatsResponse | null>(null)
+const urgentDeadlines = ref<DeadlineItem[]>([])
+let deadlinesController: AbortController | null = null
+let deadlinesRequestId = 0
 
 function triStateBoolean(value: TriStateFilter): boolean | undefined {
   if (value === 'yes') return true
@@ -185,6 +195,16 @@ function matchesLocalFilters(notice: NoticeItem, context: QueryContext): boolean
 function applyClientFilters(items: NoticeItem[], context: QueryContext): NoticeItem[] {
   return items.filter((notice) => matchesLocalFilters(notice, context))
 }
+
+const visibleUrgentDeadlines = computed(() => {
+  if (store.blacklistKeywords.length === 0) return urgentDeadlines.value
+  const keywords = store.blacklistKeywords.map((keyword) => keyword.toLocaleLowerCase())
+  return urgentDeadlines.value.filter((notice) => {
+    const searchableText =
+      `${notice.title} ${normalizeNoticeSource(notice.source)} ${notice.aiSummary}`.toLocaleLowerCase()
+    return !keywords.some((keyword) => searchableText.includes(keyword))
+  })
+})
 
 function hasLocalFilters(context: QueryContext): boolean {
   return (
@@ -715,10 +735,50 @@ async function loadServerStats(): Promise<void> {
   }
 }
 
+/** 使用轻量截止日期端点加载全局紧急 DDL，并按用户订阅来源约束结果。 */
+async function loadUrgentDeadlines(): Promise<void> {
+  const requestId = ++deadlinesRequestId
+  deadlinesController?.abort()
+
+  const sources =
+    store.subscriptionMode === 'custom'
+      ? Array.from(new Set(store.subscribedDepts.map(normalizeNoticeSource)))
+      : undefined
+  if (sources?.length === 0) {
+    deadlinesController = null
+    urgentDeadlines.value = []
+    return
+  }
+
+  const controller = new AbortController()
+  deadlinesController = controller
+  try {
+    const result = await fetchDeadlineNotices(
+      {
+        days: URGENT_DDL_DAYS,
+        sources,
+        page: 1,
+        pageSize: URGENT_DDL_LIMIT,
+      },
+      controller.signal,
+    )
+    if (controller.signal.aborted || requestId !== deadlinesRequestId) return
+    urgentDeadlines.value = [...result.items].sort(
+      (a, b) => a.deadline.localeCompare(b.deadline) || a.id.localeCompare(b.id),
+    )
+  } catch {
+    if (controller.signal.aborted || requestId !== deadlinesRequestId) return
+    // DDL 横幅是增强信息；失败时保留上一批结果，不影响通知主列表。
+  } finally {
+    if (deadlinesController === controller) deadlinesController = null
+  }
+}
+
 watch(
   () => store.subscriptionMode,
   () => {
     refresh()
+    void loadUrgentDeadlines()
   },
 )
 
@@ -729,6 +789,7 @@ watch(
   () => store.subscribedDepts.join('\u0000'),
   () => {
     refresh()
+    void loadUrgentDeadlines()
   },
 )
 
@@ -756,12 +817,16 @@ watch(
 onMounted(() => {
   initialLoading.value = true
   void loadInitial({ allowCache: true })
+  void loadUrgentDeadlines()
 })
 
 onBeforeUnmount(() => {
   loadSequence += 1
   requestController?.abort()
   statsController?.abort()
+  deadlinesRequestId += 1
+  deadlinesController?.abort()
+  deadlinesController = null
   if (searchTimer) clearTimeout(searchTimer)
 })
 </script>
@@ -793,8 +858,8 @@ onBeforeUnmount(() => {
       </v-btn>
     </v-toolbar>
 
-    <!-- 紧急 DDL 提示条：仅在实际数据加载完成后显示 -->
-    <DdlNoticeBar v-if="!initialLoading && filteredNotices.length > 0" :notices="filteredNotices" />
+    <!-- 紧急 DDL 提示条：由轻量截止日期端点独立加载 -->
+    <DdlNoticeBar :notices="visibleUrgentDeadlines" />
 
     <!-- 已加载数据统计概览 -->
     <div

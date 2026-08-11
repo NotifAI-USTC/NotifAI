@@ -1,6 +1,6 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NoticeItem } from '../types/notice'
+import type { DeadlineItem, NoticeItem } from '../types/notice'
 
 interface MockSettingsStore {
   subscriptionMode: string
@@ -10,7 +10,6 @@ interface MockSettingsStore {
   blacklistKeywords: string[]
   customTags: Record<string, string[]>
   starredIds: string[]
-  urgentStarredIds: string[]
   importantIds: string[]
   pinnedIds: string[]
   darkMode: string
@@ -34,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   fetchNoticeById: vi.fn(),
   fetchNoticesByIds: vi.fn(),
   fetchCalendarNotices: vi.fn(),
+  fetchDeadlineNotices: vi.fn(),
   fetchStats: vi.fn(),
   readNoticeFeedCache: vi.fn(),
   writeNoticeFeedCache: vi.fn(),
@@ -50,6 +50,7 @@ vi.mock('../utils/request', () => ({
   fetchNoticeById: mocks.fetchNoticeById,
   fetchNoticesByIds: mocks.fetchNoticesByIds,
   fetchCalendarNotices: mocks.fetchCalendarNotices,
+  fetchDeadlineNotices: mocks.fetchDeadlineNotices,
   fetchStats: mocks.fetchStats,
 }))
 
@@ -72,7 +73,6 @@ vi.mock('../stores/userSettings', async () => {
     blacklistKeywords: [] as string[],
     customTags: Object.create(null) as Record<string, string[]>,
     starredIds: ['notice-1'],
-    urgentStarredIds: ['notice-1'],
     importantIds: ['notice-1'],
     pinnedIds: [] as string[],
     darkMode: 'auto',
@@ -145,9 +145,25 @@ function makeCalendarItem(
   }
 }
 
+function makeDeadlineItem(overrides: Partial<DeadlineItem> = {}): DeadlineItem {
+  return {
+    id: 'notice-1',
+    title: '测试通知',
+    source: '教务处',
+    publishDate: '2026-07-30',
+    deadline: '2026-08-10',
+    aiSummary: '测试摘要',
+    targetAudience: '全体本科生',
+    ...overrides,
+  }
+}
+
 const stubs = {
   AdvancedSearch: true,
-  DdlNoticeBar: true,
+  DdlNoticeBar: {
+    props: ['notices'],
+    template: '<div class="ddl-bar-stub">{{ notices.length }}</div>',
+  },
   FolderDialog: true,
   NoticeCard: {
     props: ['notice'],
@@ -164,6 +180,13 @@ describe('view request lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.readNoticeFeedCache.mockResolvedValue(null)
+    mocks.fetchDeadlineNotices.mockResolvedValue({ items: [], total: 0 })
+    const storeState = mocks.storeState!
+    storeState.subscriptionMode = 'all'
+    storeState.subscribedDepts = []
+    storeState.categoryMode = 'all'
+    storeState.subscribedCategories = []
+    storeState.blacklistKeywords = []
   })
 
   afterEach(() => {
@@ -218,6 +241,54 @@ describe('view request lifecycle', () => {
 
     expect(mocks.fetchCalendarNotices).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('无法加载当前范围通知')
+  })
+
+  it('loads the Home DDL bar from the deadline endpoint using subscribed sources', async () => {
+    const storeState = mocks.storeState!
+    storeState.subscriptionMode = 'custom'
+    storeState.subscribedDepts = ['教务处', '计算机科学与技术学院']
+    mocks.fetchNotices.mockResolvedValue({
+      items: Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
+      total: 15,
+      rawItemCount: 15,
+    })
+    mocks.fetchDeadlineNotices.mockResolvedValue({
+      items: [makeDeadlineItem()],
+      total: 1,
+    })
+
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(mocks.fetchDeadlineNotices).toHaveBeenCalledWith(
+      {
+        days: 3,
+        sources: ['教务处', '计算机学院'],
+        page: 1,
+        pageSize: 10,
+      },
+      expect.any(AbortSignal),
+    )
+    expect(wrapper.get('.ddl-bar-stub').text()).toBe('1')
+  })
+
+  it('aborts the Home deadline request on unmount', async () => {
+    let deadlineSignal: AbortSignal | undefined
+    mocks.fetchNotices.mockImplementation(() => pendingPromise())
+    mocks.fetchDeadlineNotices.mockImplementation((_params: unknown, signal?: AbortSignal) => {
+      deadlineSignal = signal
+      return pendingPromise()
+    })
+
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+    expect(deadlineSignal?.aborted).toBe(false)
+
+    wrapper.unmount()
+    wrappers.splice(wrappers.indexOf(wrapper), 1)
+    expect(deadlineSignal?.aborted).toBe(true)
   })
 
   it('rejects a short Home page that claims more results remain', async () => {

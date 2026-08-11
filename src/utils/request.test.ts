@@ -15,6 +15,7 @@ vi.mock('../composables/useSnackbar', () => ({
 import request, {
   fetchCalendarNotices,
   fetchCategories,
+  fetchDeadlineNotices,
   fetchNoticeById,
   fetchNotices,
   fetchNoticesByIds,
@@ -217,6 +218,84 @@ describe('new API endpoints', () => {
     )
     await expect(fetchCalendarNotices({ month: '2026/08' })).rejects.toThrow(/YYYY-MM/)
     await expect(fetchCalendarNotices({ week: '2026-08' })).rejects.toThrow(/YYYY-W/)
+  })
+
+  it('fetches upcoming deadlines with repeated source parameters', async () => {
+    const get = vi.spyOn(request, 'get').mockResolvedValueOnce({
+      data: {
+        items: [
+          {
+            id: 'notice-1',
+            title: '标题',
+            source: '教务处',
+            publishDate: '2026-08-01',
+            deadline: '2026-08-12',
+            aiSummary: '摘要',
+            targetAudience: '全体学生',
+          },
+        ],
+        total: 1,
+      },
+    } as AxiosResponse<unknown>)
+
+    const result = await fetchDeadlineNotices({
+      days: 14,
+      sources: ['教务处', '研究生院'],
+      page: 1,
+      pageSize: 50,
+    })
+
+    expect(result.items[0]?.deadline).toBe('2026-08-12')
+    expect(get).toHaveBeenCalledWith(
+      '/notices/deadlines',
+      expect.objectContaining({
+        params: {
+          days: 14,
+          sources: ['教务处', '研究生院'],
+          page: 1,
+          pageSize: 50,
+        },
+        paramsSerializer: { indexes: false },
+      }),
+    )
+    const requestConfig = get.mock.calls[0]?.[1]
+    expect(
+      request.getUri({
+        url: '/notices/deadlines',
+        params: requestConfig?.params,
+        paramsSerializer: requestConfig?.paramsSerializer,
+      }),
+    ).toContain('sources%5B%5D=%E6%95%99%E5%8A%A1%E5%A4%84')
+  })
+
+  it('validates deadline query limits and payloads', async () => {
+    await expect(fetchDeadlineNotices({ days: 0 })).rejects.toThrow(/days/)
+    await expect(fetchDeadlineNotices({ days: 366 })).rejects.toThrow(/days/)
+    await expect(fetchDeadlineNotices({ page: 0 })).rejects.toThrow(/page/)
+    await expect(fetchDeadlineNotices({ pageSize: 501 })).rejects.toThrow(/pageSize/)
+    await expect(fetchDeadlineNotices({ sources: [] })).rejects.toThrow(/sources/)
+    await expect(fetchDeadlineNotices({ sources: [''] })).rejects.toThrow(/sources/)
+
+    vi.spyOn(request, 'get').mockResolvedValueOnce({
+      data: {
+        items: [
+          {
+            id: 'notice-1',
+            title: '标题',
+            source: '教务处',
+            publishDate: '2026-08-01',
+            deadline: null,
+            aiSummary: '',
+            targetAudience: '',
+          },
+        ],
+        total: 1,
+      },
+    } as AxiosResponse<unknown>)
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const result = await fetchDeadlineNotices()
+    expect(result.items).toEqual([])
+    expect(consoleWarn).toHaveBeenCalledOnce()
   })
 
   it('fetches sources, categories, and stats', async () => {

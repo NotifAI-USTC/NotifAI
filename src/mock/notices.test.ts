@@ -5,6 +5,7 @@ import { parseNoticeItem } from '../utils/validation'
 import {
   mockFetchCalendarNotices,
   mockFetchCategories,
+  mockFetchDeadlineNotices,
   mockFetchNotices,
   mockFetchNoticesByIds,
   mockFetchSources,
@@ -163,8 +164,30 @@ describe('mock new endpoints', () => {
     const result = mockFetchCalendarNotices({ week })
     expect(result.items.length).toBeGreaterThan(0)
     for (const item of result.items) {
-      expect(item.publishDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+      expect(
+        getIsoWeek(item.publishDate) === week || getIsoWeek(item.deadline ?? '') === week,
+      ).toBe(true)
     }
+  })
+
+  it('deadlines applies its date window, source filter, ordering, and pagination', () => {
+    const all = mockFetchDeadlineNotices({ days: 7, pageSize: 500 })
+    const source = all.items[0]?.source
+    expect(all.items.length).toBeGreaterThan(0)
+    expect(all.items.map((item) => item.id)).toEqual(
+      [...all.items]
+        .sort((a, b) => a.deadline.localeCompare(b.deadline) || a.id.localeCompare(b.id))
+        .map((item) => item.id),
+    )
+
+    const filtered = mockFetchDeadlineNotices({ days: 7, sources: source ? [source] : [] })
+    expect(filtered.items.every((item) => item.source === source)).toBe(true)
+
+    const firstPage = mockFetchDeadlineNotices({ days: 7, page: 1, pageSize: 1 })
+    const secondPage = mockFetchDeadlineNotices({ days: 7, page: 2, pageSize: 1 })
+    expect(firstPage.total).toBe(all.total)
+    expect(firstPage.items).toHaveLength(1)
+    expect(secondPage.items[0]?.id).toBe(all.items[1]?.id)
   })
 
   it('sources covers every department with a positive count', () => {
