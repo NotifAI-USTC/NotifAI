@@ -1,22 +1,23 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
-import { fetchCategories, fetchSources } from '../utils/request'
+import { fetchCategories } from '../utils/request'
 import { DEPARTMENTS, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
 import type { NoticeCategoryItem, SourceItem } from '../types/notice'
+import { useSourceCatalog } from '../composables/useSourceCatalog'
 
 const store = useUserSettingsStore()
 const router = useRouter()
 const newKeyword = ref('')
 
-const sources = ref<SourceItem[] | null>(null)
-const loading = ref(true)
-const loadError = ref('')
+const sourceCatalog = useSourceCatalog()
+const sources = sourceCatalog.sourceItems
+const loading = sourceCatalog.loading
+const loadError = sourceCatalog.error
 const categories = ref<NoticeCategoryItem[] | null>(null)
 const categoriesLoading = ref(true)
 const categoriesError = ref('')
-let sourceController: AbortController | null = null
 let categoryController: AbortController | null = null
 const sourceGroupOrder = ['校级部门', '二级学院', '其他'] as const
 const sourceGroupRank = new Map<string, number>(
@@ -45,26 +46,7 @@ const groupedSources = computed(() => {
 })
 
 async function loadSources(): Promise<void> {
-  sourceController?.abort()
-  const controller = new AbortController()
-  sourceController = controller
-  loading.value = true
-  loadError.value = ''
-  try {
-    const loadedSources = await fetchSources(controller.signal)
-    if (controller.signal.aborted) return
-    store.registerSources(loadedSources.map((source) => source.name))
-    sources.value = loadedSources
-  } catch (error) {
-    if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return
-    sources.value = null
-    loadError.value = error instanceof Error ? error.message : '来源列表加载失败，已展示内置部门'
-  } finally {
-    if (sourceController === controller) {
-      sourceController = null
-      loading.value = false
-    }
-  }
+  await sourceCatalog.loadSources(true)
 }
 
 const categoryOptions = computed<NoticeCategoryItem[]>(() => {
@@ -102,13 +84,10 @@ function onAddKeyword(): void {
   }
 }
 
-onMounted(() => {
-  void loadSources()
-  void loadCategories()
-})
+void loadSources()
+void loadCategories()
 
 onBeforeUnmount(() => {
-  sourceController?.abort()
   categoryController?.abort()
 })
 </script>

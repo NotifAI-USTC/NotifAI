@@ -26,9 +26,7 @@ for (const pageDef of PAGES) {
     await page.goto(pageDef.route, { waitUntil: 'networkidle' })
     await page.waitForTimeout(800)
 
-    const results = await new AxeBuilder({ page })
-      .disableRules(DISABLED_RULES)
-      .analyze()
+    const results = await new AxeBuilder({ page }).disableRules(DISABLED_RULES).analyze()
 
     const serious = results.violations.filter(
       (violation) => violation.impact === 'serious' || violation.impact === 'critical',

@@ -30,9 +30,7 @@ test('switches between month and week views with working navigation', async ({ p
 
   const headerBefore = (await page.locator('.header-title').textContent()) ?? ''
   await page.getByRole('button', { name: '下一周' }).click()
-  await expect
-    .poll(() => page.locator('.header-title').textContent())
-    .not.toBe(headerBefore)
+  await expect.poll(() => page.locator('.header-title').textContent()).not.toBe(headerBefore)
 
   // 回到今天：回到当前周，今天高亮唯一
   await page.getByRole('button', { name: '回到今天' }).click()

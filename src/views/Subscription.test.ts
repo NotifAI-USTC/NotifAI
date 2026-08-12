@@ -35,7 +35,8 @@ const stubs = {
   VListItem: {
     name: 'VListItemStub',
     props: ['title', 'subtitle'],
-    template: '<div><span>{{ title }}</span><span>{{ subtitle }}</span><slot name="append" /></div>',
+    template:
+      '<div><span>{{ title }}</span><span>{{ subtitle }}</span><slot name="append" /></div>',
   },
   VSwitch: {
     name: 'VSwitchStub',
@@ -58,9 +59,7 @@ describe('Subscription category preferences', () => {
     window.localStorage.clear()
     setActivePinia(createPinia())
     vi.clearAllMocks()
-    mocks.fetchSources.mockResolvedValue([
-      { name: '教务处', group: '校级部门', noticeCount: 10 },
-    ])
+    mocks.fetchSources.mockResolvedValue([{ name: '教务处', group: '校级部门', noticeCount: 10 }])
     mocks.fetchCategories.mockResolvedValue([
       { key: 'exam', name: '考试安排', description: '考试相关通知', noticeCount: 8 },
       { key: 'research', name: '科研通知', description: '科研相关通知', noticeCount: 4 },

@@ -1246,12 +1246,16 @@ export function normalizeStoredSettings(parsed: Record<string, unknown>): Stored
   })
     .map(normalizeDepartmentName)
     .filter((department): department is string => department !== null)
-  const subscriptionMode: SubscriptionMode =
+  const requestedSubscriptionMode: SubscriptionMode =
     parsed.subscriptionMode === 'all' || parsed.subscriptionMode === 'custom'
       ? parsed.subscriptionMode
       : subscribedDepts.length === 0
         ? 'all'
         : 'custom'
+  const subscriptionMode: SubscriptionMode =
+    requestedSubscriptionMode === 'custom' && subscribedDepts.length === 0
+      ? 'all'
+      : requestedSubscriptionMode
   const subscribedCategories = normalizeStringArray(parsed.subscribedCategories, {
     maxLength: 100,
     maxItems: VALID_CATEGORY_ORDER.length,
@@ -1259,12 +1263,16 @@ export function normalizeStoredSettings(parsed: Record<string, unknown>): Stored
   })
     .map(normalizeCategoryKey)
     .filter((category): category is NoticeCategoryKey => category !== null)
-  const categoryMode: SubscriptionMode =
+  const requestedCategoryMode: SubscriptionMode =
     parsed.categoryMode === 'all' || parsed.categoryMode === 'custom'
       ? parsed.categoryMode
       : subscribedCategories.length === 0
         ? 'all'
         : 'custom'
+  const categoryMode: SubscriptionMode =
+    requestedCategoryMode === 'custom' && subscribedCategories.length === 0
+      ? 'all'
+      : requestedCategoryMode
   const starredIds = normalizeNoticeIds(parsed.starredIds)
   const folders = normalizeFolders(parsed.folders)
   const validFolderIds = new Set(folders.map((folder) => folder.id))

@@ -1138,6 +1138,39 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     }
   }
 
+  /** 用后端来源目录替换本地白名单，并移除已经失效的自定义订阅。 */
+  function replaceAvailableSources(sourceNames: readonly string[]): void {
+    const nextSources = new Set<string>()
+    for (const sourceName of sourceNames) {
+      const normalized = normalizeDepartmentName(sourceName)
+      if (normalized) nextSources.add(normalized)
+    }
+
+    availableSourceNames.clear()
+    nextSources.forEach((sourceName) => availableSourceNames.add(sourceName))
+
+    if (subscriptionMode.value !== 'custom') return
+
+    if (subscribedDepts.value.length === 0) {
+      subscriptionMode.value = 'all'
+      persist()
+      return
+    }
+
+    const filteredSubscriptions = subscribedDepts.value.filter((source) => nextSources.has(source))
+    if (filteredSubscriptions.length === subscribedDepts.value.length) return
+
+    // 空自定义列表与入门引导的“暂不选择来源”保持一致，解释为全部来源，
+    // 避免来源目录刷新后首页意外变成空白。
+    if (filteredSubscriptions.length === 0) {
+      subscriptionMode.value = 'all'
+      subscribedDepts.value = []
+    } else {
+      subscribedDepts.value = filteredSubscriptions
+    }
+    persist()
+  }
+
   function toggleDepartment(dept: string): void {
     const normalizedDept = normalizeDepartmentName(dept)
     if (!normalizedDept || !availableSourceNames.has(normalizedDept)) return
@@ -1151,6 +1184,9 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     const idx = subscribedDepts.value.indexOf(normalizedDept)
     if (idx >= 0) {
       subscribedDepts.value.splice(idx, 1)
+      if (subscribedDepts.value.length === 0) {
+        subscriptionMode.value = 'all'
+      }
     } else {
       subscribedDepts.value.push(normalizedDept)
     }
@@ -1586,6 +1622,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     completeOnboarding,
     resetOnboarding,
     registerSources,
+    replaceAvailableSources,
     toggleDepartment,
     toggleCategory,
     subscribeAllCategories,

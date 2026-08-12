@@ -64,6 +64,9 @@ export interface NoticeListResponse {
   nextCursor: string | null
 }
 
+/** GET /notices 的分页实现；offset 用于兼容旧服务端，cursor 用于稳定翻页。 */
+export type NoticePaginationMode = 'offset' | 'cursor'
+
 /** 部门常量 */
 export interface Department {
   id: string

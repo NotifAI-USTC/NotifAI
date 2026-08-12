@@ -1,5 +1,5 @@
-import type { NoticeItem } from '../types/notice'
-import { parseNoticeItem } from './validation'
+import type { NoticeItem, NoticePaginationMode } from '../types/notice'
+import { isValidIsoTimestamp, parseNoticeItem } from './validation'
 
 /**
  * 首页通知缓存的持久化版本。
@@ -11,7 +11,8 @@ const CACHE_SCHEMA_VERSION = 2
 const DATABASE_NAME = 'notifai-cache'
 const DATABASE_VERSION = 1
 const STORE_NAME = 'notice-feeds'
-const MAX_CACHE_ITEMS = 100
+// 轻量列表项不包含正文，允许缓存更多页，避免“加载更多”后写缓存时整份失效。
+const MAX_CACHE_ITEMS = 500
 const MAX_CACHE_ENTRIES = 20
 const MAX_CACHE_ENTRY_CHARS = 8 * 1024 * 1024
 
@@ -24,6 +25,7 @@ export interface NoticeFeedCacheEntry {
   total: number
   nextPage: number
   nextCursor?: string | null
+  paginationMode?: NoticePaginationMode
   finished: boolean
   scanPaused: boolean
   fetchedAt: string
@@ -42,10 +44,6 @@ let databasePromise: Promise<IDBDatabase | null> | null = null
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isValidIsoTimestamp(value: unknown): value is string {
-  return typeof value === 'string' && value.length <= 100 && !Number.isNaN(Date.parse(value))
 }
 
 function parseCacheEntry(value: unknown, expectedKey?: string): StoredNoticeFeedCacheEntry | null {
@@ -75,6 +73,12 @@ function parseCacheEntry(value: unknown, expectedKey?: string): StoredNoticeFeed
       value.nextCursor.length > 4096)
   )
     return null
+  if (
+    value.paginationMode !== undefined &&
+    value.paginationMode !== 'offset' &&
+    value.paginationMode !== 'cursor'
+  )
+    return null
   if (!isValidIsoTimestamp(value.fetchedAt)) return null
 
   const items: NoticeItem[] = []
@@ -101,6 +105,7 @@ function parseCacheEntry(value: unknown, expectedKey?: string): StoredNoticeFeed
     total: value.total,
     nextPage: value.nextPage,
     nextCursor: value.nextCursor ?? null,
+    paginationMode: value.paginationMode ?? (value.nextCursor ? 'cursor' : 'offset'),
     finished: value.finished,
     scanPaused: value.scanPaused,
     fetchedAt: value.fetchedAt,

@@ -9,7 +9,13 @@ import {
   fetchStats,
 } from '../utils/request'
 import type { FetchNoticesParams } from '../utils/request'
-import type { DeadlineItem, NoticeCategoryKey, NoticeItem, StatsResponse } from '../types/notice'
+import type {
+  DeadlineItem,
+  NoticeCategoryKey,
+  NoticeItem,
+  NoticePaginationMode,
+  StatsResponse,
+} from '../types/notice'
 import { getNoticeCategoryName, normalizeNoticeSource } from '../types/notice'
 import NoticeCard from '../components/NoticeCard.vue'
 import DdlNoticeBar from '../components/DdlNoticeBar.vue'
@@ -25,6 +31,7 @@ const MAX_PAGES_PER_BATCH = 5
 const PULL_THRESHOLD = 72
 const URGENT_DDL_DAYS = 3
 const URGENT_DDL_LIMIT = 10
+const MAX_SERVER_EXCLUDE_IDS = 500
 
 interface QueryContext {
   keyword: string
@@ -42,28 +49,25 @@ interface QueryContext {
 
 interface FetchBatchResult {
   items: NoticeItem[]
-  rawCount: number
-  rawIds: string[]
   nextPage: number
   nextCursor: string | null
+  paginationMode: NoticePaginationMode
   finished: boolean
   scanPaused: boolean
   stale: boolean
   total: number
-  inconsistent: boolean
-  overlap: boolean
+  invalidItemCount: number
 }
 
 interface FetchPageResult {
   items: NoticeItem[]
-  rawCount: number
-  rawIds: string[]
   page: number
   nextCursor: string | null
+  paginationMode: NoticePaginationMode
   finished: boolean
   stale: boolean
   total: number
-  inconsistent: boolean
+  invalidItemCount: number
 }
 
 type RetryAction = 'refresh' | 'load'
@@ -81,7 +85,9 @@ const refreshing = ref(false)
 const backgroundRefreshing = ref(false)
 const nextPage = ref(1)
 const nextCursor = ref<string | null>(null)
+const paginationMode = ref<NoticePaginationMode>('offset')
 const loadedTotal = ref<number | null>(null)
+const invalidItemCount = ref(0)
 const initialLoading = ref(true)
 const requestError = ref('')
 const retryAction = ref<RetryAction>('refresh')
@@ -112,7 +118,7 @@ function triStateBoolean(value: TriStateFilter): boolean | undefined {
 function buildQueryContext(): QueryContext {
   const filters = advancedFilters.value
   const subscribedSources =
-    store.subscriptionMode === 'custom'
+    store.subscriptionMode === 'custom' && store.subscribedDepts.length > 0
       ? Array.from(new Set(store.subscribedDepts.map(normalizeNoticeSource)))
       : undefined
   const preferredCategories = store.categoryMode === 'custom' ? [...store.subscribedCategories] : []
@@ -138,6 +144,7 @@ function buildServerParams(
   context: QueryContext,
   cursor: string | null,
   page: number,
+  mode: NoticePaginationMode,
 ): FetchNoticesParams {
   const excludeIds = new Set<string>()
   if (context.isRead === 'no') {
@@ -156,9 +163,12 @@ function buildServerParams(
     dateTo: context.dateTo || undefined,
     hasDeadline: context.hasDeadline,
     light: true,
-    excludeIds: excludeIds.size > 0 ? [...excludeIds] : undefined,
-    cursor: cursor ?? undefined,
-    page,
+    // 后端最多接受 500 个排除 ID；其余记录仍会在客户端按本地状态二次过滤。
+    excludeIds: excludeIds.size > 0 ? [...excludeIds].slice(0, MAX_SERVER_EXCLUDE_IDS) : undefined,
+    // cursor 模式的第一页省略游标；后续只传服务端返回的游标。
+    // 空字符串不是合法的不透明游标，不能用它代替“第一页”。
+    cursor: mode === 'cursor' ? (cursor ?? undefined) : undefined,
+    page: mode === 'offset' ? page : undefined,
     pageSize: PAGE_SIZE,
   }
 }
@@ -243,112 +253,147 @@ function mergeUniqueNotices(existing: NoticeItem[], incoming: NoticeItem[]): Not
   return merged
 }
 
-function staleBatchResult(cursor: string | null): FetchBatchResult {
+function staleBatchResult(cursor: string | null, mode: NoticePaginationMode): FetchBatchResult {
   return {
     items: [],
-    rawCount: 0,
-    rawIds: [],
     nextPage: 1,
     nextCursor: cursor,
+    paginationMode: mode,
     finished: true,
     scanPaused: false,
     stale: true,
     total: 0,
-    inconsistent: false,
-    overlap: false,
+    invalidItemCount: 0,
   }
 }
 
-function stalePageResult(cursor: string | null, page: number): FetchPageResult {
+function stalePageResult(
+  cursor: string | null,
+  page: number,
+  mode: NoticePaginationMode,
+): FetchPageResult {
   return {
     items: [],
-    rawCount: 0,
-    rawIds: [],
     page,
     nextCursor: cursor,
+    paginationMode: mode,
     finished: true,
     stale: true,
     total: 0,
-    inconsistent: false,
+    invalidItemCount: 0,
   }
+}
+
+function hasHttpStatus(error: unknown, status: number): boolean {
+  if (typeof error !== 'object' || error === null || !('response' in error)) return false
+  const response = (error as { response?: unknown }).response
+  return typeof response === 'object' && response !== null && 'status' in response
+    ? (response as { status?: unknown }).status === status
+    : false
 }
 
 async function fetchPage(
   context: QueryContext,
   cursor: string | null,
   page: number,
+  mode: NoticePaginationMode,
   signal: AbortSignal,
 ): Promise<FetchPageResult> {
-  const params = buildServerParams(context, cursor, page)
-
   try {
-    const response = await fetchNotices(params, signal)
+    let effectiveMode = mode
+    let response
+    try {
+      response = await fetchNotices(buildServerParams(context, cursor, page, mode), signal)
+    } catch (error) {
+      // 旧版后端可能要求首个请求显式携带 page。仅对首个请求回退到
+      // offset，后续请求的游标错误必须继续暴露，避免静默重复加载错误页面。
+      if (mode !== 'cursor' || cursor !== null || !hasHttpStatus(error, 400)) throw error
+      effectiveMode = 'offset'
+      response = await fetchNotices(buildServerParams(context, cursor, page, effectiveMode), signal)
+    }
     if (signal.aborted) {
       return {
         items: [],
-        rawCount: 0,
-        rawIds: [],
         page,
         nextCursor: cursor,
+        paginationMode: effectiveMode,
         finished: true,
         stale: true,
         total: 0,
-        inconsistent: false,
+        invalidItemCount: 0,
       }
+    }
+
+    const responseNextCursor = response.nextCursor ?? null
+
+    // 若服务端把空游标按旧 offset 请求处理，自动保持兼容；只有拿到
+    // nextCursor 才继续使用 cursor 模式。
+    if (
+      effectiveMode === 'cursor' &&
+      cursor === null &&
+      responseNextCursor === null &&
+      response.items.length > 0 &&
+      page * PAGE_SIZE < response.total
+    ) {
+      effectiveMode = 'offset'
     }
 
     const filtered = applyClientFilters(response.items, context)
     return {
       items: filtered,
-      rawCount: response.rawItemCount,
-      rawIds: response.items.map((notice) => notice.id),
       page,
-      nextCursor: response.nextCursor ?? null,
+      nextCursor: effectiveMode === 'cursor' ? responseNextCursor : null,
+      paginationMode: effectiveMode,
       finished:
         response.items.length === 0 ||
-        (cursor !== null ? response.nextCursor === null : page * PAGE_SIZE >= response.total),
+        (effectiveMode === 'cursor'
+          ? responseNextCursor === null
+          : page * PAGE_SIZE >= response.total),
       stale: false,
       total: response.total,
-      inconsistent: false,
+      invalidItemCount: response.invalidItemCount ?? 0,
     }
   } catch (error) {
-    if (signal.aborted) return stalePageResult(cursor, page)
+    if (signal.aborted) return stalePageResult(cursor, page, mode)
     throw error
   }
 }
 
 /**
- * 读取一批服务端页面。高级搜索中的已读、收藏、标签和屏蔽词属于本地
- * 状态，不能依赖后端分页结果；当第一页没有匹配项时，继续扫描有限的
+ * 读取一批服务端页面。高级搜索中的标签和屏蔽词属于本地状态，不能完全
+ * 依赖后端分页结果；当第一页没有匹配项时，继续扫描有限的
  * 后续页面，避免首页误报“暂无通知”。
  */
 async function fetchBatch(
   context: QueryContext,
   startCursor: string | null,
   startPage: number,
+  startMode: NoticePaginationMode,
   signal: AbortSignal,
 ): Promise<FetchBatchResult> {
   const shouldScan = hasLocalFilters(context)
   const maxPages = shouldScan ? MAX_PAGES_PER_BATCH : 1
   let cursor = startCursor
   let page = startPage
+  let mode = startMode
   let total = 0
   let finished = false
   let scanPaused = false
+  let invalidItemCount = 0
   let pagesFetched = 0
   let items: NoticeItem[] = []
-  const rawIds: string[] = []
 
   for (; pagesFetched < maxPages; pagesFetched += 1) {
-    const result = await fetchPage(context, cursor, page, signal)
-    if (result.stale) return staleBatchResult(cursor)
+    const result = await fetchPage(context, cursor, page, mode, signal)
+    if (result.stale) return staleBatchResult(cursor, mode)
 
-    rawIds.push(...result.rawIds)
     items = mergeUniqueNotices(items, result.items)
     finished = result.finished
     cursor = result.nextCursor
+    mode = result.paginationMode
     page = result.page + 1
     total = result.total
+    invalidItemCount += result.invalidItemCount
 
     if (finished || !shouldScan || items.length > 0) break
   }
@@ -359,16 +404,14 @@ async function fetchBatch(
 
   return {
     items,
-    rawCount: rawIds.length,
-    rawIds,
     nextPage: page,
-    nextCursor: cursor,
+    nextCursor: mode === 'cursor' ? cursor : null,
+    paginationMode: mode,
     finished,
     scanPaused,
     stale: false,
     total,
-    inconsistent: false,
-    overlap: false,
+    invalidItemCount,
   }
 }
 
@@ -422,9 +465,11 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
         notices.value = cached.items
         nextPage.value = cached.nextPage
         nextCursor.value = cached.nextCursor ?? null
+        paginationMode.value = cached.paginationMode ?? 'offset'
         finished.value = cached.finished
         scanPaused.value = cached.scanPaused
         loadedTotal.value = cached.total
+        invalidItemCount.value = 0
         loadedQueryKey = queryKey
         hasVisibleData = true
         showingCachedData = true
@@ -446,9 +491,11 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
     initialLoading.value = true
     nextPage.value = 1
     nextCursor.value = null
+    paginationMode.value = 'cursor'
     finished.value = false
     scanPaused.value = false
     loadedTotal.value = null
+    invalidItemCount.value = 0
     notices.value = []
     cacheStatusMessage.value = ''
   } else {
@@ -460,15 +507,17 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
   backgroundRefreshing.value = hasVisibleData
 
   try {
-    const result = await fetchBatch(context, null, 1, controller.signal)
+    const result = await fetchBatch(context, null, 1, 'cursor', controller.signal)
     if (result.stale || sequence !== loadSequence) return
 
     notices.value = result.items
     nextPage.value = result.nextPage
     nextCursor.value = result.nextCursor
+    paginationMode.value = result.paginationMode
     finished.value = result.finished
     scanPaused.value = result.scanPaused
     loadedTotal.value = result.total
+    invalidItemCount.value = result.invalidItemCount
     loadedQueryKey = queryKey
     store.cacheNotices(result.items)
     cacheStatusMessage.value = ''
@@ -479,6 +528,7 @@ async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
       total: result.total,
       nextPage: result.nextPage,
       nextCursor: result.nextCursor,
+      paginationMode: result.paginationMode,
       finished: result.finished,
       scanPaused: result.scanPaused,
       fetchedAt: new Date().toISOString(),
@@ -532,15 +582,36 @@ async function loadMore(): Promise<void> {
   requestError.value = ''
 
   try {
-    const result = await fetchBatch(context, nextCursor.value, nextPage.value, controller.signal)
+    const result = await fetchBatch(
+      context,
+      nextCursor.value,
+      nextPage.value,
+      paginationMode.value,
+      controller.signal,
+    )
     if (result.stale || sequence !== loadSequence || queryKey !== loadedQueryKey) return
 
-    notices.value = mergeUniqueNotices(notices.value, result.items)
+    const mergedNotices = mergeUniqueNotices(notices.value, result.items)
+    notices.value = mergedNotices
     nextPage.value = result.nextPage
     nextCursor.value = result.nextCursor
+    paginationMode.value = result.paginationMode
     finished.value = result.finished
     scanPaused.value = result.scanPaused
     loadedTotal.value = result.total
+    invalidItemCount.value += result.invalidItemCount
+    store.cacheNotices(result.items)
+    void writeNoticeFeedCache({
+      key: queryKey,
+      items: mergedNotices,
+      total: result.total,
+      nextPage: result.nextPage,
+      nextCursor: result.nextCursor,
+      paginationMode: result.paginationMode,
+      finished: result.finished,
+      scanPaused: result.scanPaused,
+      fetchedAt: new Date().toISOString(),
+    })
   } catch (error) {
     if (error instanceof ApiConfigurationError) {
       requestError.value = error.message
@@ -713,7 +784,7 @@ async function loadUrgentDeadlines(): Promise<void> {
   deadlinesController?.abort()
 
   const sources =
-    store.subscriptionMode === 'custom'
+    store.subscriptionMode === 'custom' && store.subscribedDepts.length > 0
       ? Array.from(new Set(store.subscribedDepts.map(normalizeNoticeSource)))
       : undefined
   if (sources?.length === 0) {
@@ -938,6 +1009,17 @@ onBeforeUnmount(() => {
       </v-alert>
 
       <v-alert
+        v-if="invalidItemCount > 0 && !requestError"
+        type="warning"
+        variant="tonal"
+        density="compact"
+        class="mb-4"
+        role="status"
+      >
+        有 {{ invalidItemCount }} 条通知数据格式异常，已跳过；可刷新后重试。
+      </v-alert>
+
+      <v-alert
         v-if="scanPaused && !requestError"
         type="info"
         variant="tonal"
@@ -993,7 +1075,13 @@ onBeforeUnmount(() => {
       </v-alert>
 
       <v-card
-        v-if="filteredNotices.length === 0 && !loading && !requestError && !scanPaused"
+        v-if="
+          filteredNotices.length === 0 &&
+          !loading &&
+          !requestError &&
+          !scanPaused &&
+          invalidItemCount === 0
+        "
         flat
         class="text-center pa-8 bg-transparent"
       >

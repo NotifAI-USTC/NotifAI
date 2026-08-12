@@ -88,7 +88,6 @@ describe('shiftLocalDays', () => {
   })
 })
 
-
 describe('getIsoWeek', () => {
   it('returns ISO week strings for known dates', () => {
     expect(getIsoWeek('2026-01-01')).toBe('2026-W01')

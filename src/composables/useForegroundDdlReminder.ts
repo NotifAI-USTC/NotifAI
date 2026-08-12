@@ -56,7 +56,7 @@ export function useForegroundDdlReminder(): void {
     if (Notification.permission !== 'granted') return
 
     const sources =
-      store.subscriptionMode === 'custom'
+      store.subscriptionMode === 'custom' && store.subscribedDepts.length > 0
         ? Array.from(new Set(store.subscribedDepts.map(normalizeNoticeSource)))
         : undefined
     if (sources?.length === 0) return

@@ -22,6 +22,7 @@ import {
   parseNoticeListResponse,
   parseSourceListResponse,
   parseStatsResponse,
+  isValidIsoTimestamp,
 } from './validation'
 import type { ValidatedNoticeListResponse } from './validation'
 import { isNoticeCategoryKey } from '../types/notice'
@@ -157,10 +158,7 @@ function validateOptionalText(value: unknown, name: string, maxLength = 200): st
 
 function validateOptionalIsoTime(value: unknown, name: string): string | undefined {
   if (value === undefined) return undefined
-  if (typeof value !== 'string' || value.length === 0 || value.length > 100) {
-    throw new DataValidationError(`${name} 必须是 ISO8601 时间字符串`)
-  }
-  if (Number.isNaN(Date.parse(value))) {
+  if (!isValidIsoTimestamp(value)) {
     throw new DataValidationError(`${name} 必须是合法的 ISO8601 时间字符串`)
   }
   return value
@@ -251,10 +249,13 @@ export async function fetchNotices(
   }
   let cursor: string | undefined
   if (params.cursor !== undefined) {
-    if (typeof params.cursor !== 'string' || params.cursor.length > 4096) {
-      throw new DataValidationError('cursor 必须是不超过 4096 个字符的字符串')
+    if (
+      typeof params.cursor !== 'string' ||
+      params.cursor.length === 0 ||
+      params.cursor.length > 4096
+    ) {
+      throw new DataValidationError('cursor 必须是 1 到 4096 个字符的字符串')
     }
-    // 空光标用于显式启动游标分页；后续光标由服务端返回。
     cursor = params.cursor
   }
 

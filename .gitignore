@@ -20,6 +20,9 @@ test-results
 # Vite
 .vite
 
+# Local agent artifacts
+.gstack/
+
 # Capacitor (future mobile builds)
 android/
 ios/

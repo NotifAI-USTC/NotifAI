@@ -1283,6 +1283,42 @@ describe('user settings store', () => {
     expect(store.subscribedDepts).toContain('新成立研究院')
   })
 
+  it('reconciles custom subscriptions with the latest backend source snapshot', () => {
+    store = useUserSettingsStore()
+    store.completeOnboarding({
+      identity: 'custom',
+      channels: ['教务处', '新成立研究院'],
+      categories: [],
+      keywords: [],
+    })
+
+    store.replaceAvailableSources(['教务处'])
+    expect(store.subscriptionMode).toBe('custom')
+    expect(store.subscribedDepts).toEqual(['教务处'])
+    expect(store.isSubscribed('新成立研究院')).toBe(false)
+
+    // 如果目录更新后自定义列表全部失效，回到“全部来源”，避免首页变成
+    // 一个用户无法修复的空订阅状态。
+    store.replaceAvailableSources(['本科生院'])
+    expect(store.subscriptionMode).toBe('all')
+    expect(store.subscribedDepts).toEqual([])
+    expect(store.isSubscribed('本科生院')).toBe(true)
+  })
+
+  it('normalizes a persisted empty custom subscription to all sources', () => {
+    window.localStorage.setItem(
+      USER_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        subscriptionMode: 'custom',
+        subscribedDepts: [],
+      }),
+    )
+
+    store = useUserSettingsStore()
+    expect(store.subscriptionMode).toBe('all')
+    expect(store.subscribedDepts).toEqual([])
+  })
+
   it('completes and resets onboarding without creating a second settings source', () => {
     store = useUserSettingsStore()
     expect(store.hasOnboarded).toBe(false)

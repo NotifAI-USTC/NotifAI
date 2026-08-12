@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useUserSettingsStore } from '../stores/userSettings'
 import type { OnboardingIdentity } from '../stores/userSettings'
 import { useWindowSize } from '../composables/useWindowSize'
-import { fetchSources } from '../utils/request'
 import { DEPARTMENTS, getNoticeCategoryName } from '../types/notice'
-import type { NoticeCategoryKey, SourceItem } from '../types/notice'
+import type { NoticeCategoryKey } from '../types/notice'
+import { useSourceCatalog } from '../composables/useSourceCatalog'
 
 interface ChannelOption {
   name: string
@@ -126,10 +126,10 @@ const draftCategories = ref<NoticeCategoryKey[]>(
 )
 const draftKeywords = ref<string[]>([...store.blackKeywords])
 const newKeyword = ref('')
-const sources = ref<SourceItem[] | null>(null)
-const sourcesLoading = ref(false)
-const sourcesError = ref('')
-let sourceRequestController: AbortController | null = null
+const sourceCatalog = useSourceCatalog()
+const sources = sourceCatalog.sourceItems
+const sourcesLoading = sourceCatalog.loading
+const sourcesError = sourceCatalog.error
 
 store.registerSources([
   ...FALLBACK_SCHOOL_OPTIONS.map((channel) => channel.name),
@@ -217,39 +217,11 @@ function toggleChannel(channel: string): void {
 }
 
 async function loadSources(force = false): Promise<void> {
-  if (sourcesLoading.value || (!force && sources.value !== null)) return
-
-  sourceRequestController?.abort()
-  const controller = new AbortController()
-  sourceRequestController = controller
-  sourcesLoading.value = true
-  sourcesError.value = ''
-
-  try {
-    const loadedSources = await fetchSources(controller.signal)
-    if (controller.signal.aborted) return
-    sources.value = loadedSources
-    store.registerSources(loadedSources.map((source) => source.name))
-
-    // 来源列表是动态数据。若用户尚未手动改成“全部/自定义”，将静态
-    // 预设裁剪到当前 API 真正存在的来源，避免保存无法在引导页选择的名称。
-    if (draftIdentity.value !== 'custom' && !draftSelectAll.value) {
-      draftChannels.value = resolvePresetChannels(draftChannels.value)
-    }
-  } catch (error) {
-    if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
-      return
-    }
-    sources.value = null
-    sourcesError.value =
-      error instanceof Error
-        ? `${error.message}，已展示内置来源列表`
-        : '来源列表加载失败，已展示内置来源列表'
-  } finally {
-    if (sourceRequestController === controller) {
-      sourceRequestController = null
-      sourcesLoading.value = false
-    }
+  const loaded = await sourceCatalog.loadSources(force)
+  if (loaded && draftIdentity.value !== 'custom' && !draftSelectAll.value) {
+    // 来源列表是动态数据。将静态预设裁剪到当前 API 真正存在的来源，
+    // 避免保存无法在引导页选择的名称。
+    draftChannels.value = resolvePresetChannels(draftChannels.value)
   }
 }
 
@@ -293,10 +265,6 @@ function complete(): void {
     keywords: [...draftKeywords.value],
   })
 }
-
-onBeforeUnmount(() => {
-  sourceRequestController?.abort()
-})
 </script>
 
 <template>

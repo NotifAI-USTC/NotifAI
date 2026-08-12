@@ -98,12 +98,20 @@ describe('useForegroundDdlReminder', () => {
     wrapper.unmount()
   })
 
-  it('does not request all sources when a custom subscription is empty', async () => {
+  it('treats an empty custom subscription as all sources', async () => {
     mocks.store.subscribedDepts = []
     const wrapper = mount(Harness)
     await flushPromises()
 
-    expect(mocks.fetchDeadlineNotices).not.toHaveBeenCalled()
+    expect(mocks.fetchDeadlineNotices).toHaveBeenCalledWith(
+      {
+        days: 1,
+        sources: undefined,
+        page: 1,
+        pageSize: 50,
+      },
+      expect.any(AbortSignal),
+    )
     wrapper.unmount()
   })
 

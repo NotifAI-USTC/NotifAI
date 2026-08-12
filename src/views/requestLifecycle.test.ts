@@ -250,7 +250,7 @@ describe('view request lifecycle', () => {
     mocks.fetchNotices.mockResolvedValue({
       items: Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 15,
-      rawItemCount: 15,
+      invalidItemCount: 0,
     })
     mocks.fetchDeadlineNotices.mockResolvedValue({
       items: [makeDeadlineItem()],
@@ -295,7 +295,7 @@ describe('view request lifecycle', () => {
     mocks.fetchNotices.mockResolvedValue({
       items: Array.from({ length: 10 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 30,
-      rawItemCount: 10,
+      invalidItemCount: 0,
       nextCursor: 'cursor-2',
     })
 
@@ -304,14 +304,23 @@ describe('view request lifecycle', () => {
     await flushPromises()
 
     expect(mocks.fetchNotices).toHaveBeenCalledOnce()
+    expect(mocks.fetchNotices).toHaveBeenCalledWith(
+      expect.objectContaining({
+        light: true,
+        cursor: undefined,
+        page: undefined,
+        pageSize: 15,
+      }),
+      expect.any(AbortSignal),
+    )
     expect(wrapper.text()).not.toContain('通知加载失败')
   })
 
-  it('uses the raw Home page size when validation skips a malformed notice', async () => {
+  it('keeps a short offset page eligible for loading more', async () => {
     mocks.fetchNotices.mockResolvedValue({
       items: Array.from({ length: 14 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 30,
-      rawItemCount: 15,
+      invalidItemCount: 0,
     })
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -321,6 +330,28 @@ describe('view request lifecycle', () => {
     expect(mocks.fetchNotices).toHaveBeenCalledOnce()
     expect(wrapper.text()).not.toContain('通知加载失败')
     expect(wrapper.findAll('.notice-card-stub')).toHaveLength(14)
+
+    await wrapper.get('.notice-grid').trigger('scroll')
+    await flushPromises()
+    expect(mocks.fetchNotices.mock.calls.map(([params]) => params)).toEqual([
+      expect.objectContaining({ cursor: undefined, page: undefined }),
+      expect.objectContaining({ cursor: undefined, page: 2 }),
+    ])
+  })
+
+  it('shows a warning when the API skips malformed notice records', async () => {
+    mocks.fetchNotices.mockResolvedValue({
+      items: [makeNotice()],
+      total: 1,
+      invalidItemCount: 2,
+      nextCursor: null,
+    })
+
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('有 2 条通知数据格式异常，已跳过')
   })
 
   it('applies persisted category preferences to the Home API request', async () => {
@@ -332,7 +363,7 @@ describe('view request lifecycle', () => {
         makeNotice({ id: `notice-${index + 1}`, categories: ['exam'] }),
       ),
       total: 15,
-      rawItemCount: 15,
+      invalidItemCount: 0,
     })
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -419,7 +450,7 @@ describe('view request lifecycle', () => {
         makeNotice({ id: `notice-${params.cursor === 'cursor-2' ? 200 + index : 100 + index}` }),
       ),
       total: 45,
-      rawItemCount: 15,
+      invalidItemCount: 0,
       nextCursor: params.cursor === 'cursor-2' ? null : 'cursor-2',
     }))
 
@@ -447,7 +478,7 @@ describe('view request lifecycle', () => {
         }),
       ),
       total: 30,
-      rawItemCount: 15,
+      invalidItemCount: 0,
       nextCursor: params.cursor === 'cursor-2' ? null : 'cursor-2',
     }))
 
@@ -473,7 +504,7 @@ describe('view request lifecycle', () => {
         ? Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 15}` }))
         : Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 30,
-      rawItemCount: 15,
+      invalidItemCount: 0,
       nextCursor: params.cursor === 'cursor-2' ? null : 'cursor-2',
     }))
 
@@ -487,6 +518,17 @@ describe('view request lifecycle', () => {
       undefined,
       'cursor-2',
     ])
+    expect(mocks.writeNoticeFeedCache).toHaveBeenCalledTimes(2)
+    expect(mocks.writeNoticeFeedCache).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        items: expect.arrayContaining([
+          expect.objectContaining({ id: 'notice-1' }),
+          expect.objectContaining({ id: 'notice-15' }),
+        ]),
+        nextCursor: null,
+        paginationMode: 'cursor',
+      }),
+    )
     expect(wrapper.text()).not.toContain('更多通知加载失败')
   })
 
@@ -533,7 +575,7 @@ describe('view request lifecycle', () => {
     mocks.fetchNotices.mockResolvedValue({
       items: Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 15,
-      rawItemCount: 15,
+      invalidItemCount: 0,
     })
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -557,7 +599,7 @@ describe('view request lifecycle', () => {
     mocks.fetchNotices.mockResolvedValue({
       items: Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 15,
-      rawItemCount: 15,
+      invalidItemCount: 0,
     })
 
     const wrapper = shallowMount(Home, { global: { stubs } })
@@ -576,7 +618,7 @@ describe('view request lifecycle', () => {
     mocks.fetchNotices.mockResolvedValue({
       items: Array.from({ length: 15 }, (_, index) => makeNotice({ id: `notice-${index + 1}` })),
       total: 15,
-      rawItemCount: 15,
+      invalidItemCount: 0,
     })
 
     const wrapper = shallowMount(Home, { global: { stubs } })

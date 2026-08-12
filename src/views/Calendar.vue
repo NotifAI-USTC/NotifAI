@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ApiConfigurationError, fetchCalendarNotices, type FetchCalendarParams } from '../utils/request'
+import {
+  ApiConfigurationError,
+  fetchCalendarNotices,
+  type FetchCalendarParams,
+} from '../utils/request'
 import {
   formatLocalDate,
   formatPublishDate,
@@ -81,7 +85,11 @@ function getMonthRange(dateStr: string): { start: string; end: string } | null {
 function getWeekRange(dateStr: string): { start: string; end: string } | null {
   const date = parseLocalDate(dateStr)
   if (!date) return null
-  const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate() - ((date.getDay() + 6) % 7))
+  const monday = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate() - ((date.getDay() + 6) % 7),
+  )
   const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6)
   return {
     start: formatLocalDate(monday),
@@ -90,9 +98,7 @@ function getWeekRange(dateStr: string): { start: string; end: string } | null {
 }
 
 const visibleRange = computed(() =>
-  viewMode.value === 'week'
-    ? getWeekRange(calendarDate.value)
-    : getMonthRange(calendarDate.value),
+  viewMode.value === 'week' ? getWeekRange(calendarDate.value) : getMonthRange(calendarDate.value),
 )
 const visibleRangeKey = computed(() => {
   const range = visibleRange.value
@@ -375,7 +381,9 @@ async function loadVisibleRange() {
     if (controller.signal.aborted || requestId !== loadRequestId) return
     notices.value = []
     loadError.value =
-      error instanceof ApiConfigurationError ? error.message : '无法加载当前范围通知，请检查网络后重试'
+      error instanceof ApiConfigurationError
+        ? error.message
+        : '无法加载当前范围通知，请检查网络后重试'
   } finally {
     if (loadController === controller) loadController = null
     if (requestId === loadRequestId) loading.value = false
@@ -479,102 +487,107 @@ onBeforeUnmount(() => {
         </div>
 
         <template v-if="viewMode === 'month'">
-        <!-- 自研月网格（替代弃用的 v-calendar） -->
-        <div v-if="!isMobile" class="month-grid" role="grid" aria-label="月份日历">
-          <div class="month-grid__head" role="row">
-            <div
-              v-for="label in WEEKDAY_LABELS"
-              :key="label"
-              class="month-grid__weekday"
-              role="columnheader"
-            >
-              {{ label }}
+          <!-- 自研月网格（替代弃用的 v-calendar） -->
+          <div v-if="!isMobile" class="month-grid" role="grid" aria-label="月份日历">
+            <div class="month-grid__head" role="row">
+              <div
+                v-for="label in WEEKDAY_LABELS"
+                :key="label"
+                class="month-grid__weekday"
+                role="columnheader"
+              >
+                {{ label }}
+              </div>
             </div>
-          </div>
-          <div v-for="(week, weekIndex) in monthGrid" :key="weekIndex" class="month-grid__row" role="row">
             <div
-              v-for="cell in week"
-              :key="cell.dateStr"
-              class="month-grid__cell"
-              :class="{
-                'month-grid__cell--outside': !cell.inMonth,
-                'month-grid__cell--today': cell.isToday,
-                'month-grid__cell--selected': cell.isSelected,
-              }"
-              role="gridcell"
-              :aria-label="cellAriaLabel(cell)"
-              :aria-selected="cell.isSelected"
-              tabindex="0"
-              @click="handleDayClick(cell.dateStr)"
-              @keydown.enter.prevent="handleDayClick(cell.dateStr)"
-              @keydown.space.prevent="handleDayClick(cell.dateStr)"
+              v-for="(week, weekIndex) in monthGrid"
+              :key="weekIndex"
+              class="month-grid__row"
+              role="row"
             >
-              <div class="month-grid__date">{{ cell.dayNumber }}</div>
-              <div class="month-grid__events">
-                <template
-                  v-for="event in cell.events.slice(0, MAX_EVENTS_PER_CELL)"
-                  :key="`${event.type}-${event.noticeId}`"
-                >
-                  <button
-                    type="button"
-                    class="event-chip"
-                    :class="{ 'event-chip--deadline': event.type === 'deadline' }"
-                    :style="{ backgroundColor: event.color, color: event.textColor }"
-                    :aria-label="eventAriaLabel(event)"
-                    :title="event.name"
-                    @click.stop="goToDetail(event.noticeId)"
+              <div
+                v-for="cell in week"
+                :key="cell.dateStr"
+                class="month-grid__cell"
+                :class="{
+                  'month-grid__cell--outside': !cell.inMonth,
+                  'month-grid__cell--today': cell.isToday,
+                  'month-grid__cell--selected': cell.isSelected,
+                }"
+                role="gridcell"
+                :aria-label="cellAriaLabel(cell)"
+                :aria-selected="cell.isSelected"
+                tabindex="0"
+                @click="handleDayClick(cell.dateStr)"
+                @keydown.enter.prevent="handleDayClick(cell.dateStr)"
+                @keydown.space.prevent="handleDayClick(cell.dateStr)"
+              >
+                <div class="month-grid__date">{{ cell.dayNumber }}</div>
+                <div class="month-grid__events">
+                  <template
+                    v-for="event in cell.events.slice(0, MAX_EVENTS_PER_CELL)"
+                    :key="`${event.type}-${event.noticeId}`"
                   >
-                    <v-icon v-if="event.type === 'deadline'" size="10" class="mr-1">
-                      $clockAlert
-                    </v-icon>
-                    <span class="event-text">{{ event.name }}</span>
+                    <button
+                      type="button"
+                      class="event-chip"
+                      :class="{ 'event-chip--deadline': event.type === 'deadline' }"
+                      :style="{ backgroundColor: event.color, color: event.textColor }"
+                      :aria-label="eventAriaLabel(event)"
+                      :title="event.name"
+                      @click.stop="goToDetail(event.noticeId)"
+                    >
+                      <v-icon v-if="event.type === 'deadline'" size="10" class="mr-1">
+                        $clockAlert
+                      </v-icon>
+                      <span class="event-text">{{ event.name }}</span>
+                    </button>
+                  </template>
+                  <button
+                    v-if="cell.events.length > MAX_EVENTS_PER_CELL"
+                    type="button"
+                    class="month-grid__more"
+                    :aria-label="`查看 ${formatPublishDate(cell.dateStr)} 更多通知`"
+                    @click.stop="handleDayClick(cell.dateStr)"
+                  >
+                    +{{ cell.events.length - MAX_EVENTS_PER_CELL }} 项
                   </button>
-                </template>
-                <button
-                  v-if="cell.events.length > MAX_EVENTS_PER_CELL"
-                  type="button"
-                  class="month-grid__more"
-                  :aria-label="`查看 ${formatPublishDate(cell.dateStr)} 更多通知`"
-                  @click.stop="handleDayClick(cell.dateStr)"
-                >
-                  +{{ cell.events.length - MAX_EVENTS_PER_CELL }} 项
-                </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div v-else class="mobile-agenda" aria-label="当月议程">
-          <v-list v-if="mobileAgendaEvents.length > 0" lines="two">
-            <v-list-subheader>当月议程</v-list-subheader>
-            <v-list-item
-              v-for="event in mobileAgendaEvents"
-              :key="`${event.type}-${event.noticeId}-${event.start}`"
-              :title="event.name"
-              :subtitle="`${formatPublishDate(event.start)} · ${event.source}`"
-              @click="goToDetail(event.noticeId)"
-            >
-              <template #prepend>
-                <v-icon :color="event.color">
-                  {{ event.type === 'deadline' ? '$clockAlertOutline' : '$bullhornOutline' }}
-                </v-icon>
-              </template>
-              <template #append>
-                <v-chip
-                  size="x-small"
-                  :color="event.type === 'deadline' ? 'warning' : 'primary'"
-                  variant="tonal"
-                >
-                  {{ event.type === 'deadline' ? '截止' : '发布' }}
-                </v-chip>
-              </template>
-            </v-list-item>
-          </v-list>
-          <div v-else class="mobile-agenda-empty">
-            <v-icon size="36" color="grey">$calendarBlankOutline</v-icon>
-            <span>当月暂无通知</span>
+          <div v-else class="mobile-agenda" aria-label="当月议程">
+            <v-list v-if="mobileAgendaEvents.length > 0" lines="two">
+              <v-list-subheader>当月议程</v-list-subheader>
+              <v-list-item
+                v-for="event in mobileAgendaEvents"
+                :key="`${event.type}-${event.noticeId}-${event.start}`"
+                :title="event.name"
+                :subtitle="`${formatPublishDate(event.start)} · ${event.source}`"
+                @click="goToDetail(event.noticeId)"
+              >
+                <template #prepend>
+                  <v-icon :color="event.color">
+                    {{ event.type === 'deadline' ? '$clockAlertOutline' : '$bullhornOutline' }}
+                  </v-icon>
+                </template>
+                <template #append>
+                  <v-chip
+                    size="x-small"
+                    :color="event.type === 'deadline' ? 'warning' : 'primary'"
+                    variant="tonal"
+                  >
+                    {{ event.type === 'deadline' ? '截止' : '发布' }}
+                  </v-chip>
+                </template>
+              </v-list-item>
+            </v-list>
+            <div v-else class="mobile-agenda-empty">
+              <v-icon size="36" color="grey">$calendarBlankOutline</v-icon>
+              <span>当月暂无通知</span>
+            </div>
           </div>
-        </div>
         </template>
 
         <!-- 周视图 -->
@@ -643,12 +656,7 @@ onBeforeUnmount(() => {
               >
                 <span class="week-agenda__weekday">{{ day.weekdayLabel }}</span>
                 <span class="week-agenda__date">{{ formatPublishDate(day.dateStr) }}</span>
-                <v-chip
-                  v-if="day.events.length > 0"
-                  size="x-small"
-                  color="primary"
-                  variant="tonal"
-                >
+                <v-chip v-if="day.events.length > 0" size="x-small" color="primary" variant="tonal">
                   {{ day.events.length }} 项
                 </v-chip>
               </div>

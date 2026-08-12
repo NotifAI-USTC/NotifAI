@@ -28,6 +28,8 @@ const LIMITS = {
 
 const NOTICE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
+const ISO_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})?$/
 const MIN_DATE_YEAR = 2000
 const MAX_DATE_YEAR = 2100
 
@@ -41,11 +43,11 @@ export class DataValidationError extends Error {
 /**
  * 通知列表通过运行时校验后的结果。
  *
- * rawItemCount 是服务端原始 items 数量，包含被跳过的非法条目。它不是后端
- * API 字段，只用于让分页逻辑仍按服务端偏移量推进。
+ * invalidItemCount 是服务端原始 items 中未通过校验的条目数量。它不是后端
+ * API 字段，用于向用户说明页面中被安全跳过的数据。
  */
 export interface ValidatedNoticeListResponse extends NoticeListResponse {
-  rawItemCount: number
+  invalidItemCount: number
 }
 
 function expectRecord(value: unknown, path: string): Record<string, unknown> {
@@ -71,13 +73,44 @@ function optionalString(value: unknown, maxLength: number, defaultValue = ''): s
   return value.length > maxLength ? value.slice(0, maxLength) : value
 }
 
+export function isValidIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 100) return false
+  const match = ISO_TIMESTAMP_PATTERN.exec(value)
+  if (!match) return false
+
+  const year = Number(value.slice(0, 4))
+  const month = Number(value.slice(5, 7))
+  const day = Number(value.slice(8, 10))
+  const hour = Number(value.slice(11, 13))
+  const minute = Number(value.slice(14, 16))
+  const seconds = value.length >= 19 && value[16] === ':' ? Number(value.slice(17, 19)) : 0
+  const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth[month - 1]! ||
+    hour > 23 ||
+    minute > 59 ||
+    seconds > 59
+  ) {
+    return false
+  }
+
+  const timezone = value.match(/(?:Z|[+-])(\d{2}):?(\d{2})$/)
+  if (timezone && (Number(timezone[1]) > 23 || Number(timezone[2]) > 59)) return false
+  return !Number.isNaN(Date.parse(value))
+}
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+}
+
 function optionalIsoTimestamp(value: unknown, path: string): string | null {
   if (value === undefined || value === null) return null
-  if (typeof value !== 'string' || value.length === 0 || value.length > 100) {
+  if (!isValidIsoTimestamp(value)) {
     throw new DataValidationError(`${path} 必须是 ISO8601 时间字符串或 null`)
-  }
-  if (Number.isNaN(Date.parse(value))) {
-    throw new DataValidationError(`${path} 必须是合法的 ISO8601 时间字符串`)
   }
   return value
 }
@@ -297,7 +330,9 @@ export function parseNoticeListResponse(value: unknown): ValidatedNoticeListResp
   ) {
     throw new DataValidationError('response.total 无效')
   }
-  if (record.total < record.items.length) {
+  // 非法条目会被安全跳过，total 只应与实际可用的返回项比较；否则一条
+  // 脏数据就可能把整页升级为失败，用户也看不到其余合法通知。
+  if (record.total < items.length) {
     throw new DataValidationError('response.total 小于实际返回的通知数量')
   }
 
@@ -316,7 +351,7 @@ export function parseNoticeListResponse(value: unknown): ValidatedNoticeListResp
   return {
     items,
     total: record.total,
-    rawItemCount: record.items.length,
+    invalidItemCount: record.items.length - items.length,
     nextCursor,
   }
 }
@@ -422,7 +457,7 @@ export function parseDeadlineListResponse(value: unknown): DeadlineListResponse 
   ) {
     throw new DataValidationError('response.total 无效')
   }
-  if (record.total < record.items.length) {
+  if (record.total < items.length) {
     throw new DataValidationError('response.total 小于实际返回的通知数量')
   }
 
@@ -475,10 +510,15 @@ export function parseSourceListResponse(value: unknown): SourceItem[] {
   if (!Array.isArray(value) || value.length > LIMITS.notices) {
     throw new DataValidationError('sources 必须是数组')
   }
+  const names = new Set<string>()
   return value.map((item, index) => {
     const record = expectRecord(item, `sources[${index}]`)
     const name = expectString(record.name, `sources[${index}].name`, LIMITS.source)
     const group = expectString(record.group, `sources[${index}].group`, LIMITS.source)
+    if (names.has(name)) {
+      throw new DataValidationError(`sources[${index}].name 存在重复来源`)
+    }
+    names.add(name)
     const noticeCount = record.noticeCount
     if (typeof noticeCount !== 'number' || !Number.isInteger(noticeCount) || noticeCount < 0) {
       throw new DataValidationError(`sources[${index}].noticeCount 必须是非负整数`)
@@ -544,7 +584,7 @@ export function parseStatsResponse(value: unknown): StatsResponse {
     if (typeof record.lastCrawlAt !== 'string' || record.lastCrawlAt.length > 100) {
       throw new DataValidationError('stats.lastCrawlAt 必须是字符串')
     }
-    if (!Number.isNaN(Date.parse(record.lastCrawlAt))) {
+    if (isValidIsoTimestamp(record.lastCrawlAt)) {
       lastCrawlAt = record.lastCrawlAt
     }
   }

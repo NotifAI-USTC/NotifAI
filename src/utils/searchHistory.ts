@@ -5,7 +5,9 @@ const SEARCH_HISTORY_LIMIT = 10
 const SEARCH_HISTORY_ITEM_MAX_LENGTH = 200
 
 function isValidHistoryItem(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= SEARCH_HISTORY_ITEM_MAX_LENGTH
+  return (
+    typeof value === 'string' && value.length > 0 && value.length <= SEARCH_HISTORY_ITEM_MAX_LENGTH
+  )
 }
 
 /** 读取搜索历史，损坏数据回退为空列表。 */

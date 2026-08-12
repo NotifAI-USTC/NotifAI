@@ -6,6 +6,7 @@ import {
   normalizeHttpUrl,
   parseNoticeItem,
   parseNoticeListResponse,
+  parseSourceListResponse,
 } from '../src/utils/validation.ts'
 
 function validNotice() {
@@ -33,7 +34,7 @@ it('accepts a bounded notice response and returns a fresh object', () => {
   assert.notEqual(parsed.items[0], source)
   assert.equal('cleanContent' in parsed.items[0], true)
   assert.equal('attachments' in parsed.items[0], true)
-  assert.equal(parsed.rawItemCount, 1)
+  assert.equal(parsed.invalidItemCount, 0)
 })
 
 it('rejects route traversal and reserved characters in notice IDs', () => {
@@ -88,6 +89,18 @@ it('rejects impossible dates and oversized strings or arrays', () => {
   assert.equal(parsed.items[0].aiSummary.length, 10_000)
 })
 
+it('strictly validates API timestamps without changing local date semantics', () => {
+  const valid = {
+    ...validNotice(),
+    firstSeen: '2026-08-01T12:30:00',
+    lastCrawl: '2026-02-28T23:59:59+08:00',
+  }
+  assert.doesNotThrow(() => parseNoticeItem(valid))
+
+  const invalid = { ...validNotice(), firstSeen: '2026-02-29T12:30:00' }
+  assert.throws(() => parseNoticeItem(invalid), DataValidationError)
+})
+
 it('validates notice category keys, limits, and duplicates', () => {
   const unknownCategory = { ...validNotice(), categories: ['not-a-category'] }
   assert.throws(() => parseNoticeItem(unknownCategory), DataValidationError)
@@ -133,8 +146,19 @@ it('skips a single malformed item without failing the whole page', () => {
   const good = validNotice()
   good.id = 'notice-002'
 
-  const parsed = parseNoticeListResponse({ items: [bad, good], total: 2 })
+  const parsed = parseNoticeListResponse({ items: [bad, good], total: 1 })
   assert.equal(parsed.items.length, 1)
   assert.equal(parsed.items[0].id, 'notice-002')
-  assert.equal(parsed.rawItemCount, 2)
+  assert.equal(parsed.invalidItemCount, 1)
+})
+
+it('rejects duplicate source names at the API boundary', () => {
+  assert.throws(
+    () =>
+      parseSourceListResponse([
+        { name: '教务处', group: '校级部门', noticeCount: 1 },
+        { name: '教务处', group: '校级部门', noticeCount: 2 },
+      ]),
+    DataValidationError,
+  )
 })

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { DEPARTMENTS, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
-import { useUserSettingsStore } from '../stores/userSettings'
-import { fetchCategories, fetchSources } from '../utils/request'
-import type { NoticeCategoryItem, NoticeCategoryKey, SourceItem } from '../types/notice'
+import { fetchCategories } from '../utils/request'
+import type { NoticeCategoryItem, NoticeCategoryKey } from '../types/notice'
 import { clearSearchHistory, loadSearchHistory, recordSearchHistory } from '../utils/searchHistory'
+import { useSourceCatalog } from '../composables/useSourceCatalog'
 
 const emit = defineEmits<{
   search: [filters: SearchFilters]
@@ -28,8 +28,6 @@ export interface SearchFilters {
   isStarred: TriStateFilter
   tags: string[]
 }
-
-const store = useUserSettingsStore()
 
 function emptyFilters(): SearchFilters {
   return {
@@ -57,9 +55,10 @@ const filters = ref<SearchFilters>(
 
 const newTag = ref('')
 
-const sourceItems = ref<SourceItem[] | null>(null)
 const categoryItems = ref<NoticeCategoryItem[] | null>(null)
 let metadataController: AbortController | null = null
+const sourceCatalog = useSourceCatalog()
+const sourceItems = sourceCatalog.sourceItems
 
 /** 来源下拉项：优先使用后端 GET /sources（含分组），加载中/失败时回退到内置部门表 */
 const sources = computed(() => {
@@ -74,15 +73,9 @@ const sources = computed(() => {
 })
 
 async function loadSources(signal: AbortSignal): Promise<void> {
-  try {
-    const loadedSources = await fetchSources(signal)
-    if (signal.aborted) return
-    store.registerSources(loadedSources.map((source) => source.name))
-    sourceItems.value = loadedSources
-  } catch {
-    // 来源列表失败时回退到内置部门表，不阻塞搜索
-    sourceItems.value = null
-  }
+  // 共享来源目录的取消和回退逻辑；组件自己的 signal 只用于生命周期守卫。
+  if (signal.aborted) return
+  await sourceCatalog.loadSources()
 }
 
 const categories = computed(() => {
