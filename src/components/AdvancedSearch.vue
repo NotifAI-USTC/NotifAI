@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { DEPARTMENTS, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
+import { NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
 import { fetchCategories } from '../utils/request'
 import type { NoticeCategoryItem, NoticeCategoryKey } from '../types/notice'
 import { clearSearchHistory, loadSearchHistory, recordSearchHistory } from '../utils/searchHistory'
@@ -60,16 +60,13 @@ let metadataController: AbortController | null = null
 const sourceCatalog = useSourceCatalog()
 const sourceItems = sourceCatalog.sourceItems
 
-/** 来源下拉项：优先使用后端 GET /sources（含分组），加载中/失败时回退到内置部门表 */
+/** 来源下拉项：使用共享的 API/IndexedDB/内置快照目录。 */
 const sources = computed(() => {
-  if (sourceItems.value) {
-    return sourceItems.value.map((item) => ({
-      title: item.name,
-      value: item.name,
-      group: item.group || '其他',
-    }))
-  }
-  return DEPARTMENTS.map((d) => ({ title: d.name, value: d.name, group: d.group }))
+  return sourceItems.value.map((item) => ({
+    title: item.name,
+    value: item.name,
+    group: item.group || '其他',
+  }))
 })
 
 async function loadSources(signal: AbortSignal): Promise<void> {

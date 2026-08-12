@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref } from 'vue'
 import type { NoticeCategoryKey, NoticeItem } from '../types/notice'
-import { DEPARTMENTS, isNoticeCategoryKey } from '../types/notice'
+import { isNoticeCategoryKey, SOURCE_CATALOG_FALLBACK } from '../types/notice'
 import { isValidNoticeId } from '../utils/validation'
 import type { Folder } from '../types/folder'
 import {
@@ -184,10 +184,11 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   const subscribedChannels = subscribedDepts
   const blackKeywords = blacklistKeywords
 
-  // Static departments are a fallback. Keep runtime sources discovered from
-  // GET /sources so switching one of them can build a complete custom list.
+  // The checked-in /sources snapshot is the fallback. Keep runtime sources
+  // discovered from GET /sources so switching one of them can build a complete
+  // custom list before the next settings checkpoint.
   const availableSourceNames = new Set([
-    ...DEPARTMENTS.map((department) => department.name),
+    ...SOURCE_CATALOG_FALLBACK.map((source) => source.name),
     ...saved.subscribedDepts,
   ])
 

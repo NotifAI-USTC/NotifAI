@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   fetchStats: vi.fn(),
   readNoticeFeedCache: vi.fn(),
   writeNoticeFeedCache: vi.fn(),
+  writeNoticeDetailCache: vi.fn(),
   push: vi.fn(),
   cacheNotices: vi.fn(),
   cacheNotice: vi.fn(),
@@ -57,6 +58,7 @@ vi.mock('../utils/request', () => ({
 vi.mock('../utils/noticeFeedCache', () => ({
   readNoticeFeedCache: mocks.readNoticeFeedCache,
   writeNoticeFeedCache: mocks.writeNoticeFeedCache,
+  writeNoticeDetailCache: mocks.writeNoticeDetailCache,
 }))
 
 vi.mock('vue-router', () => ({

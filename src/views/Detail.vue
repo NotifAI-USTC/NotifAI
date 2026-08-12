@@ -12,6 +12,7 @@ import { useSnackbar } from '../composables/useSnackbar'
 import { copyText } from '../utils/share'
 import { DataValidationError, normalizeHttpUrl } from '../utils/validation'
 import { sanitizeNoticeContent } from '../utils/sanitizeNoticeContent'
+import { readNoticeDetailCache, writeNoticeDetailCache } from '../utils/noticeFeedCache'
 
 const route = useRoute()
 const router = useRouter()
@@ -22,6 +23,7 @@ const notice = ref<NoticeItem | null>(null)
 const loading = ref(true)
 const refreshing = ref(false)
 const loadError = ref('')
+const detailCacheStale = ref(false)
 const showShare = ref(false)
 const showImagePreview = ref(false)
 const previewImages = ref<string[]>([])
@@ -58,6 +60,7 @@ async function loadNotice(): Promise<void> {
   refreshing.value = false
   notice.value = null
   loadError.value = ''
+  detailCacheStale.value = false
 
   try {
     const id = route.params.id
@@ -65,9 +68,18 @@ async function loadNotice(): Promise<void> {
       throw new DataValidationError('通知 ID 格式无效')
     }
 
-    // 详情页优先展示首页、收藏页或其他页面已经写入的内存缓存，
-    // 同时在后台请求最新内容。这样从列表进入详情时不会再次等待网络。
-    const cachedNotice = store.getCachedNotice(id)
+    // 详情页优先展示内存缓存，再读取 IndexedDB 持久缓存；两者都只作为
+    // 首屏/离线兜底，仍然会请求最新详情。
+    let cachedNotice = store.getCachedNotice(id)
+    // 首页列表可能只缓存轻量字段；此时优先使用持久化的完整详情，
+    // 避免刷新页面时用空正文覆盖已知的本地正文。
+    if (!cachedNotice || cachedNotice.cleanContent.trim().length === 0) {
+      const cachedDetail = await readNoticeDetailCache(id)
+      if (controller.signal.aborted || sequence !== loadSequence) return
+      cachedNotice = cachedDetail?.notice ?? cachedNotice
+      detailCacheStale.value = cachedDetail?.stale ?? false
+      if (cachedNotice) store.cacheNotice(cachedNotice)
+    }
     notice.value = cachedNotice ?? null
     loading.value = cachedNotice === undefined
     refreshing.value = cachedNotice !== undefined
@@ -78,7 +90,9 @@ async function loadNotice(): Promise<void> {
 
     notice.value = loadedNotice
     loadError.value = ''
+    detailCacheStale.value = false
     store.cacheNotice(loadedNotice)
+    void writeNoticeDetailCache(loadedNotice)
     store.markRead(loadedNotice.id)
   } catch (error) {
     if (controller.signal.aborted || sequence !== loadSequence) return
@@ -218,6 +232,17 @@ function handleContentKeydown(event: KeyboardEvent): void {
                 重试
               </v-btn>
             </template>
+          </v-alert>
+
+          <v-alert
+            v-else-if="detailCacheStale"
+            type="info"
+            variant="tonal"
+            density="compact"
+            class="mb-4"
+            role="status"
+          >
+            当前显示较旧的本地详情，正在同步最新内容。
           </v-alert>
 
           <v-card class="mb-6" variant="flat">

@@ -1,8 +1,8 @@
 import {
-  DEPARTMENTS,
   isNoticeCategoryKey,
   normalizeNoticeSource,
   NOTICE_CATEGORY_DEFINITIONS,
+  SOURCE_CATALOG_FALLBACK,
 } from '../types/notice'
 import type { NoticeCategoryKey } from '../types/notice'
 import type { Folder } from '../types/folder'
@@ -14,6 +14,12 @@ export const USER_SETTINGS_JOURNAL_NAMESPACE = `${USER_SETTINGS_STORAGE_KEY}:jou
 export const USER_SETTINGS_JOURNAL_PREFIX = `${USER_SETTINGS_STORAGE_KEY}:journal:1:`
 export const USER_SETTINGS_SCHEMA_VERSION = 3
 export const USER_FOLDER_LIMIT = 100
+
+const SOURCE_GROUP_ORDER = new Map([
+  ['校级部门', 0],
+  ['二级学院', 1],
+  ['其他', 2],
+])
 
 export const MAX_STORED_ITEMS = 10_000
 export const MAX_TAGS_PER_NOTICE = 50
@@ -43,7 +49,18 @@ const LEGACY_FOLDER_ICONS: Readonly<Record<string, string>> = {
   'mdi-folder': '$folder',
 }
 export const VALID_DEPARTMENT_ORDER = Array.from(
-  new Set(DEPARTMENTS.map((department) => normalizeNoticeSource(department.name))),
+  new Set(
+    [...SOURCE_CATALOG_FALLBACK]
+      .map((source, index) => ({ source, index }))
+      .sort((first, second) => {
+        return (
+          (SOURCE_GROUP_ORDER.get(first.source.group) ?? SOURCE_GROUP_ORDER.size) -
+            (SOURCE_GROUP_ORDER.get(second.source.group) ?? SOURCE_GROUP_ORDER.size) ||
+          first.index - second.index
+        )
+      })
+      .map(({ source }) => normalizeNoticeSource(source.name)),
+  ),
 )
 export const VALID_DEPARTMENT_NAMES = new Set(VALID_DEPARTMENT_ORDER)
 export const VALID_CATEGORY_ORDER = NOTICE_CATEGORY_DEFINITIONS.map(({ key }) => key)

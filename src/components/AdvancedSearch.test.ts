@@ -1,7 +1,9 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEPARTMENTS, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
+import { NOTICE_CATEGORY_DEFINITIONS, SOURCE_CATALOG_FALLBACK } from '../types/notice'
+import { resetSourceCatalogStateForTests } from '../composables/useSourceCatalog'
+import { clearSourceCatalogCache } from '../utils/sourceCatalogCache'
 import AdvancedSearch from './AdvancedSearch.vue'
 
 const mocks = vi.hoisted(() => ({
@@ -46,8 +48,10 @@ function mountDialog() {
 }
 
 describe('AdvancedSearch source options', () => {
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks()
+    resetSourceCatalogStateForTests()
+    await clearSourceCatalogCache()
   })
 
   it('loads source options from GET /sources', async () => {
@@ -69,7 +73,7 @@ describe('AdvancedSearch source options', () => {
     ])
   })
 
-  it('falls back to built-in departments when the sources request fails', async () => {
+  it('falls back to the checked-in /sources snapshot when the request fails', async () => {
     mocks.fetchSources.mockRejectedValue(new Error('network unavailable'))
 
     const wrapper = mountDialog()
@@ -77,7 +81,11 @@ describe('AdvancedSearch source options', () => {
 
     const select = wrapper.findComponent({ name: 'VSelectStub' })
     expect(select.props('items')).toEqual(
-      DEPARTMENTS.map((d) => ({ title: d.name, value: d.name, group: d.group })),
+      SOURCE_CATALOG_FALLBACK.map((source) => ({
+        title: source.name,
+        value: source.name,
+        group: source.group,
+      })),
     )
   })
 

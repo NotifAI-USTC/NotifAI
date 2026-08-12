@@ -3,8 +3,8 @@ import { computed, ref } from 'vue'
 import { useUserSettingsStore } from '../stores/userSettings'
 import type { OnboardingIdentity } from '../stores/userSettings'
 import { useWindowSize } from '../composables/useWindowSize'
-import { DEPARTMENTS, getNoticeCategoryName } from '../types/notice'
-import type { NoticeCategoryKey } from '../types/notice'
+import { getNoticeCategoryName } from '../types/notice'
+import type { NoticeCategoryKey, SourceItem } from '../types/notice'
 import { useSourceCatalog } from '../composables/useSourceCatalog'
 
 interface ChannelOption {
@@ -25,33 +25,27 @@ interface IdentityPreset {
 
 const SCHOOL_SOURCE_ICONS: Readonly<Record<string, string>> = {
   教务处: '$school',
-  本科生院: '$accountGroup',
-  学工部: '$account',
-  科研部: '$flask',
-  校团委: '$bullhornOutline',
-  迎新特辑: '$calendarCheck',
+  瀚海教学网: '$school',
+  研究生院: '$school',
+  就业指导中心: '$accountGroup',
+  图书馆: '$fileDocumentOutline',
+  国际合作交流: '$shareVariant',
+  体育教学中心: '$trophy',
+  网络信息中心: '$domain',
+  本科招生网: '$school',
 }
 
-const FALLBACK_SCHOOL_OPTIONS: readonly ChannelOption[] = [
-  { name: '教务处', group: '校级部门', icon: '$school' },
-  { name: '本科生院', group: '校级部门', icon: '$accountGroup' },
-  { name: '学工部', group: '校级部门', icon: '$account' },
-  { name: '科研部', group: '校级部门', icon: '$flask' },
-  { name: '校团委', group: '校级部门', icon: '$bullhornOutline' },
-  { name: '迎新特辑', group: '校级部门', icon: '$calendarCheck' },
-]
+function toChannelOption(source: SourceItem): ChannelOption {
+  return {
+    name: source.name,
+    group: source.group === '二级学院' ? '二级学院' : '校级部门',
+    icon: SCHOOL_SOURCE_ICONS[source.name] ?? '$domain',
+  }
+}
 
-const FALLBACK_SECONDARY_OPTIONS: readonly ChannelOption[] = DEPARTMENTS.filter(
-  (department) => department.group === '二级学院',
-).map((department) => ({
-  name: department.name,
-  group: '二级学院',
-  icon: '$domain',
-}))
-
-const FRESHMAN_CHANNELS = ['教务处', '本科生院', '迎新特辑']
-const UNDERGRADUATE_CHANNELS = ['教务处', '本科生院']
-const POSTGRADUATE_CHANNELS = ['科研部']
+const FRESHMAN_CHANNELS = ['教务处', '本科招生网', '瀚海教学网']
+const UNDERGRADUATE_CHANNELS = ['教务处', '质量工程']
+const POSTGRADUATE_CHANNELS = ['研究生院']
 const FRESHMAN_CATEGORIES: NoticeCategoryKey[] = [
   'course_selection',
   'exam',
@@ -83,7 +77,7 @@ const identityPresets: readonly IdentityPreset[] = [
   {
     value: 'freshman',
     title: '新生',
-    description: '优先关注教务、本科生院与迎新信息',
+    description: '优先关注教务、本科招生和瀚海教学信息',
     icon: '$school',
     channels: FRESHMAN_CHANNELS,
     categories: FRESHMAN_CATEGORIES,
@@ -91,7 +85,7 @@ const identityPresets: readonly IdentityPreset[] = [
   {
     value: 'undergraduate',
     title: '本科生',
-    description: '关注教务、本科生院等本科培养信息',
+    description: '关注教务与质量工程等本科培养信息',
     icon: '$domain',
     channels: UNDERGRADUATE_CHANNELS,
     categories: UNDERGRADUATE_CATEGORIES,
@@ -99,7 +93,7 @@ const identityPresets: readonly IdentityPreset[] = [
   {
     value: 'postgraduate',
     title: '研究生',
-    description: '关注科研与研究生相关信息',
+    description: '关注研究生院相关信息',
     icon: '$flask',
     channels: POSTGRADUATE_CHANNELS,
     categories: POSTGRADUATE_CATEGORIES,
@@ -131,38 +125,17 @@ const sources = sourceCatalog.sourceItems
 const sourcesLoading = sourceCatalog.loading
 const sourcesError = sourceCatalog.error
 
-store.registerSources([
-  ...FALLBACK_SCHOOL_OPTIONS.map((channel) => channel.name),
-  ...FALLBACK_SECONDARY_OPTIONS.map((channel) => channel.name),
-])
-
 const progress = computed(() => (currentStep.value / 4) * 100)
 // 校级部门和二级学院都允许不订阅，完成后由 store 将空列表解释为“全部来源”。
 const canContinueFromChannels = computed(() => true)
 const schoolOptions = computed<ChannelOption[]>(() => {
-  if (sources.value === null) return [...FALLBACK_SCHOOL_OPTIONS]
-  return sources.value
-    .filter((source) => source.group === '校级部门')
-    .map((source) => ({
-      name: source.name,
-      group: '校级部门',
-      icon: SCHOOL_SOURCE_ICONS[source.name] ?? '$domain',
-    }))
+  return sources.value.filter((source) => source.group === '校级部门').map(toChannelOption)
 })
 const secondaryOptions = computed<ChannelOption[]>(() => {
-  if (sources.value === null) return [...FALLBACK_SECONDARY_OPTIONS]
-  return sources.value
-    .filter((source) => source.group === '二级学院')
-    .map((source) => ({ name: source.name, group: '二级学院', icon: '$domain' }))
+  return sources.value.filter((source) => source.group === '二级学院').map(toChannelOption)
 })
 const allChannelNames = computed(() => {
-  const names =
-    sources.value === null
-      ? [
-          ...FALLBACK_SCHOOL_OPTIONS.map((channel) => channel.name),
-          ...FALLBACK_SECONDARY_OPTIONS.map((channel) => channel.name),
-        ]
-      : sources.value.map((source) => source.name)
+  const names = sources.value.map((source) => source.name)
   return Array.from(new Set(names))
 })
 const selectedSchoolCount = computed(() => {
@@ -185,7 +158,6 @@ function selectedIdentity(value: OnboardingIdentity): boolean {
 }
 
 function resolvePresetChannels(channels: readonly string[]): string[] {
-  if (sources.value === null) return [...channels]
   const available = new Set(allChannelNames.value)
   return channels.filter((channel) => available.has(channel))
 }
@@ -217,10 +189,10 @@ function toggleChannel(channel: string): void {
 }
 
 async function loadSources(force = false): Promise<void> {
-  const loaded = await sourceCatalog.loadSources(force)
-  if (loaded && draftIdentity.value !== 'custom' && !draftSelectAll.value) {
-    // 来源列表是动态数据。将静态预设裁剪到当前 API 真正存在的来源，
-    // 避免保存无法在引导页选择的名称。
+  await sourceCatalog.loadSources(force)
+  if (draftIdentity.value !== 'custom' && !draftSelectAll.value) {
+    // 无论来源来自 API、持久缓存还是内置快照，都只保存当前目录中
+    // 存在的名称，避免旧版本预设残留（如“本科生院”）继续漂移。
     draftChannels.value = resolvePresetChannels(draftChannels.value)
   }
 }

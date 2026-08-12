@@ -2,6 +2,8 @@ import { flushPromises, shallowMount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useUserSettingsStore } from '../stores/userSettings'
+import { resetSourceCatalogStateForTests } from '../composables/useSourceCatalog'
+import { clearSourceCatalogCache } from '../utils/sourceCatalogCache'
 import OnboardingModal from './OnboardingModal.vue'
 
 vi.mock('../utils/request', () => ({
@@ -57,7 +59,9 @@ describe('OnboardingModal', () => {
     setActivePinia(createPinia())
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    resetSourceCatalogStateForTests()
+    await clearSourceCatalogCache()
     window.localStorage.clear()
   })
 
@@ -71,7 +75,7 @@ describe('OnboardingModal', () => {
     await findButton(wrapper, '开始个性化配置').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('学生事务中心')
-    await findButton(wrapper, '本科生关注教务、本科生院等本科培养信息').trigger('click')
+    await findButton(wrapper, '本科生关注教务与质量工程等本科培养信息').trigger('click')
     expect(wrapper.text()).toContain('该身份预设自动关注的通知分类')
     expect(wrapper.text()).toContain('选课通知')
     await findButton(wrapper, '下一步：选择二级学院').trigger('click')

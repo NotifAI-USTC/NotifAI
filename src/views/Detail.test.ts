@@ -2,6 +2,7 @@ import { flushPromises, shallowMount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NoticeItem } from '../types/notice'
+import { clearNoticeDetailCache, writeNoticeDetailCache } from '../utils/noticeFeedCache'
 
 const mocks = vi.hoisted(() => ({
   fetchNoticeById: vi.fn(),
@@ -112,8 +113,9 @@ describe('Detail request lifecycle', () => {
     mocks.getCachedNotice.mockReturnValue(undefined)
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const wrapper of wrappers.splice(0)) wrapper.unmount()
+    await clearNoticeDetailCache()
   })
 
   it('aborts and ignores a pending detail response after unmount', async () => {
@@ -227,6 +229,24 @@ describe('Detail request lifecycle', () => {
     expect(wrapper.text()).toContain('摘要')
     expect(wrapper.text()).toContain('当前显示缓存数据')
     expect(wrapper.text()).not.toContain('通知数据校验失败')
+  })
+
+  it('hydrates the detail page from persistent cache after the memory cache misses', async () => {
+    const cachedNotice = createNotice('notice-1')
+    await writeNoticeDetailCache(cachedNotice)
+    mocks.fetchNoticeById.mockRejectedValue(new Error('network unavailable'))
+
+    const router = createTestRouter()
+    await router.push('/detail/notice-1')
+    const wrapper = shallowMount(Detail, {
+      global: { plugins: [router], stubs: componentStubs },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(mocks.getCachedNotice).toHaveBeenCalledWith('notice-1')
+    expect(wrapper.text()).toContain('摘要')
+    expect(wrapper.text()).toContain('当前显示缓存数据')
   })
 
   it('renders the notice title, source, date, and category names', async () => {

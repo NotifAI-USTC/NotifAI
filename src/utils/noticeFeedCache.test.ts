@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NoticeItem } from '../types/notice'
-import { clearNoticeFeedCache, readNoticeFeedCache, writeNoticeFeedCache } from './noticeFeedCache'
+import {
+  clearNoticeDetailCache,
+  clearNoticeFeedCache,
+  readNoticeDetailCache,
+  readNoticeFeedCache,
+  writeNoticeDetailCache,
+  writeNoticeFeedCache,
+} from './noticeFeedCache'
 
 function makeNotice(overrides: Partial<NoticeItem> = {}): NoticeItem {
   return {
@@ -23,6 +30,7 @@ function makeNotice(overrides: Partial<NoticeItem> = {}): NoticeItem {
 describe('noticeFeedCache', () => {
   afterEach(async () => {
     await clearNoticeFeedCache()
+    await clearNoticeDetailCache()
     vi.useRealTimers()
   })
 
@@ -74,5 +82,22 @@ describe('noticeFeedCache', () => {
     })
 
     await expect(readNoticeFeedCache('old')).resolves.toMatchObject({ stale: true })
+  })
+
+  it('persists complete notice details independently from the feed cache', async () => {
+    const notice = makeNotice({ cleanContent: '# 完整正文\n\n详情内容' })
+    await writeNoticeDetailCache(notice)
+
+    await expect(readNoticeDetailCache(notice.id)).resolves.toMatchObject({
+      id: notice.id,
+      notice,
+      stale: false,
+    })
+  })
+
+  it('rejects an invalid detail cache write', async () => {
+    await writeNoticeDetailCache(makeNotice({ originUrl: 'javascript:alert(1)' }))
+
+    await expect(readNoticeDetailCache('notice-1')).resolves.toBeNull()
   })
 })

@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
 import { fetchCategories } from '../utils/request'
-import { DEPARTMENTS, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
+import { NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
 import type { NoticeCategoryItem, SourceItem } from '../types/notice'
 import { useSourceCatalog } from '../composables/useSourceCatalog'
 
@@ -24,12 +24,10 @@ const sourceGroupRank = new Map<string, number>(
   sourceGroupOrder.map((group, index) => [group, index]),
 )
 
-/** 分组来源：优先使用后端 GET /sources；失败时回退到静态部门表 */
+/** 分组来源：使用共享的 API/IndexedDB/内置快照目录。 */
 const groupedSources = computed(() => {
   const groups = new Map<string, SourceItem[]>()
-  const list =
-    sources.value ?? DEPARTMENTS.map((d) => ({ name: d.name, group: d.group, noticeCount: 0 }))
-  for (const item of list) {
+  for (const item of sources.value) {
     const group = item.group || '其他'
     const arr = groups.get(group) ?? []
     arr.push(item)
@@ -45,8 +43,8 @@ const groupedSources = computed(() => {
     .map(([group, items]) => ({ group, items }))
 })
 
-async function loadSources(): Promise<void> {
-  await sourceCatalog.loadSources(true)
+async function loadSources(force = false): Promise<void> {
+  await sourceCatalog.loadSources(force)
 }
 
 const categoryOptions = computed<NoticeCategoryItem[]>(() => {
@@ -124,7 +122,7 @@ onBeforeUnmount(() => {
             variant="text"
             size="small"
             aria-label="重试加载来源列表"
-            @click="loadSources"
+            @click="loadSources(true)"
           >
             重试
           </v-btn>

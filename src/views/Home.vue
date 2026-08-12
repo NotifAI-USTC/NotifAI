@@ -749,19 +749,12 @@ const localStats = computed(() => {
     const days = calculateRemainingDays(notice.deadline)
     if (days !== null && days >= 0 && days <= 7) ddlSoon += 1
   }
-  return { loaded: loaded.length, total: loadedTotal.value, sources, ddlSoon }
+  return { loaded: loaded.length, sources, ddlSoon }
 })
 
-/** 展示统计：优先使用后端 GET /stats 的全局数据，失败时回退到本地统计。 */
+/** 展示统计：当前列表的数字只来自当前已加载、已筛选的数据。 */
 const displayStats = computed(() => {
-  const local = localStats.value
-  if (!serverStats.value) return local
-  return {
-    loaded: local.loaded,
-    total: serverStats.value.total,
-    sources: serverStats.value.sourceCount,
-    ddlSoon: serverStats.value.last7DaysDdl,
-  }
+  return localStats.value
 })
 
 /** 拉取全局统计，失败时静默保留本地兜底。 */
@@ -906,18 +899,18 @@ onBeforeUnmount(() => {
 
     <!-- 已加载数据统计概览 -->
     <div
-      v-if="!initialLoading && !requestError && displayStats.loaded > 0"
+      v-if="!initialLoading && !requestError"
       class="d-flex flex-wrap align-center ga-2 px-4 pt-2"
       role="status"
       aria-label="通知统计概览"
     >
       <v-chip size="x-small" variant="tonal" class="stats-chip">
         <v-icon start size="14">$fileDocumentOutline</v-icon>
-        共 {{ displayStats.total }} 条 · 已加载 {{ displayStats.loaded }}
+        当前列表已加载 {{ displayStats.loaded }} 条
       </v-chip>
       <v-chip size="x-small" variant="tonal" class="stats-chip">
         <v-icon start size="14">$accountGroup</v-icon>
-        {{ displayStats.sources }} 个来源
+        当前列表覆盖 {{ displayStats.sources }} 个来源
       </v-chip>
       <v-chip
         size="x-small"
@@ -926,7 +919,11 @@ onBeforeUnmount(() => {
         class="stats-chip"
       >
         <v-icon start size="14">$clockAlert</v-icon>
-        近 7 天 DDL {{ displayStats.ddlSoon }} 个
+        当前列表近 7 天 DDL {{ displayStats.ddlSoon }} 个
+      </v-chip>
+      <v-chip v-if="serverStats" size="x-small" variant="outlined" class="stats-chip">
+        <v-icon start size="14">$database</v-icon>
+        全站共 {{ serverStats.total }} 条通知
       </v-chip>
     </div>
 

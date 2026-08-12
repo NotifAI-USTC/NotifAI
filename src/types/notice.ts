@@ -179,6 +179,39 @@ export interface SourceItem {
   noticeCount: number
 }
 
+/**
+ * GET /sources 的内置快照。
+ *
+ * 来源目录由服务端维护；这份快照只用于首次加载、离线访问和接口临时
+ * 不可用时的 UI 兜底。更新来源时应先同步线上 /sources，再更新这里。
+ */
+export const SOURCE_CATALOG_FALLBACK: readonly SourceItem[] = [
+  { name: '校友总会', group: '其他', noticeCount: 8 },
+  { name: '生医部', group: '二级学院', noticeCount: 31 },
+  { name: '管理学院', group: '二级学院', noticeCount: 29 },
+  { name: '瀚海教学网', group: '校级部门', noticeCount: 11 },
+  { name: '计算机学院', group: '二级学院', noticeCount: 25 },
+  { name: '地空学院', group: '二级学院', noticeCount: 16 },
+  { name: '研究生院', group: '校级部门', noticeCount: 303 },
+  { name: '国际学院', group: '二级学院', noticeCount: 22 },
+  { name: '就业指导中心', group: '校级部门', noticeCount: 596 },
+  { name: '图书馆', group: '校级部门', noticeCount: 2 },
+  { name: 'Linux用户组', group: '其他', noticeCount: 5 },
+  { name: '镜像站', group: '其他', noticeCount: 3 },
+  { name: '国际合作交流', group: '校级部门', noticeCount: 15 },
+  { name: '物理学院', group: '二级学院', noticeCount: 8 },
+  { name: '质量工程', group: '其他', noticeCount: 10 },
+  { name: '化学院', group: '二级学院', noticeCount: 29 },
+  { name: '工院', group: '二级学院', noticeCount: 21 },
+  { name: '信息学院', group: '二级学院', noticeCount: 12 },
+  { name: '软件学院', group: '二级学院', noticeCount: 28 },
+  { name: '苏州高研院', group: '二级学院', noticeCount: 31 },
+  { name: '教务处', group: '校级部门', noticeCount: 20 },
+  { name: '体育教学中心', group: '校级部门', noticeCount: 11 },
+  { name: '网络信息中心', group: '校级部门', noticeCount: 28 },
+  { name: '本科招生网', group: '校级部门', noticeCount: 12 },
+]
+
 /** 通知分类条目（GET /categories） */
 export interface NoticeCategoryItem {
   key: NoticeCategoryKey

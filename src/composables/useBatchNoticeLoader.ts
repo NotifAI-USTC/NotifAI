@@ -2,6 +2,7 @@ import type { NoticeItem } from '../types/notice'
 import { useUserSettingsStore } from '../stores/userSettings'
 import { fetchNoticesByIds } from '../utils/request'
 import { isValidNoticeId } from '../utils/validation'
+import { writeNoticeDetailCache } from '../utils/noticeFeedCache'
 
 const MAX_BATCH_SIZE = 500
 
@@ -87,6 +88,7 @@ export async function loadBatchNotices(
         if (!chunkIds.has(notice.id) || receivedIds.has(notice.id)) continue
         receivedIds.add(notice.id)
         store.cacheNotice(notice)
+        void writeNoticeDetailCache(notice)
         appendIfIncluded(notice)
       }
 
