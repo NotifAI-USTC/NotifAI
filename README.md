@@ -80,7 +80,7 @@ npm run check
 
 ## 部署
 
-每次 push 到 `main` 分支后，`.github/workflows/deploy-gh-pages.yml` 会自动执行 `npm run build` 并把 `dist/` 产物推送到当前仓库的 `gh-pages` 分支。生产构建必须配置 `VITE_API_BASE_URL`：workflow 会优先读取仓库变量 `VITE_API_BASE_URL`，未配置时回退到 `https://notifai-api.enthusjast.cc`。
+每次 push 到 `main` 分支后，`.github/workflows/deploy-gh-pages.yml` 会自动执行 `npm run build` 并把 `dist/` 产物推送到当前仓库的 `gh-pages` 分支。生产构建必须配置 `VITE_API_BASE_URL`：workflow 会读取仓库变量 `VITE_API_BASE_URL`。
 
 在 GitHub 仓库的 Settings → Pages 中选择从 `gh-pages` 分支部署即可启用站点。
 
