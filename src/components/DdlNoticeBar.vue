@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import type { DeadlineItem } from '../types/notice'
 import { formatRemaining, isUrgent } from '../utils/date'
+import AppBanner from './AppBanner.vue'
 
 const props = defineProps<{
   notices: DeadlineItem[]
@@ -23,7 +24,7 @@ function openNotice(id: string): void {
 </script>
 
 <template>
-  <v-alert
+  <AppBanner
     v-if="urgentNotices.length > 0"
     type="warning"
     variant="tonal"
@@ -39,20 +40,26 @@ function openNotice(id: string): void {
       <v-slide-group class="ddl-notice-bar__slider" show-arrows mandatory>
         <v-slide-group-item v-for="notice in urgentNotices" :key="notice.id">
           <v-chip
-            class="ma-1"
+            class="ddl-notice-bar__chip ma-1"
             size="small"
             :color="isUrgent(notice.deadline, 0) ? 'error' : 'warning'"
             variant="flat"
             :aria-label="`查看紧急通知：${notice.title}，${formatRemaining(notice.deadline)}`"
+            :title="notice.title"
             @click="openNotice(notice.id)"
           >
             <v-icon start size="small">$clockAlert</v-icon>
-            {{ notice.source }}《{{ notice.title }}》{{ formatRemaining(notice.deadline) }}
+            <span class="ddl-notice-bar__chip-title">
+              {{ notice.source }} · {{ notice.title }}
+            </span>
+            <span class="ddl-notice-bar__chip-deadline">
+              {{ formatRemaining(notice.deadline) }}
+            </span>
           </v-chip>
         </v-slide-group-item>
       </v-slide-group>
     </div>
-  </v-alert>
+  </AppBanner>
 </template>
 
 <style scoped>
@@ -68,5 +75,26 @@ function openNotice(id: string): void {
 .ddl-notice-bar__slider {
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.ddl-notice-bar__chip {
+  max-width: min(70vw, 440px);
+}
+
+.ddl-notice-bar__chip :deep(.v-chip__content) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ddl-notice-bar__chip-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ddl-notice-bar__chip-deadline {
+  flex: 0 0 auto;
+  margin-inline-start: 4px;
 }
 </style>

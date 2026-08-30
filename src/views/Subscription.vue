@@ -6,6 +6,7 @@ import { fetchCategories } from '../utils/request'
 import { NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
 import type { NoticeCategoryItem, SourceItem } from '../types/notice'
 import { useSourceCatalog } from '../composables/useSourceCatalog'
+import AppBanner from '../components/AppBanner.vue'
 
 const store = useUserSettingsStore()
 const router = useRouter()
@@ -114,7 +115,14 @@ onBeforeUnmount(() => {
         aria-label="正在加载来源列表"
       />
 
-      <v-alert v-else-if="loadError" type="warning" variant="tonal" class="mb-4" role="status">
+      <AppBanner
+        v-else-if="loadError"
+        type="warning"
+        variant="tonal"
+        density="compact"
+        class="mb-4"
+        role="status"
+      >
         {{ loadError }}
         <template #append>
           <v-btn
@@ -127,7 +135,7 @@ onBeforeUnmount(() => {
             重试
           </v-btn>
         </template>
-      </v-alert>
+      </AppBanner>
 
       <!-- 部门分组列表 -->
       <v-card v-for="group in groupedSources" :key="group.group" class="mb-4">
@@ -183,7 +191,7 @@ onBeforeUnmount(() => {
         />
 
         <template v-else>
-          <v-alert
+          <AppBanner
             v-if="categoriesError"
             type="warning"
             variant="tonal"
@@ -203,7 +211,7 @@ onBeforeUnmount(() => {
                 重试
               </v-btn>
             </template>
-          </v-alert>
+          </AppBanner>
 
           <v-list>
             <v-list-item

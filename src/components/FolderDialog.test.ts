@@ -22,6 +22,9 @@ vi.mock('../stores/userSettings', () => ({
 import FolderDialog from './FolderDialog.vue'
 
 const containerStub = { template: '<div><slot /><slot name="append" /></div>' }
+const bannerStub = {
+  template: '<div v-bind="$attrs"><slot /><slot name="prepend" /><slot name="append" /></div>',
+}
 const notice: NoticeItem = {
   id: 'notice-1',
   title: '测试通知',
@@ -55,7 +58,7 @@ function mountDialog(
         VListItemSubtitle: containerStub,
         VRow: containerStub,
         VCol: containerStub,
-        VAlert: { template: '<div role="alert"><slot /></div>' },
+        AppBanner: bannerStub,
         VDivider: true,
         VIcon: true,
         VSpacer: true,

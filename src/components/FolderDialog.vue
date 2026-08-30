@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { USER_FOLDER_LIMIT, useUserSettingsStore } from '../stores/userSettings'
 import type { NoticeItem } from '../types/notice'
+import AppBanner from './AppBanner.vue'
 
 const props = defineProps<{
   notice?: NoticeItem
@@ -158,7 +159,7 @@ function deleteFolder(folderId: string) {
 
         <!-- 新建收藏夹 -->
         <div v-if="showNewFolder" class="mt-4">
-          <v-alert
+          <AppBanner
             v-if="folderError"
             type="error"
             variant="tonal"
@@ -167,7 +168,7 @@ function deleteFolder(folderId: string) {
             role="alert"
           >
             {{ folderError }}
-          </v-alert>
+          </AppBanner>
           <v-text-field
             v-model="newFolderName"
             label="收藏夹名称"

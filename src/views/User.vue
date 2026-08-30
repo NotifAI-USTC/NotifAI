@@ -14,6 +14,7 @@ import FolderDialog from '../components/FolderDialog.vue'
 import { hapticMedium } from '../utils/haptics'
 import { useSnackbar } from '../composables/useSnackbar'
 import { loadBatchNotices } from '../composables/useBatchNoticeLoader'
+import AppBanner from '../components/AppBanner.vue'
 
 const router = useRouter()
 const store = useUserSettingsStore()
@@ -248,7 +249,7 @@ function restartOnboarding(): void {
         </v-card-text>
 
         <template v-else>
-          <v-alert
+          <AppBanner
             v-if="importantLoadError"
             type="warning"
             variant="tonal"
@@ -267,7 +268,7 @@ function restartOnboarding(): void {
                 @click="loadImportantNotices"
               />
             </template>
-          </v-alert>
+          </AppBanner>
 
           <v-list v-if="importantNotices.length > 0">
             <v-list-item

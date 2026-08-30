@@ -25,6 +25,7 @@ import type { SearchFilters, TriStateFilter } from '../components/AdvancedSearch
 import { useWindowSize } from '../composables/useWindowSize'
 import { calculateRemainingDays } from '../utils/date'
 import { readNoticeFeedCache, writeNoticeFeedCache } from '../utils/noticeFeedCache'
+import AppBanner from '../components/AppBanner.vue'
 
 const PAGE_SIZE = 15
 const MAX_PAGES_PER_BATCH = 5
@@ -928,7 +929,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 高级搜索提示 -->
-    <v-alert
+    <AppBanner
       v-if="advancedFilters"
       type="info"
       variant="tonal"
@@ -946,7 +947,7 @@ onBeforeUnmount(() => {
           {{ advancedFilters.categories.map(getNoticeCategoryName).join('、') }}
         </span>
       </span>
-    </v-alert>
+    </AppBanner>
 
     <v-progress-linear
       v-if="(refreshing || backgroundRefreshing) && !initialLoading"
@@ -980,7 +981,7 @@ onBeforeUnmount(() => {
         </v-icon>
       </div>
 
-      <v-alert
+      <AppBanner
         v-if="cacheStatusMessage"
         type="info"
         variant="tonal"
@@ -989,9 +990,9 @@ onBeforeUnmount(() => {
         role="status"
       >
         {{ cacheStatusMessage }}
-      </v-alert>
+      </AppBanner>
 
-      <v-alert
+      <AppBanner
         v-if="requestError"
         type="error"
         variant="tonal"
@@ -1003,9 +1004,9 @@ onBeforeUnmount(() => {
         <template #append>
           <v-btn variant="text" size="small" @click="retryRequest">重试</v-btn>
         </template>
-      </v-alert>
+      </AppBanner>
 
-      <v-alert
+      <AppBanner
         v-if="invalidItemCount > 0 && !requestError"
         type="warning"
         variant="tonal"
@@ -1014,9 +1015,9 @@ onBeforeUnmount(() => {
         role="status"
       >
         有 {{ invalidItemCount }} 条通知数据格式异常，已跳过；可刷新后重试。
-      </v-alert>
+      </AppBanner>
 
-      <v-alert
+      <AppBanner
         v-if="scanPaused && !requestError"
         type="info"
         variant="tonal"
@@ -1025,7 +1026,7 @@ onBeforeUnmount(() => {
         role="status"
       >
         当前筛选在本批 {{ PAGE_SIZE * MAX_PAGES_PER_BATCH }} 条通知中暂无匹配，可继续查找后续页面。
-      </v-alert>
+      </AppBanner>
 
       <v-row>
         <v-col
@@ -1060,7 +1061,7 @@ onBeforeUnmount(() => {
         </v-btn>
       </div>
 
-      <v-alert
+      <AppBanner
         v-if="finished && filteredNotices.length > 0 && !requestError"
         type="info"
         variant="tonal"
@@ -1069,7 +1070,7 @@ onBeforeUnmount(() => {
         icon="$checkCircleOutline"
       >
         没有更多通知了
-      </v-alert>
+      </AppBanner>
 
       <v-card
         v-if="

@@ -16,6 +16,9 @@ vi.mock('../utils/request', () => ({
 }))
 
 const stubs = {
+  AppBanner: {
+    template: '<div v-bind="$attrs"><slot /><slot name="prepend" /><slot name="append" /></div>',
+  },
   VDialog: {
     name: 'VDialogStub',
     props: { persistent: Boolean },

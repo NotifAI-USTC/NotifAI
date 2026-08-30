@@ -79,6 +79,9 @@ function createTestRouter() {
 const slotStub = { template: '<div><slot /></div>' }
 
 const componentStubs = {
+  AppBanner: {
+    template: '<div v-bind="$attrs"><slot /><slot name="prepend" /><slot name="append" /></div>',
+  },
   VAppBar: true,
   VAppBarTitle: true,
   VBtn: true,

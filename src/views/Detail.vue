@@ -13,6 +13,7 @@ import { copyText } from '../utils/share'
 import { DataValidationError, normalizeHttpUrl } from '../utils/validation'
 import { sanitizeNoticeContent } from '../utils/sanitizeNoticeContent'
 import { readNoticeDetailCache, writeNoticeDetailCache } from '../utils/noticeFeedCache'
+import AppBanner from '../components/AppBanner.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -218,7 +219,7 @@ function handleContentKeydown(event: KeyboardEvent): void {
         <v-col :cols="12" :md="8" :lg="6">
           <v-progress-linear v-if="refreshing" indeterminate color="primary" class="mb-4" />
 
-          <v-alert
+          <AppBanner
             v-if="loadError"
             type="warning"
             variant="tonal"
@@ -232,9 +233,9 @@ function handleContentKeydown(event: KeyboardEvent): void {
                 重试
               </v-btn>
             </template>
-          </v-alert>
+          </AppBanner>
 
-          <v-alert
+          <AppBanner
             v-else-if="detailCacheStale"
             type="info"
             variant="tonal"
@@ -243,7 +244,7 @@ function handleContentKeydown(event: KeyboardEvent): void {
             role="status"
           >
             当前显示较旧的本地详情，正在同步最新内容。
-          </v-alert>
+          </AppBanner>
 
           <v-card class="mb-6" variant="flat">
             <v-card-title class="detail-title text-h5 text-wrap">{{ notice.title }}</v-card-title>

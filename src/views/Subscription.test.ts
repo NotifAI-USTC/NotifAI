@@ -21,6 +21,9 @@ vi.mock('vue-router', () => ({
 
 const slotStub = { template: '<div><slot /></div>' }
 const stubs = {
+  AppBanner: {
+    template: '<div v-bind="$attrs"><slot /><slot name="prepend" /><slot name="append" /></div>',
+  },
   VAppBar: slotStub,
   VAppBarTitle: slotStub,
   VBtn: { template: '<button v-bind="$attrs"><slot /></button>' },

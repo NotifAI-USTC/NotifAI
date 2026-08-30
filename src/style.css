@@ -77,3 +77,20 @@ img {
   color: rgb(var(--v-theme-on-surface-variant));
   opacity: 1;
 }
+
+/*
+ * Vuetify's default alert grid reserves a second row for prominent alerts.
+ * For compact banners this can turn a one-line message containing a flex
+ * control into a very tall empty block on narrow screens. Keep ordinary
+ * compact alerts on one auto-sized row; multi-line text can still grow the
+ * content naturally.
+ */
+.v-alert.v-alert--density-compact:not(.v-alert--prominent) {
+  flex: 0 0 auto;
+  grid-template-areas: 'prepend content append close';
+  grid-template-rows: auto;
+}
+
+.v-alert.v-alert--density-compact:not(.v-alert--prominent) .v-alert__content {
+  min-width: 0;
+}

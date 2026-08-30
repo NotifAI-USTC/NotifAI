@@ -22,6 +22,7 @@ import { getContrastTextColor } from '../utils/color'
 import type { CalendarItem } from '../types/notice'
 import { useWindowSize } from '../composables/useWindowSize'
 import { buildMonthIcs, downloadIcs } from '../utils/ics'
+import AppBanner from '../components/AppBanner.vue'
 
 const router = useRouter()
 const { isMobile } = useWindowSize()
@@ -438,12 +439,19 @@ onBeforeUnmount(() => {
       <v-progress-circular indeterminate color="primary" />
     </v-card>
 
-    <v-alert v-else-if="loadError" type="error" variant="tonal" class="ma-3" role="alert">
+    <AppBanner
+      v-else-if="loadError"
+      type="error"
+      variant="tonal"
+      density="compact"
+      class="ma-3"
+      role="alert"
+    >
       {{ loadError }}
       <template #append>
         <v-btn prepend-icon="$refresh" variant="text" @click="loadVisibleRange"> 重试 </v-btn>
       </template>
-    </v-alert>
+    </AppBanner>
 
     <template v-else>
       <!-- VCalendar 月视图 -->

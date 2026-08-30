@@ -6,6 +6,7 @@ import { useWindowSize } from '../composables/useWindowSize'
 import { getNoticeCategoryName } from '../types/notice'
 import type { NoticeCategoryKey, SourceItem } from '../types/notice'
 import { useSourceCatalog } from '../composables/useSourceCatalog'
+import AppBanner from './AppBanner.vue'
 
 interface ChannelOption {
   name: string
@@ -330,15 +331,22 @@ function complete(): void {
             </v-btn>
           </div>
 
-          <v-alert type="info" variant="tonal" density="compact" class="mt-4 mb-4">
+          <AppBanner type="info" variant="tonal" density="compact" class="mt-4 mb-4">
             <div class="text-caption text-medium-emphasis">该身份预设自动关注的通知分类</div>
             <div class="text-body-2 mt-1">{{ selectedCategorySummary }}</div>
             <div class="text-caption text-medium-emphasis mt-1">
               完成引导后，可以在个人中心的“订阅与屏蔽”中修改。
             </div>
-          </v-alert>
+          </AppBanner>
 
-          <v-alert v-if="sourcesError" type="warning" variant="tonal" class="mb-4" role="status">
+          <AppBanner
+            v-if="sourcesError"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mb-4"
+            role="status"
+          >
             {{ sourcesError }}
             <template #append>
               <v-btn
@@ -351,7 +359,7 @@ function complete(): void {
                 重试
               </v-btn>
             </template>
-          </v-alert>
+          </AppBanner>
 
           <v-progress-circular
             v-if="sourcesLoading"
@@ -389,7 +397,7 @@ function complete(): void {
                 {{ channel.name }}
               </v-chip>
             </div>
-            <v-alert
+            <AppBanner
               v-else
               type="info"
               variant="tonal"
@@ -398,7 +406,7 @@ function complete(): void {
               role="status"
             >
               当前没有可选的校级部门来源，可以直接跳过此步。
-            </v-alert>
+            </AppBanner>
           </template>
         </section>
 
@@ -416,7 +424,14 @@ function complete(): void {
             aria-label="正在加载二级学院来源"
           />
 
-          <v-alert v-if="sourcesError" type="warning" variant="tonal" class="mb-4" role="status">
+          <AppBanner
+            v-if="sourcesError"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mb-4"
+            role="status"
+          >
             {{ sourcesError }}
             <template #append>
               <v-btn
@@ -429,7 +444,7 @@ function complete(): void {
                 重试
               </v-btn>
             </template>
-          </v-alert>
+          </AppBanner>
 
           <template v-if="!sourcesLoading">
             <div class="d-flex align-center justify-space-between mb-2">
@@ -459,7 +474,7 @@ function complete(): void {
                 {{ channel.name }}
               </v-chip>
             </div>
-            <v-alert
+            <AppBanner
               v-else
               type="info"
               variant="tonal"
@@ -468,7 +483,7 @@ function complete(): void {
               role="status"
             >
               当前没有可选的二级学院来源，可以直接跳过此步。
-            </v-alert>
+            </AppBanner>
           </template>
         </section>
 
@@ -502,9 +517,9 @@ function complete(): void {
               {{ keyword }}
             </v-chip>
           </div>
-          <v-alert v-else type="info" variant="tonal" density="compact" class="mt-2">
+          <AppBanner v-else type="info" variant="tonal" density="compact" class="mt-2">
             不设置关键词也可以，之后可在个人中心的“订阅与屏蔽”中随时修改。
-          </v-alert>
+          </AppBanner>
         </section>
       </v-card-text>
 

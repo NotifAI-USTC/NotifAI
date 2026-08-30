@@ -161,6 +161,9 @@ function makeDeadlineItem(overrides: Partial<DeadlineItem> = {}): DeadlineItem {
 }
 
 const stubs = {
+  AppBanner: {
+    template: '<div v-bind="$attrs"><slot /><slot name="prepend" /><slot name="append" /></div>',
+  },
   AdvancedSearch: true,
   DdlNoticeBar: {
     props: ['notices'],

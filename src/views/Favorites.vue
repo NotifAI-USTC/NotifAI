@@ -7,6 +7,7 @@ import NoticeCard from '../components/NoticeCard.vue'
 import SkeletonLoader from '../components/SkeletonLoader.vue'
 import { useWindowSize } from '../composables/useWindowSize'
 import { loadBatchNotices } from '../composables/useBatchNoticeLoader'
+import AppBanner from '../components/AppBanner.vue'
 
 const REQUEST_LIMIT = 1000
 
@@ -142,7 +143,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 加载提示 -->
-      <v-alert
+      <AppBanner
         v-if="loadError"
         type="warning"
         variant="tonal"
@@ -160,7 +161,7 @@ onBeforeUnmount(() => {
             @click="loadFavorites"
           />
         </template>
-      </v-alert>
+      </AppBanner>
 
       <!-- 骨架屏 -->
       <SkeletonLoader v-if="loading" type="card" />
