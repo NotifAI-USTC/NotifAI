@@ -200,7 +200,7 @@ function handleContentKeydown(event: KeyboardEvent): void {
     <!-- 错误状态 -->
     <v-container v-else-if="loadError && !notice" fluid>
       <v-row justify="center">
-        <v-col :cols="12" :md="8" :lg="6">
+        <v-col :cols="12" :md="8" :lg="8">
           <v-card class="pa-4 text-center">
             <v-icon size="48" color="error" class="mb-2">$alertCircleOutline</v-icon>
             <v-card-title>无法加载通知</v-card-title>
@@ -216,7 +216,7 @@ function handleContentKeydown(event: KeyboardEvent): void {
     <!-- 内容区 -->
     <v-container v-else-if="notice" fluid>
       <v-row justify="center">
-        <v-col :cols="12" :md="8" :lg="6">
+        <v-col :cols="12" :md="8" :lg="8">
           <v-progress-linear v-if="refreshing" indeterminate color="primary" class="mb-4" />
 
           <AppBanner

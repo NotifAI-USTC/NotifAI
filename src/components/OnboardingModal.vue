@@ -246,7 +246,7 @@ function complete(): void {
     persistent
     scrollable
     :fullscreen="isMobile"
-    max-width="500"
+    max-width="560"
     aria-labelledby="onboarding-title"
     content-class="onboarding-dialog"
   >
@@ -254,7 +254,7 @@ function complete(): void {
       <v-card-title class="onboarding-header">
         <div class="d-flex align-center ga-3">
           <v-avatar color="primary" size="42" aria-hidden="true">
-            <v-icon color="white">$robot</v-icon>
+            <v-icon color="white">$handWave</v-icon>
           </v-avatar>
           <div>
             <h2 id="onboarding-title" class="text-h6">欢迎使用 NotifAI-USTC</h2>
@@ -274,7 +274,7 @@ function complete(): void {
       <v-card-text class="onboarding-body">
         <section v-if="currentStep === 1" aria-labelledby="onboarding-welcome-title">
           <div class="text-center py-4">
-            <v-icon color="primary" size="56" aria-hidden="true">$robot</v-icon>
+            <img src="/icons/icon.svg" alt="" width="56" height="56" aria-hidden="true" />
             <h3 id="onboarding-welcome-title" class="text-h5 mt-3 mb-2">校园通知，一眼看懂</h3>
             <p class="text-body-2 text-medium-emphasis">
               NotifAI-USTC 帮你从分散的校园通知中快速找到真正重要的信息。
@@ -297,7 +297,7 @@ function complete(): void {
               </div>
             </v-card>
             <v-card variant="tonal" class="feature-card pa-4">
-              <v-icon color="secondary" size="28" aria-hidden="true">$checkCircleOutline</v-icon>
+              <v-icon color="secondary" size="28" aria-hidden="true">$database</v-icon>
               <div class="text-subtitle-2 mt-2">免登录与本地存储</div>
               <div class="text-caption text-medium-emphasis mt-1">
                 不要求创建账号，偏好设置保存在当前设备。
@@ -561,7 +561,7 @@ function complete(): void {
 
 <style scoped>
 .onboarding-dialog {
-  width: min(500px, calc(100vw - 32px));
+  width: min(560px, calc(100vw - 32px));
 }
 
 .onboarding-card {
