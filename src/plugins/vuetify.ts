@@ -1,5 +1,6 @@
 import 'vuetify/styles'
 import { createVuetify } from 'vuetify'
+import { md3 } from 'vuetify/blueprints'
 import { aliases as mdiAliases, mdi } from 'vuetify/iconsets/mdi-svg'
 import {
   mdiAccount,
@@ -79,6 +80,7 @@ import {
 } from '@mdi/js'
 
 export default createVuetify({
+  blueprint: md3,
   icons: {
     defaultSet: 'mdi',
     aliases: {
@@ -169,6 +171,7 @@ export default createVuetify({
         dark: false,
         colors: {
           primary: '#4a6cf7',
+          'primary-darken-1': '#3b5bdb',
           secondary: '#087f5b',
           error: '#b42318',
           background: '#f5f5f5',
@@ -182,6 +185,7 @@ export default createVuetify({
         dark: true,
         colors: {
           primary: '#6b8cff',
+          'primary-darken-1': '#6b8cff',
           secondary: '#5ee0b3',
           error: '#ff8a80',
           background: '#0d0d0d',

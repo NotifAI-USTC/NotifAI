@@ -139,7 +139,7 @@ onBeforeUnmount(() => {
 
       <!-- 部门分组列表 -->
       <v-card v-for="group in groupedSources" :key="group.group" class="mb-4">
-        <v-card-title class="text-subtitle-1 font-weight-bold">
+        <v-card-title class="text-body-large font-weight-bold">
           {{ group.group }}
         </v-card-title>
         <v-divider />
@@ -165,7 +165,7 @@ onBeforeUnmount(() => {
 
       <!-- AI 通知分类 -->
       <v-card class="mb-4">
-        <v-card-title class="d-flex align-center text-subtitle-1 font-weight-bold">
+        <v-card-title class="d-flex align-center text-body-large font-weight-bold">
           通知分类
           <v-spacer />
           <v-btn
@@ -245,10 +245,10 @@ onBeforeUnmount(() => {
 
       <!-- 黑名单关键词 -->
       <v-card>
-        <v-card-title class="text-subtitle-1 font-weight-bold"> AI 黑名单关键词 </v-card-title>
+        <v-card-title class="text-body-large font-weight-bold"> AI 黑名单关键词 </v-card-title>
         <v-divider />
         <v-card-text>
-          <v-row dense class="mb-4">
+          <v-row density="compact" class="mb-4">
             <v-col>
               <v-text-field
                 v-model="newKeyword"
@@ -286,8 +286,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.subscription-page {
-  min-height: 100vh;
-  background: rgb(var(--v-theme-background));
+@layer notifai-components {
+  .subscription-page {
+    min-height: 100vh;
+    background: rgb(var(--v-theme-background));
+  }
 }
 </style>

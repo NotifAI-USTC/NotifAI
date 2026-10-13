@@ -16,6 +16,7 @@ vi.mock('../utils/request', () => ({
 }))
 
 const stubs = {
+  VDefaultsProvider: { template: '<div><slot /></div>' },
   AppBanner: {
     template: '<div v-bind="$attrs"><slot /><slot name="prepend" /><slot name="append" /></div>',
   },

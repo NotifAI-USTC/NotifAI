@@ -15,6 +15,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:e2e:md3": "PLAYWRIGHT_MIGRATION=true playwright test",
+    "test:e2e:preview": "VITE_API_BASE_URL=/api VITE_USE_MOCK=false npm run build && PLAYWRIGHT_PREVIEW=true playwright test",
     "check": "npm run lint && npm run type-check && npm run test && npm run build"
   },
   "dependencies": {
@@ -26,7 +28,7 @@
     "qrcode": "^1.5.4",
     "vue": "^3.5.34",
     "vue-router": "^4.6.4",
-    "vuetify": "^3.13.0"
+    "vuetify": "4.2.4"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
@@ -43,6 +45,7 @@
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-vue": "^10.10.0",
+    "eslint-plugin-vuetify": "2.7.3",
     "globals": "^17.8.0",
     "jsdom": "^29.1.1",
     "prettier": "^3.9.6",

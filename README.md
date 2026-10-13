@@ -18,7 +18,7 @@
 - 自研月/周网格日历（不依赖已弃用的 VCalendar 组件）
 - 分享弹窗支持系统分享、复制链接/内容/文本与二维码扫码分享
 - 首页统计概览（总数、来源数、近 7 天 DDL）
-- 浅色、深色和跟随系统主题
+- Material Design 3 控件与字体，保留蓝绿配色；支持浅色、深色和跟随系统主题
 - 偏好保存在浏览器 LocalStorage，无账号依赖，支持一键导出 / 导入 JSON 备份
 - 已读记录管理（标记已读、一键清空）
 - 前台 DDL 提醒：应用打开期间通过轻量端点轮询订阅来源的近期截止通知（同一通知只提醒一次）
@@ -33,12 +33,16 @@
 | ---- | ---------------------------------- |
 | 框架 | Vue 3 `<script setup>`             |
 | 语言 | TypeScript 6 strict                |
-| UI   | Vuetify 3                          |
+| UI   | Vuetify 4 + Material Design 3      |
 | 构建 | Vite 8                             |
 | 路由 | Vue Router 4 Hash 模式             |
 | 状态 | Pinia + LocalStorage               |
 | 网络 | Axios + 运行时响应校验             |
 | 测试 | Vitest、Vue Test Utils、Playwright |
+
+Vuetify 配置启用 `md3` blueprint，并保留本项目的蓝绿主题和 MDI SVG 图标。
+`public/layers.css` 在页面头部先于构建样式加载：全局 reset 位于 `notifai-base`，业务样式位于 `notifai-components`，Vuetify 的颜色、间距与字体工具类继续优先生效。
+所有页面提示使用 `AppBanner`，高度由内容决定；紧急 DDL 的横向列表在小屏上支持滑动，长标题省略时仍显示截止时间。
 
 ## 快速开始
 
@@ -72,11 +76,15 @@ npm run lint
 npm run type-check
 npm run test
 npm run test:e2e
+npm run test:e2e:md3
+npm run test:e2e:preview
 npm run build
 npm run check
 ```
 
-`npm run lint` 和 `npm run format:check` 是只读检查；使用 `lint:fix` 或 `format` 才会修改文件。完整质量检查可通过 `npm run check` 一次执行（格式、lint、类型检查、单测与构建），端到端测试使用 `npm run test:e2e`。
+`npm run lint` 和 `npm run format:check` 是只读检查；使用 `lint:fix` 或 `format` 才会修改文件。完整质量检查可通过 `npm run check` 一次执行（lint、类型检查、单测与构建），端到端测试使用 `npm run test:e2e`。
+
+`test:e2e:md3` 和 `test:e2e:preview` 使用相同的浏览器 API 响应夹具，分别验证开发服务器和生产构建。覆盖六种屏幕宽度、深浅主题、横幅高度、弹窗和无障碍；生产预览构建使用 `/api` 基地址，不启用应用内模拟数据。
 
 ## 部署
 

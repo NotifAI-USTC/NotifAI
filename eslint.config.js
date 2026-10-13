@@ -1,6 +1,7 @@
 import js from '@eslint/js'
 import eslintConfigPrettier from 'eslint-config-prettier'
 import pluginVue from 'eslint-plugin-vue'
+import pluginVuetify from 'eslint-plugin-vuetify'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
@@ -20,6 +21,7 @@ export default [
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...pluginVue.configs['flat/recommended'],
+  ...pluginVuetify.configs['flat/recommended-v4'],
   {
     files: ['**/*.{js,mjs,cjs,ts,vue}'],
     languageOptions: {

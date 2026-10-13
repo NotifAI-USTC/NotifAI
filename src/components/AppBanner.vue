@@ -43,3 +43,21 @@ const attrs = useAttrs()
     </template>
   </v-alert>
 </template>
+
+<style scoped>
+@layer notifai-components {
+  .app-banner {
+    flex: 0 0 auto;
+    min-width: 0;
+    min-height: 0;
+    grid-template-areas: 'prepend content append close';
+    grid-template-columns: max-content minmax(0, 1fr) max-content max-content;
+    grid-template-rows: auto;
+  }
+
+  .app-banner :deep(.v-alert__content) {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+</style>

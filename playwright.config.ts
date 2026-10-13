@@ -1,7 +1,12 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const preview = process.env.PLAYWRIGHT_PREVIEW === 'true'
+const migration = preview || process.env.PLAYWRIGHT_MIGRATION === 'true'
+
 export default defineConfig({
   testDir: './tests/e2e',
+  testMatch: migration ? '**/md3.spec.ts' : '**/*.spec.ts',
+  testIgnore: migration ? [] : ['**/md3.spec.ts'],
   fullyParallel: false,
   workers: 1,
   forbidOnly: Boolean(process.env.CI),
@@ -10,23 +15,29 @@ export default defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:4173',
     trace: 'on-first-retry',
+    ...(migration ? { timezoneId: 'Asia/Shanghai' } : {}),
   },
-  projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-    {
-      name: 'mobile-chromium',
-      use: { ...devices['Pixel 7'] },
-    },
-  ],
+  projects: migration
+    ? [{ name: 'md3', use: { ...devices['Desktop Chrome'] } }]
+    : [
+        {
+          name: 'chromium',
+          use: { ...devices['Desktop Chrome'] },
+        },
+        {
+          name: 'mobile-chromium',
+          use: { ...devices['Pixel 7'] },
+        },
+      ],
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 4173 --force',
+    command: preview
+      ? 'npm run preview -- --host 127.0.0.1 --port 4173'
+      : 'npm run dev -- --host 127.0.0.1 --port 4173 --force',
     env: {
-      VITE_USE_MOCK: 'true',
+      VITE_USE_MOCK: migration ? 'false' : 'true',
+      ...(migration ? { VITE_API_BASE_URL: '/api' } : {}),
     },
     url: 'http://127.0.0.1:4173',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: !process.env.CI && !migration,
   },
 })

@@ -200,7 +200,7 @@ function handleContentKeydown(event: KeyboardEvent): void {
 
     <!-- 错误状态 -->
     <v-container v-else-if="loadError && !notice" fluid>
-      <v-row justify="center">
+      <v-row class="justify-center">
         <v-col :cols="12" :md="8" :lg="8">
           <v-card class="pa-4 text-center">
             <v-icon size="48" color="error" class="mb-2">$alertCircleOutline</v-icon>
@@ -216,7 +216,7 @@ function handleContentKeydown(event: KeyboardEvent): void {
 
     <!-- 内容区 -->
     <v-container v-else-if="notice" fluid>
-      <v-row justify="center">
+      <v-row class="justify-center">
         <v-col :cols="12" :md="8" :lg="8">
           <v-progress-linear v-if="refreshing" indeterminate color="primary" class="mb-4" />
 
@@ -248,7 +248,9 @@ function handleContentKeydown(event: KeyboardEvent): void {
           </AppBanner>
 
           <v-card class="mb-6" variant="flat">
-            <v-card-title class="detail-title text-h5 text-wrap">{{ notice.title }}</v-card-title>
+            <v-card-title class="detail-title text-headline-small text-wrap">{{
+              notice.title
+            }}</v-card-title>
             <v-card-subtitle class="pb-2">
               {{ notice.source }} · {{ notice.publishDate }}
               <span v-if="formatCrawlTime(notice.lastCrawl)" class="text-medium-emphasis">
@@ -299,7 +301,7 @@ function handleContentKeydown(event: KeyboardEvent): void {
                 </v-list-item>
               </v-list>
 
-              <v-card-text class="summary-text text-body-1 mt-4" tag="p">
+              <v-card-text class="summary-text text-body-large mt-4" tag="p">
                 {{ notice.aiSummary }}
               </v-card-text>
             </v-card-text>
@@ -390,151 +392,153 @@ function handleContentKeydown(event: KeyboardEvent): void {
 </template>
 
 <style scoped>
-.summary-text {
-  line-height: 1.8;
-}
-
-.detail-title {
-  line-height: 1.45;
-}
-
-.detail-page {
-  min-height: 100vh;
-  background: rgb(var(--v-theme-background));
-}
-
-.ai-card {
-  animation: fadeIn 0.5s ease-out;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
+@layer notifai-components {
+  .summary-text {
+    line-height: 1.8;
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+
+  .detail-title {
+    line-height: 1.45;
   }
-}
 
-.clean-content {
-  font-size: 15px;
-  line-height: 1.8;
-  color: rgb(var(--v-theme-on-surface));
-  overflow-wrap: break-word;
-}
+  .detail-page {
+    min-height: 100vh;
+    background: rgb(var(--v-theme-background));
+  }
 
-.clean-content :deep(img) {
-  max-width: 100%;
-  height: auto;
-  border-radius: 8px;
-  margin: 8px 0;
-  cursor: pointer;
-  transition: transform 0.2s;
-}
+  .ai-card {
+    animation: fadeIn 0.5s ease-out;
+  }
 
-.clean-content :deep(img:hover) {
-  transform: scale(1.02);
-}
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
 
-.clean-content :deep(table) {
-  max-width: 100%;
-  display: block;
-  overflow-x: auto;
-  border-collapse: collapse;
-  margin: 16px 0;
-}
+  .clean-content {
+    font-size: 15px;
+    line-height: 1.8;
+    color: rgb(var(--v-theme-on-surface));
+    overflow-wrap: break-word;
+  }
 
-.clean-content :deep(td),
-.clean-content :deep(th) {
-  border: 1px solid rgb(var(--v-border-color));
-  padding: 8px 12px;
-}
+  .clean-content :deep(img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin: 8px 0;
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
 
-.clean-content :deep(a) {
-  color: rgb(var(--v-theme-primary));
-  text-decoration: none;
-}
+  .clean-content :deep(img:hover) {
+    transform: scale(1.02);
+  }
 
-.clean-content :deep(a:hover) {
-  text-decoration: underline;
-}
+  .clean-content :deep(table) {
+    max-width: 100%;
+    display: block;
+    overflow-x: auto;
+    border-collapse: collapse;
+    margin: 16px 0;
+  }
 
-/* ---- Markdown 渲染样式 ---- */
-.clean-content :deep(h1),
-.clean-content :deep(h2),
-.clean-content :deep(h3),
-.clean-content :deep(h4) {
-  margin: 20px 0 10px;
-  font-weight: 600;
-  line-height: 1.4;
-}
+  .clean-content :deep(td),
+  .clean-content :deep(th) {
+    border: 1px solid rgb(var(--v-border-color));
+    padding: 8px 12px;
+  }
 
-.clean-content :deep(h1) {
-  font-size: 22px;
-}
+  .clean-content :deep(a) {
+    color: rgb(var(--v-theme-primary));
+    text-decoration: none;
+  }
 
-.clean-content :deep(h2) {
-  font-size: 19px;
-}
+  .clean-content :deep(a:hover) {
+    text-decoration: underline;
+  }
 
-.clean-content :deep(h3) {
-  font-size: 17px;
-}
+  /* ---- Markdown 渲染样式 ---- */
+  .clean-content :deep(h1),
+  .clean-content :deep(h2),
+  .clean-content :deep(h3),
+  .clean-content :deep(h4) {
+    margin: 20px 0 10px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
 
-.clean-content :deep(h4) {
-  font-size: 15px;
-}
+  .clean-content :deep(h1) {
+    font-size: 22px;
+  }
 
-.clean-content :deep(p) {
-  margin: 10px 0;
-}
+  .clean-content :deep(h2) {
+    font-size: 19px;
+  }
 
-.clean-content :deep(ul),
-.clean-content :deep(ol) {
-  margin: 10px 0;
-  padding-left: 24px;
-}
+  .clean-content :deep(h3) {
+    font-size: 17px;
+  }
 
-.clean-content :deep(li) {
-  margin: 4px 0;
-}
+  .clean-content :deep(h4) {
+    font-size: 15px;
+  }
 
-.clean-content :deep(blockquote) {
-  margin: 12px 0;
-  padding: 4px 16px;
-  border-left: 4px solid rgb(var(--v-theme-primary));
-  background: rgba(var(--v-theme-primary), 0.06);
-  color: rgb(var(--v-theme-on-surface-variant));
-}
+  .clean-content :deep(p) {
+    margin: 10px 0;
+  }
 
-.clean-content :deep(pre) {
-  margin: 12px 0;
-  padding: 12px 16px;
-  border-radius: 8px;
-  background: rgba(var(--v-theme-on-surface), 0.06);
-  overflow-x: auto;
-  font-size: 13px;
-  line-height: 1.6;
-}
+  .clean-content :deep(ul),
+  .clean-content :deep(ol) {
+    margin: 10px 0;
+    padding-left: 24px;
+  }
 
-.clean-content :deep(code) {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  background: rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 4px;
-  padding: 1px 4px;
-  font-size: 0.92em;
-}
+  .clean-content :deep(li) {
+    margin: 4px 0;
+  }
 
-.clean-content :deep(pre code) {
-  background: transparent;
-  padding: 0;
-}
+  .clean-content :deep(blockquote) {
+    margin: 12px 0;
+    padding: 4px 16px;
+    border-left: 4px solid rgb(var(--v-theme-primary));
+    background: rgba(var(--v-theme-primary), 0.06);
+    color: rgb(var(--v-theme-on-surface-variant));
+  }
 
-.clean-content :deep(hr) {
-  border: none;
-  border-top: 1px solid rgb(var(--v-theme-surface-variant));
-  margin: 16px 0;
+  .clean-content :deep(pre) {
+    margin: 12px 0;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: rgba(var(--v-theme-on-surface), 0.06);
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .clean-content :deep(code) {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    background: rgba(var(--v-theme-on-surface), 0.08);
+    border-radius: 4px;
+    padding: 1px 4px;
+    font-size: 0.92em;
+  }
+
+  .clean-content :deep(pre code) {
+    background: transparent;
+    padding: 0;
+  }
+
+  .clean-content :deep(hr) {
+    border: none;
+    border-top: 1px solid rgb(var(--v-theme-surface-variant));
+    margin: 16px 0;
+  }
 }
 </style>

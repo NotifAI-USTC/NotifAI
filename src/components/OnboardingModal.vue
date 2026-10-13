@@ -257,8 +257,8 @@ function complete(): void {
             <v-icon color="white">$handWave</v-icon>
           </v-avatar>
           <div>
-            <h2 id="onboarding-title" class="text-h6">欢迎使用 NotifAI-USTC</h2>
-            <p class="text-caption text-medium-emphasis mb-0">用一分钟设置你的通知看板</p>
+            <h2 id="onboarding-title" class="text-title-large">欢迎使用 NotifAI-USTC</h2>
+            <p class="text-body-small text-medium-emphasis mb-0">用一分钟设置你的通知看板</p>
           </div>
         </div>
         <v-chip size="small" color="primary" variant="tonal">{{ currentStep }} / 4</v-chip>
@@ -275,8 +275,10 @@ function complete(): void {
         <section v-if="currentStep === 1" aria-labelledby="onboarding-welcome-title">
           <div class="text-center py-4">
             <img src="/icons/icon.svg" alt="" width="56" height="56" aria-hidden="true" />
-            <h3 id="onboarding-welcome-title" class="text-h5 mt-3 mb-2">校园通知，一眼看懂</h3>
-            <p class="text-body-2 text-medium-emphasis">
+            <h3 id="onboarding-welcome-title" class="text-headline-small mt-3 mb-2">
+              校园通知，一眼看懂
+            </h3>
+            <p class="text-body-medium text-medium-emphasis">
               NotifAI-USTC 帮你从分散的校园通知中快速找到真正重要的信息。
             </p>
           </div>
@@ -284,22 +286,22 @@ function complete(): void {
           <div class="feature-grid">
             <v-card variant="tonal" class="feature-card pa-4">
               <v-icon color="primary" size="28" aria-hidden="true">$robot</v-icon>
-              <div class="text-subtitle-2 mt-2">AI 智能提炼</div>
-              <div class="text-caption text-medium-emphasis mt-1">
+              <div class="text-title-small mt-2">AI 智能提炼</div>
+              <div class="text-body-small text-medium-emphasis mt-1">
                 自动提取摘要、截止时间、面向对象和行动地点。
               </div>
             </v-card>
             <v-card variant="tonal" class="feature-card pa-4">
               <v-icon color="error" size="28" aria-hidden="true">$clockAlert</v-icon>
-              <div class="text-subtitle-2 mt-2">DDL 倒计时</div>
-              <div class="text-caption text-medium-emphasis mt-1">
+              <div class="text-title-small mt-2">DDL 倒计时</div>
+              <div class="text-body-small text-medium-emphasis mt-1">
                 重要日程集中高亮，减少错过选课和报名的风险。
               </div>
             </v-card>
             <v-card variant="tonal" class="feature-card pa-4">
               <v-icon color="secondary" size="28" aria-hidden="true">$database</v-icon>
-              <div class="text-subtitle-2 mt-2">免登录与本地存储</div>
-              <div class="text-caption text-medium-emphasis mt-1">
+              <div class="text-title-small mt-2">免登录与本地存储</div>
+              <div class="text-body-small text-medium-emphasis mt-1">
                 不要求创建账号，偏好设置保存在当前设备。
               </div>
             </v-card>
@@ -307,34 +309,38 @@ function complete(): void {
         </section>
 
         <section v-else-if="currentStep === 2" aria-labelledby="onboarding-preferences-title">
-          <h3 id="onboarding-preferences-title" class="text-h6 mb-2">先告诉我们你的身份</h3>
-          <p class="text-body-2 text-medium-emphasis mb-4">
+          <h3 id="onboarding-preferences-title" class="text-title-large mb-2">
+            先告诉我们你的身份
+          </h3>
+          <p class="text-body-medium text-medium-emphasis mb-4">
             选择一个预设后，仍可以在下方调整校级部门；下一步可以单独选择二级学院。
           </p>
 
-          <div class="identity-grid" role="list" aria-label="身份预设">
-            <v-btn
-              v-for="preset in identityPresets"
-              :key="preset.value"
-              class="identity-option text-none"
-              :color="selectedIdentity(preset.value) ? 'primary' : undefined"
-              :variant="selectedIdentity(preset.value) ? 'tonal' : 'outlined'"
-              :aria-pressed="selectedIdentity(preset.value)"
-              @click="selectIdentity(preset)"
-            >
-              <v-icon start>{{ preset.icon }}</v-icon>
-              <span class="text-left">
-                <strong class="d-block">{{ preset.title }}</strong>
-                <small>{{ preset.description }}</small>
-              </span>
-              <v-icon v-if="selectedIdentity(preset.value)" end>$check</v-icon>
-            </v-btn>
-          </div>
+          <v-defaults-provider :defaults="{ VBtn: { color: null } }">
+            <div class="identity-grid" role="list" aria-label="身份预设">
+              <v-btn
+                v-for="preset in identityPresets"
+                :key="preset.value"
+                class="identity-option text-none"
+                :color="selectedIdentity(preset.value) ? 'primary' : undefined"
+                :variant="selectedIdentity(preset.value) ? 'tonal' : 'outlined'"
+                :aria-pressed="selectedIdentity(preset.value)"
+                @click="selectIdentity(preset)"
+              >
+                <v-icon start>{{ preset.icon }}</v-icon>
+                <span class="text-left">
+                  <strong class="d-block">{{ preset.title }}</strong>
+                  <small>{{ preset.description }}</small>
+                </span>
+                <v-icon v-if="selectedIdentity(preset.value)" end>$check</v-icon>
+              </v-btn>
+            </div>
+          </v-defaults-provider>
 
           <AppBanner type="info" variant="tonal" density="compact" class="mt-4 mb-4">
-            <div class="text-caption text-medium-emphasis">该身份预设自动关注的通知分类</div>
-            <div class="text-body-2 mt-1">{{ selectedCategorySummary }}</div>
-            <div class="text-caption text-medium-emphasis mt-1">
+            <div class="text-body-small text-medium-emphasis">该身份预设自动关注的通知分类</div>
+            <div class="text-body-medium mt-1">{{ selectedCategorySummary }}</div>
+            <div class="text-body-small text-medium-emphasis mt-1">
               完成引导后，可以在个人中心的“订阅与屏蔽”中修改。
             </div>
           </AppBanner>
@@ -371,8 +377,8 @@ function complete(): void {
 
           <template v-else>
             <div class="d-flex align-center justify-space-between mt-6 mb-2">
-              <h4 class="text-subtitle-1">校级部门</h4>
-              <span class="text-caption text-medium-emphasis">
+              <h4 class="text-body-large">校级部门</h4>
+              <span class="text-body-small text-medium-emphasis">
                 {{ draftSelectAll ? '当前关注所有来源' : `已选 ${selectedSchoolCount} 个` }}
               </span>
             </div>
@@ -411,8 +417,8 @@ function complete(): void {
         </section>
 
         <section v-else-if="currentStep === 3" aria-labelledby="onboarding-secondary-title">
-          <h3 id="onboarding-secondary-title" class="text-h6 mb-2">选择二级学院订阅</h3>
-          <p class="text-body-2 text-medium-emphasis mb-4">
+          <h3 id="onboarding-secondary-title" class="text-title-large mb-2">选择二级学院订阅</h3>
+          <p class="text-body-medium text-medium-emphasis mb-4">
             可以选择多个二级学院，也可以暂时不选，之后可在个人中心继续调整。
           </p>
 
@@ -448,8 +454,8 @@ function complete(): void {
 
           <template v-if="!sourcesLoading">
             <div class="d-flex align-center justify-space-between mb-2">
-              <h4 class="text-subtitle-1">二级学院</h4>
-              <span class="text-caption text-medium-emphasis">
+              <h4 class="text-body-large">二级学院</h4>
+              <span class="text-body-small text-medium-emphasis">
                 {{ draftSelectAll ? '当前关注所有来源' : `已选 ${selectedSecondaryCount} 个` }}
               </span>
             </div>
@@ -488,8 +494,8 @@ function complete(): void {
         </section>
 
         <section v-else aria-labelledby="onboarding-filter-title">
-          <h3 id="onboarding-filter-title" class="text-h6 mb-2">设置 AI 过滤关键词</h3>
-          <p class="text-body-2 text-medium-emphasis mb-4">
+          <h3 id="onboarding-filter-title" class="text-title-large mb-2">设置 AI 过滤关键词</h3>
+          <p class="text-body-medium text-medium-emphasis mb-4">
             添加你暂时不关心的主题，首页会自动减少相关通知；也可以直接跳过。
           </p>
 
@@ -560,108 +566,124 @@ function complete(): void {
 </template>
 
 <style scoped>
-.onboarding-dialog {
-  width: min(560px, calc(100vw - 32px));
-}
-
-.onboarding-card {
-  max-height: min(760px, calc(100dvh - 32px));
-  overflow: hidden;
-}
-
-.onboarding-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex: 0 0 auto;
-}
-
-.onboarding-body {
-  overflow-y: auto;
-}
-
-.feature-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.feature-card {
-  min-height: 150px;
-}
-
-.identity-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.identity-option {
-  justify-content: flex-start;
-  min-height: 72px;
-  padding: 10px 12px;
-  white-space: normal;
-  height: auto;
-  text-align: left;
-}
-
-.identity-option :deep(.v-btn__content) {
-  white-space: normal;
-  overflow: visible;
-}
-
-.identity-option small {
-  display: block;
-  color: rgb(var(--v-theme-on-surface-variant));
-  font-weight: 400;
-  line-height: 1.35;
-  white-space: normal;
-  word-break: break-word;
-}
-
-.channel-chips :deep(.v-chip--variant-tonal) {
-  border: thin solid transparent;
-}
-
-.onboarding-actions {
-  flex: 0 0 auto;
-  border-top: 1px solid rgb(var(--v-theme-outline-variant));
-}
-
-@media (max-width: 959px) {
+@layer notifai-components {
   .onboarding-dialog {
-    width: 100%;
-    margin: 0;
+    width: min(560px, calc(100vw - 32px));
   }
 
   .onboarding-card {
-    max-height: 100dvh;
-    min-height: 100dvh;
-    border-radius: 0;
+    max-height: min(760px, calc(100dvh - 32px));
+    overflow: hidden;
+  }
+
+  .onboarding-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex: 0 0 auto;
+    white-space: normal;
+  }
+
+  .onboarding-header > .d-flex {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .onboarding-header > .d-flex > div {
+    min-width: 0;
+  }
+
+  .onboarding-header > .v-chip {
+    flex: 0 0 auto;
+  }
+
+  .onboarding-body {
+    overflow-y: auto;
   }
 
   .feature-grid {
-    grid-template-columns: 1fr;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
   }
 
   .feature-card {
-    min-height: 0;
+    min-height: 150px;
   }
-}
 
-@media (max-width: 420px) {
   .identity-grid {
-    grid-template-columns: 1fr;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .identity-option {
+    justify-content: flex-start;
+    min-height: 72px;
+    padding: 10px 12px;
+    white-space: normal;
+    height: auto;
+    text-align: left;
+  }
+
+  .identity-option :deep(.v-btn__content) {
+    white-space: normal;
+    overflow: visible;
+  }
+
+  .identity-option small {
+    display: block;
+    color: rgb(var(--v-theme-on-surface-variant));
+    font-weight: 400;
+    line-height: 1.35;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .channel-chips :deep(.v-chip--variant-tonal) {
+    border: thin solid transparent;
   }
 
   .onboarding-actions {
-    align-items: stretch;
-    flex-wrap: wrap;
+    flex: 0 0 auto;
+    border-top: 1px solid rgb(var(--v-theme-outline-variant));
   }
 
-  .onboarding-actions .v-btn {
-    flex: 1 1 auto;
+  @media (max-width: 959px) {
+    .onboarding-dialog {
+      width: 100%;
+      margin: 0;
+    }
+
+    .onboarding-card {
+      max-height: 100dvh;
+      min-height: 100dvh;
+      border-radius: 0;
+    }
+
+    .feature-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .feature-card {
+      min-height: 0;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .identity-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .onboarding-actions {
+      align-items: stretch;
+      flex-wrap: wrap;
+    }
+
+    .onboarding-actions .v-btn {
+      flex: 1 1 auto;
+    }
   }
 }
 </style>

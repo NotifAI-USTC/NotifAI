@@ -77,7 +77,7 @@ watch(
     </v-navigation-drawer>
 
     <!-- 主内容区 -->
-    <v-main>
+    <v-main class="app-main">
       <router-view />
     </v-main>
 
@@ -107,5 +107,11 @@ watch(
 </template>
 
 <style>
-/* 全局样式 */
+@layer notifai-components {
+  /* Route app bars change layout padding. Apply it immediately so v4's
+     layout observer doesn't interrupt a padding transition mid-resize. */
+  .app-main {
+    transition: none;
+  }
+}
 </style>

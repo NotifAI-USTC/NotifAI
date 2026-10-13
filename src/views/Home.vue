@@ -939,7 +939,7 @@ onBeforeUnmount(() => {
       closable
       @click:close="clearAdvancedSearch"
     >
-      <span class="text-caption">
+      <span class="text-body-small">
         高级搜索已启用
         <span v-if="advancedFilters.keyword">· 关键词: {{ advancedFilters.keyword }}</span>
         <span v-if="advancedFilters.categories.length">
@@ -1052,7 +1052,7 @@ onBeforeUnmount(() => {
       <!-- 加载状态 -->
       <v-card v-if="loading" flat class="text-center pa-8 bg-transparent">
         <v-progress-circular indeterminate color="primary" />
-        <div class="text-caption mt-2">加载中...</div>
+        <div class="text-body-small mt-2">加载中...</div>
       </v-card>
 
       <div v-else-if="!finished && !requestError" class="d-flex justify-center pa-4">
@@ -1099,47 +1099,49 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.home-page {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: rgb(var(--v-theme-background));
-}
-
-.notice-grid {
-  flex: 1;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-}
-
-.pull-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.pull-indicator :deep(.v-icon) {
-  transition: transform 0.2s ease;
-}
-
-.pull-indicator__icon--ready {
-  transform: rotate(180deg);
-}
-
-/* 卡片入场动画 */
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
+@layer notifai-components {
+  .home-page {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: rgb(var(--v-theme-background));
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
-.notice-col {
-  animation: fadeInUp 0.4s ease-out both;
+  .notice-grid {
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+
+  .pull-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .pull-indicator :deep(.v-icon) {
+    transition: transform 0.2s ease;
+  }
+
+  .pull-indicator__icon--ready {
+    transform: rotate(180deg);
+  }
+
+  /* 卡片入场动画 */
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .notice-col {
+    animation: fadeInUp 0.4s ease-out both;
+  }
 }
 </style>

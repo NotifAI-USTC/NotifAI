@@ -246,85 +246,87 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.image-preview-overlay :deep(.v-overlay__content) {
-  width: 100%;
-  height: 100%;
-}
+@layer notifai-components {
+  .image-preview-overlay :deep(.v-overlay__content) {
+    width: 100%;
+    height: 100%;
+  }
 
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
 
-.preview-content {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+  .preview-content {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 
-.preview-close {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  z-index: 10;
-}
+  .preview-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 10;
+  }
 
-.preview-counter {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  z-index: 10;
-}
+  .preview-counter {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    z-index: 10;
+  }
 
-.preview-container {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
+  .preview-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
 
-.preview-image {
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
-  transition: transform 0.1s ease;
-  user-select: none;
-}
+  .preview-image {
+    max-width: 90vw;
+    max-height: 90vh;
+    object-fit: contain;
+    transition: transform 0.1s ease;
+    user-select: none;
+  }
 
-.preview-nav {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 10;
-}
+  .preview-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 10;
+  }
 
-.preview-nav--prev {
-  left: 16px;
-}
+  .preview-nav--prev {
+    left: 16px;
+  }
 
-.preview-nav--next {
-  right: 16px;
-}
+  .preview-nav--next {
+    right: 16px;
+  }
 
-.preview-toolbar {
-  position: absolute;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
+  .preview-toolbar {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+  }
 }
 </style>

@@ -202,7 +202,7 @@ function resetFilters() {
         <!-- 筛选条件 -->
         <div class="tri-state-filters mb-4">
           <div class="tri-state-filter">
-            <span class="text-caption text-medium-emphasis">截止日期</span>
+            <span class="text-body-small text-medium-emphasis">截止日期</span>
             <v-btn-toggle
               v-model="filters.hasDeadline"
               mandatory
@@ -217,7 +217,7 @@ function resetFilters() {
             </v-btn-toggle>
           </div>
           <div class="tri-state-filter">
-            <span class="text-caption text-medium-emphasis">阅读状态</span>
+            <span class="text-body-small text-medium-emphasis">阅读状态</span>
             <v-btn-toggle
               v-model="filters.isRead"
               mandatory
@@ -232,7 +232,7 @@ function resetFilters() {
             </v-btn-toggle>
           </div>
           <div class="tri-state-filter">
-            <span class="text-caption text-medium-emphasis">收藏状态</span>
+            <span class="text-body-small text-medium-emphasis">收藏状态</span>
             <v-btn-toggle
               v-model="filters.isStarred"
               mandatory
@@ -250,7 +250,7 @@ function resetFilters() {
 
         <!-- 标签筛选 -->
         <div class="mb-4">
-          <div class="text-caption text-medium-emphasis mb-2">标签筛选</div>
+          <div class="text-body-small text-medium-emphasis mb-2">标签筛选</div>
           <div class="d-flex ga-2">
             <v-text-field
               v-model="newTag"
@@ -272,7 +272,7 @@ function resetFilters() {
         <!-- 搜索历史 -->
         <div v-if="searchHistory.length > 0 && !filters.keyword">
           <div class="d-flex align-center justify-space-between mb-2">
-            <span class="text-caption text-medium-emphasis">搜索历史</span>
+            <span class="text-body-small text-medium-emphasis">搜索历史</span>
             <v-btn variant="text" size="x-small" @click="clearHistory">清空</v-btn>
           </div>
           <div class="d-flex flex-wrap ga-2">
@@ -304,35 +304,37 @@ function resetFilters() {
 </template>
 
 <style scoped>
-.search-form {
-  max-height: 60vh;
-}
+@layer notifai-components {
+  .search-form {
+    max-height: 60vh;
+  }
 
-.tri-state-filters {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.tri-state-filter {
-  display: grid;
-  gap: 6px;
-}
-
-.tri-state-filter :deep(.v-btn-toggle) {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  width: 100%;
-}
-
-.tri-state-filter :deep(.v-btn) {
-  min-width: 0;
-  padding-inline: 8px;
-}
-
-@media (max-width: 720px) {
   .tri-state-filters {
-    grid-template-columns: 1fr;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tri-state-filter {
+    display: grid;
+    gap: 6px;
+  }
+
+  .tri-state-filter :deep(.v-btn-toggle) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .tri-state-filter :deep(.v-btn) {
+    min-width: 0;
+    padding-inline: 8px;
+  }
+
+  @media (max-width: 720px) {
+    .tri-state-filters {
+      grid-template-columns: 1fr;
+    }
   }
 }
 </style>

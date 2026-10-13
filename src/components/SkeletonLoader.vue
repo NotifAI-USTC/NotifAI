@@ -16,7 +16,7 @@ defineProps<{
     <!-- 详情页骨架屏 -->
     <template v-else>
       <v-container>
-        <v-row justify="center">
+        <v-row class="justify-center">
           <v-col cols="12" md="8" lg="6">
             <v-card class="mb-4" rounded="lg">
               <v-skeleton-loader type="image, article" :loading="true" />
@@ -32,7 +32,9 @@ defineProps<{
 </template>
 
 <style scoped>
-.skeleton-wrapper {
-  padding: 16px;
+@layer notifai-components {
+  .skeleton-wrapper {
+    padding: 16px;
+  }
 }
 </style>

@@ -229,7 +229,7 @@ function restartOnboarding(): void {
       <v-card class="mb-4">
         <v-card-text class="text-center pa-6">
           <v-avatar size="80" color="primary" class="mb-4">
-            <span class="text-h5 text-white font-weight-bold">USTC</span>
+            <span class="text-headline-small text-white font-weight-bold">USTC</span>
           </v-avatar>
           <v-card-title class="pa-0">科大新同学</v-card-title>
           <v-card-subtitle class="pa-0"> 已读 {{ store.readIds.length }} 条通知 </v-card-subtitle>
@@ -289,7 +289,7 @@ function restartOnboarding(): void {
           <v-card-text v-else-if="!importantLoadError" class="text-center pa-6">
             <v-icon size="48" color="grey" class="mb-2">$clockOutline</v-icon>
             <div class="text-medium-emphasis">暂无重要的 DDL 通知</div>
-            <div class="text-caption text-medium-emphasis mt-1">去首页将通知标记为重要</div>
+            <div class="text-body-small text-medium-emphasis mt-1">去首页将通知标记为重要</div>
           </v-card-text>
         </template>
       </v-card>
@@ -413,7 +413,7 @@ function restartOnboarding(): void {
         <v-card-title>外观</v-card-title>
         <v-divider />
         <v-card-text>
-          <v-row align="center">
+          <v-row class="align-center">
             <v-col>深色模式</v-col>
             <v-col cols="auto">
               <v-chip-group
@@ -446,7 +446,7 @@ function restartOnboarding(): void {
         </v-card-title>
         <v-divider />
         <v-card-text class="text-center pa-6">
-          <div class="text-body-2 text-medium-emphasis">
+          <div class="text-body-medium text-medium-emphasis">
             将清除全部已读标记，此操作不可撤销。确定继续吗？
           </div>
         </v-card-text>
@@ -466,10 +466,12 @@ function restartOnboarding(): void {
         </v-card-title>
         <v-divider />
         <v-card-text class="text-center pa-6">
-          <div class="text-body-2 text-medium-emphasis mb-2">欢迎通过邮件反馈你的想法或建议</div>
+          <div class="text-body-medium text-medium-emphasis mb-2">
+            欢迎通过邮件反馈你的想法或建议
+          </div>
           <a
             :href="`mailto:${FEEDBACK_EMAIL}`"
-            class="feedback-email text-h6 font-weight-bold text-primary text-decoration-none"
+            class="feedback-email text-title-large font-weight-bold text-primary text-decoration-none"
           >
             {{ FEEDBACK_EMAIL }}
           </a>
@@ -496,12 +498,14 @@ function restartOnboarding(): void {
 </template>
 
 <style scoped>
-.user-page {
-  min-height: 100vh;
-  background: rgb(var(--v-theme-background));
-}
+@layer notifai-components {
+  .user-page {
+    min-height: 100vh;
+    background: rgb(var(--v-theme-background));
+  }
 
-.feedback-email {
-  word-break: break-all;
+  .feedback-email {
+    word-break: break-all;
+  }
 }
 </style>

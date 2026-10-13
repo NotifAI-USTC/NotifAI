@@ -92,21 +92,22 @@ function removeTag(tag: string) {
       @keydown.space.prevent="handleClick"
     >
       <!-- 标题 -->
-      <v-card-title class="text-subtitle-1 font-weight-bold pa-0 mb-2 line-clamp-2">
+      <v-card-title class="text-body-large font-weight-bold pa-0 mb-2 line-clamp-2">
         <v-icon v-if="isImportant" size="16" color="error" class="mr-1">$alertCircle</v-icon>
         {{ notice.title }}
       </v-card-title>
 
       <!-- AI 摘要 -->
-      <v-card-subtitle class="notice-summary text-body-2 pa-0 mb-3">
+      <v-card-subtitle class="notice-summary text-body-medium pa-0 mb-3">
         {{ notice.aiSummary || '暂无 AI 摘要' }}
       </v-card-subtitle>
     </div>
 
     <v-card-text class="pt-0">
       <!-- 标签 -->
-      <v-chip-group column class="pa-0">
-        <v-chip size="small" color="primary" variant="tonal">
+      <!-- Display labels do not need the selectable group's resize/scroll machinery. -->
+      <div class="d-flex flex-wrap ga-2">
+        <v-chip size="small" color="primary-darken-1" variant="tonal">
           {{ notice.source }}
         </v-chip>
 
@@ -130,7 +131,9 @@ function removeTag(tag: string) {
           {{ remainingText }}
         </v-chip>
 
-        <v-chip v-if="isRead" size="small" color="grey" variant="outlined"> 已读 </v-chip>
+        <v-chip v-if="isRead" size="small" color="on-surface-variant" variant="outlined">
+          已读
+        </v-chip>
 
         <!-- 自定义标签 -->
         <v-chip
@@ -144,7 +147,7 @@ function removeTag(tag: string) {
         >
           {{ tag }}
         </v-chip>
-      </v-chip-group>
+      </div>
     </v-card-text>
 
     <!-- 操作按钮 -->
@@ -222,73 +225,73 @@ function removeTag(tag: string) {
 </template>
 
 <style scoped>
-.notice-card {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  border-radius: 8px;
-  position: relative;
-}
+@layer notifai-components {
+  .notice-card {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+  }
 
-.notice-summary {
-  opacity: 1;
-}
-
-.notice-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.notice-card__open {
-  cursor: pointer;
-  padding: 16px 16px 0;
-}
-
-.notice-card__open:focus-visible {
-  outline: 2px solid rgb(var(--v-theme-primary));
-  outline-offset: -2px;
-}
-
-.notice-card--read {
-  opacity: 0.65;
-}
-
-.notice-card--pinned {
-  border-left: 3px solid rgb(var(--v-theme-primary));
-}
-
-.notice-card--important {
-  border-left: 3px solid rgb(var(--v-theme-error));
-}
-
-.pin-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  background: rgba(var(--v-theme-primary), 0.1);
-  border-radius: 50%;
-  padding: 4px;
-}
-
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.card-actions {
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.notice-card:hover .card-actions,
-.notice-card:focus-within .card-actions {
-  opacity: 1;
-}
-
-/* 移动端始终显示操作按钮 */
-@media (max-width: 960px) {
-  .card-actions {
+  .notice-summary {
     opacity: 1;
+  }
+
+  .notice-card:hover {
+    transform: translateY(-2px);
+  }
+
+  .notice-card__open {
+    cursor: pointer;
+    padding: 16px 16px 0;
+  }
+
+  .notice-card__open:focus-visible {
+    outline: 2px solid rgb(var(--v-theme-primary));
+    outline-offset: -2px;
+  }
+
+  .notice-card--read {
+    opacity: 0.65;
+  }
+
+  .notice-card--pinned {
+    border-left: 3px solid rgb(var(--v-theme-primary));
+  }
+
+  .notice-card--important {
+    border-left: 3px solid rgb(var(--v-theme-error));
+  }
+
+  .pin-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(var(--v-theme-primary), 0.1);
+    border-radius: 50%;
+    padding: 4px;
+  }
+
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-actions {
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  .notice-card:hover .card-actions,
+  .notice-card:focus-within .card-actions {
+    opacity: 1;
+  }
+
+  /* 移动端始终显示操作按钮 */
+  @media (max-width: 960px) {
+    .card-actions {
+      opacity: 1;
+    }
   }
 }
 </style>

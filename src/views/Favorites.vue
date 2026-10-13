@@ -197,25 +197,27 @@ onBeforeUnmount(() => {
       <!-- 无任何收藏 -->
       <div v-else class="empty-state">
         <v-icon size="64" color="grey" class="mb-2">$starOutline</v-icon>
-        <div class="text-h6 text-medium-emphasis">暂无收藏通知</div>
-        <div class="text-caption text-medium-emphasis mt-1">去首页点击星标收藏通知</div>
+        <div class="text-title-large text-medium-emphasis">暂无收藏通知</div>
+        <div class="text-body-small text-medium-emphasis mt-1">去首页点击星标收藏通知</div>
       </div>
     </v-container>
   </div>
 </template>
 
 <style scoped>
-.favorites-page {
-  min-height: 100vh;
-  background: rgb(var(--v-theme-background));
-}
+@layer notifai-components {
+  .favorites-page {
+    min-height: 100vh;
+    background: rgb(var(--v-theme-background));
+  }
 
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 80px 24px;
-  text-align: center;
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 80px 24px;
+    text-align: center;
+  }
 }
 </style>

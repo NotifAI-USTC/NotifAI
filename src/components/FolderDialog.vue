@@ -176,7 +176,7 @@ function deleteFolder(folderId: string) {
             hide-details
             @keyup.enter="createFolder"
           />
-          <v-row justify="end" dense class="mt-2">
+          <v-row density="compact" class="justify-end mt-2">
             <v-col cols="auto">
               <v-btn size="small" color="primary" @click="createFolder">创建</v-btn>
             </v-col>
@@ -196,7 +196,7 @@ function deleteFolder(folderId: string) {
         </v-btn>
         <span
           v-if="mode === 'manage' && store.folders.length >= USER_FOLDER_LIMIT"
-          class="text-caption text-error px-2"
+          class="text-body-small text-error px-2"
           role="status"
         >
           已达到 {{ USER_FOLDER_LIMIT }} 个收藏夹上限

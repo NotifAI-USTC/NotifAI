@@ -138,8 +138,8 @@ function handleSaveQr(): void {
       <v-card-text>
         <!-- 通知预览 -->
         <div class="share-preview mb-4">
-          <div class="text-subtitle-2 mb-1">{{ notice.title }}</div>
-          <div class="text-caption text-medium-emphasis">{{ notice.aiSummary }}</div>
+          <div class="text-title-small mb-1">{{ notice.title }}</div>
+          <div class="text-body-small text-medium-emphasis">{{ notice.aiSummary }}</div>
         </div>
 
         <!-- 分享选项 -->
@@ -186,7 +186,7 @@ function handleSaveQr(): void {
         <div v-if="qrError" class="text-error mt-2">{{ qrError }}</div>
         <div v-if="showQr" class="qr-block">
           <img :src="qrDataUrl" alt="通知分享二维码" class="qr-image" />
-          <div class="text-caption text-medium-emphasis qr-link">{{ noticeUrl() }}</div>
+          <div class="text-body-small text-medium-emphasis qr-link">{{ noticeUrl() }}</div>
           <v-btn
             size="small"
             color="primary"
@@ -209,32 +209,34 @@ function handleSaveQr(): void {
 </template>
 
 <style scoped>
-.share-preview {
-  padding: 12px;
-  background: rgb(var(--v-theme-surface-variant));
-  color: rgb(var(--v-theme-on-surface-variant));
-  border-radius: 8px;
-}
+@layer notifai-components {
+  .share-preview {
+    padding: 12px;
+    background: rgb(var(--v-theme-surface-variant));
+    color: rgb(var(--v-theme-on-surface-variant));
+    border-radius: 8px;
+  }
 
-.qr-block {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
+  .qr-block {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
 
-.qr-image {
-  width: 200px;
-  height: 200px;
-  image-rendering: pixelated;
-  border-radius: 8px;
-  border: 1px solid rgb(var(--v-theme-surface-variant));
-}
+  .qr-image {
+    width: 200px;
+    height: 200px;
+    image-rendering: pixelated;
+    border-radius: 8px;
+    border: 1px solid rgb(var(--v-theme-surface-variant));
+  }
 
-.qr-link {
-  max-width: 100%;
-  word-break: break-all;
-  text-align: center;
-  margin-top: 8px;
+  .qr-link {
+    max-width: 100%;
+    word-break: break-all;
+    text-align: center;
+    margin-top: 8px;
+  }
 }
 </style>
