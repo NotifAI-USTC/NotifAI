@@ -1,9 +1,19 @@
 import assert from 'node:assert/strict'
 import { it } from 'vitest'
 import {
+  getNoticeContentTypeName,
+  isNoticeContentType,
+  NOTICE_CONTENT_TYPE_DEFINITIONS,
+} from '../src/types/notice.ts'
+import {
   DataValidationError,
   assertNoticeId,
   normalizeHttpUrl,
+  parseCalendarItem,
+  parseCalendarListResponse,
+  parseDeadlineItem,
+  parseDeadlineListResponse,
+  parseNoticeBatchResponse,
   parseNoticeItem,
   parseNoticeListResponse,
   parseSourceListResponse,
@@ -113,6 +123,81 @@ it('validates notice category keys, limits, and duplicates', () => {
     categories: ['exam', 'course_info', 'admin', 'other'],
   }
   assert.throws(() => parseNoticeItem(tooManyCategories), DataValidationError)
+})
+
+it('preserves only supported content types and normalizes legacy missing values', () => {
+  assert.deepEqual(NOTICE_CONTENT_TYPE_DEFINITIONS, [
+    { key: 'news', name: '新闻' },
+    { key: 'notice', name: '通知/公告' },
+    { key: 'public_notice', name: '公示' },
+    { key: 'other', name: '其他' },
+  ])
+  for (const { key, name } of NOTICE_CONTENT_TYPE_DEFINITIONS) {
+    assert.equal(isNoticeContentType(key), true)
+    assert.equal(getNoticeContentTypeName(key), name)
+    assert.equal(parseNoticeItem({ ...validNotice(), contentType: key }).contentType, key)
+  }
+  assert.equal(parseNoticeItem(validNotice()).contentType, null)
+  assert.equal(parseNoticeItem({ ...validNotice(), contentType: null }).contentType, null)
+  for (const contentType of ['announcement', 'NEWS', '', ' news', ['news'], 1, false, {}]) {
+    assert.equal(isNoticeContentType(contentType), false)
+    assert.throws(
+      () => parseNoticeItem({ ...validNotice(), contentType }),
+      { name: 'DataValidationError', message: 'notice.contentType 必须是支持的内容类型或 null' },
+    )
+  }
+})
+
+it('skips invalid content types in list and batch while retaining valid and legacy items', () => {
+  const items = [
+    { ...validNotice(), id: 'known', contentType: 'public_notice' },
+    { ...validNotice(), id: 'invalid', contentType: 'announcement' },
+    { ...validNotice(), id: 'legacy' },
+  ]
+  const list = parseNoticeListResponse({ items, total: 3 })
+  assert.deepEqual(list.items.map(({ id, contentType }) => [id, contentType]), [
+    ['known', 'public_notice'],
+    ['legacy', null],
+  ])
+  assert.equal(list.invalidItemCount, 1)
+  const batch = parseNoticeBatchResponse({ items, missing: [] })
+  assert.deepEqual(batch.items.map(({ id, contentType }) => [id, contentType]), [
+    ['known', 'public_notice'],
+    ['legacy', null],
+  ])
+})
+
+it('validates content types in calendar and deadline responses', () => {
+  const item = validNotice()
+  for (const { key } of NOTICE_CONTENT_TYPE_DEFINITIONS) {
+    assert.equal(parseCalendarItem({ ...item, contentType: key }).contentType, key)
+    assert.equal(parseDeadlineItem({ ...item, contentType: key }).contentType, key)
+  }
+  assert.equal(parseCalendarItem(item).contentType, null)
+  assert.equal(parseDeadlineItem({ ...item, contentType: null }).contentType, null)
+  for (const contentType of ['announcement', 'NEWS', '', ['news'], 1]) {
+    assert.throws(() => parseCalendarItem({ ...item, contentType }), {
+      name: 'DataValidationError',
+      message: 'calendarItem.contentType 必须是支持的内容类型或 null',
+    })
+    assert.throws(() => parseDeadlineItem({ ...item, contentType }), {
+      name: 'DataValidationError',
+      message: 'deadlineItem.contentType 必须是支持的内容类型或 null',
+    })
+  }
+  const items = [
+    { ...item, id: 'known', contentType: 'notice' },
+    { ...item, id: 'invalid', contentType: 'NEWS' },
+    { ...item, id: 'legacy' },
+  ]
+  assert.deepEqual(parseCalendarListResponse({ items }).map(({ id, contentType }) => [id, contentType]), [
+    ['known', 'notice'],
+    ['legacy', null],
+  ])
+  assert.deepEqual(parseDeadlineListResponse({ items, total: 3 }).items.map(({ id, contentType }) => [id, contentType]), [
+    ['known', 'notice'],
+    ['legacy', null],
+  ])
 })
 
 it('rejects malformed list metadata, oversized result sets, and duplicate IDs', () => {

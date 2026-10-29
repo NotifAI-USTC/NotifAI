@@ -53,6 +53,7 @@ function createNotice(id: string): NoticeItem {
     id,
     title: `Notice ${id}`,
     source: '教务处',
+    contentType: null,
     categories: [],
 
     publishDate: '2026-08-01',
@@ -119,6 +120,24 @@ describe('Detail request lifecycle', () => {
   afterEach(async () => {
     for (const wrapper of wrappers.splice(0)) wrapper.unmount()
     await clearNoticeDetailCache()
+  })
+
+  it('shows a fresh content type without categories and omits unknown cached type', async () => {
+    const cached = createNotice('notice-1')
+    const pending = createDeferred<NoticeItem>()
+    mocks.getCachedNotice.mockReturnValue(cached)
+    mocks.fetchNoticeById.mockReturnValue(pending.promise)
+    const router = createTestRouter()
+    await router.push('/detail/notice-1')
+    const wrapper = shallowMount(Detail, {
+      global: { plugins: [router], stubs: componentStubs },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+    expect(wrapper.find('[aria-label^="内容类型："]').exists()).toBe(false)
+    pending.resolve({ ...cached, contentType: 'notice' })
+    await flushPromises()
+    expect(wrapper.find('[aria-label="内容类型：通知/公告"]').text()).toBe('通知/公告')
   })
 
   it('aborts and ignores a pending detail response after unmount', async () => {

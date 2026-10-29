@@ -7,7 +7,8 @@
 ## 已实现能力
 
 - 通知流、分页、刷新、服务端关键词、来源、AI 分类与日期筛选
-- 通知卡片和详情页展示 AI 分类，高级搜索分类选项由 `GET /categories` 动态提供
+- 通知卡片和详情页展示 AI 主题分类及已分析的内容类型；高级搜索支持临时单选内容类型，默认显示全部（含未分析的通知）
+- 高级搜索主题分类选项由 `GET /categories` 动态提供；内容类型与主题分类独立，不作为持久化偏好
 - 四步入门引导会根据身份预设自动配置来源与关注分类，分类无需单独选择
 - 通知详情、经过净化的原文、官网原文入口和附件链接复制
 - 部门订阅、关键词屏蔽、已读、收藏、置顶、重要标记和收藏夹
@@ -46,10 +47,13 @@ Vuetify 配置启用 `md3` blueprint，并保留本项目的蓝绿主题和 MDI 
 
 ## 快速开始
 
+使用 Node.js 22 和 Corepack（启用后自动使用 `package.json` 中固定的 pnpm 版本）。
+
 ```bash
-npm ci
+corepack enable
+pnpm install --frozen-lockfile
 cp .env.example .env.local
-npm run dev
+pnpm run dev
 ```
 
 前端默认运行在 `http://localhost:5173`。
@@ -72,23 +76,23 @@ VITE_USE_MOCK=true
 ## 质量检查
 
 ```bash
-npm run lint
-npm run type-check
-npm run test
-npm run test:e2e
-npm run test:e2e:md3
-npm run test:e2e:preview
-npm run build
-npm run check
+pnpm run lint
+pnpm run type-check
+pnpm run test
+pnpm run test:e2e
+pnpm run test:e2e:md3
+pnpm run test:e2e:preview
+pnpm run build
+pnpm run check
 ```
 
-`npm run lint` 和 `npm run format:check` 是只读检查；使用 `lint:fix` 或 `format` 才会修改文件。完整质量检查可通过 `npm run check` 一次执行（lint、类型检查、单测与构建），端到端测试使用 `npm run test:e2e`。
+`pnpm run lint` 和 `pnpm run format:check` 是只读检查；使用 `lint:fix` 或 `format` 才会修改文件。完整质量检查可通过 `pnpm run check` 一次执行（lint、类型检查、单测与构建），端到端测试使用 `pnpm run test:e2e`。
 
 `test:e2e:md3` 和 `test:e2e:preview` 使用相同的浏览器 API 响应夹具，分别验证开发服务器和生产构建。覆盖六种屏幕宽度、深浅主题、横幅高度、弹窗和无障碍；生产预览构建使用 `/api` 基地址，不启用应用内模拟数据。
 
 ## 部署
 
-每次 push 到 `main` 分支后，`.github/workflows/deploy-gh-pages.yml` 会自动执行 `npm run build` 并把 `dist/` 产物推送到当前仓库的 `gh-pages` 分支。生产构建必须配置 `VITE_API_BASE_URL`：workflow 会读取仓库变量 `VITE_API_BASE_URL`。
+每次 push 到 `main` 分支后，`.github/workflows/deploy-gh-pages.yml` 会自动执行 `pnpm run build` 并把 `dist/` 产物推送到当前仓库的 `gh-pages` 分支。生产构建必须配置 `VITE_API_BASE_URL`：workflow 会读取仓库变量 `API_BASE_URL`。
 
 在 GitHub 仓库的 Settings → Pages 中选择从 `gh-pages` 分支部署即可启用站点。
 
@@ -121,6 +125,7 @@ interface NoticeItem {
   id: string // 通知唯一 MD5/ID
   title: string // 原始标题
   source: string // 发布来源，如 "教务处"、"计算机学院"
+  contentType: 'news' | 'notice' | 'public_notice' | 'other' | null // 内容文体；null 表示尚无有效分析
   categories: string[] // 0~3 个 AI 分类英文 key
   publishDate: string // 发布日期 YYYY-MM-DD
   aiSummary: string // AI 提炼的一句话摘要，可为空字符串
@@ -142,6 +147,7 @@ interface NoticeItem {
 | `keyword`               | 标题、来源和摘要关键词                                                      |
 | `source` / `sources[]`  | 单个或多个来源                                                              |
 | `categories[]`          | 一个或多个 AI 分类 key；多项为 OR 语义                                      |
+| `contentType`           | 单个内容类型精确筛选，仅 `GET /notices` 支持；省略时包含未知类型           |
 | `dateFrom` / `dateTo`   | 发布日期范围，格式为 `YYYY-MM-DD`                                           |
 | `rangeFrom` / `rangeTo` | 日历范围；发布日或截止日任一命中即返回                                      |
 | `hasDeadline`           | 是否具有截止日期                                                            |
@@ -151,7 +157,7 @@ interface NoticeItem {
 | `cursor`                | 不透明游标；传入后忽略 `page`                                               |
 | `page` / `pageSize`     | 偏移分页；`page` 从 1 开始，`pageSize` 最大 1000                            |
 
-`GET /notices/:id` 返回完整 `NoticeItem`。`aiSummary`、`targetAudience`、`coreAction`、`cleanContent` 和 `attachments` 为可选字段，缺失时前端按空值处理；日期使用本地日历日字符串；`originUrl` 只接受 `ustc.edu.cn` 或其子域的无凭据 HTTPS 地址，附件 URL 接受无凭据的 HTTP(S) 地址。详细边界见 `src/utils/validation.ts`。
+`GET /notices/:id` 返回完整 `NoticeItem`。`contentType` 缺失或为 `null` 时按未知类型处理，不等同于 `other`；非法非空值会被拒绝。类型分别显示为新闻、通知/公告、公示和其他，与多值主题分类独立，组合筛选时为 AND。`aiSummary`、`targetAudience`、`coreAction`、`cleanContent` 和 `attachments` 为可选字段，缺失时前端按空值处理；日期使用本地日历日字符串；`originUrl` 只接受 `ustc.edu.cn` 或其子域的无凭据 HTTPS 地址，附件 URL 接受无凭据的 HTTP(S) 地址。详细边界见 `src/utils/validation.ts`。
 
 偏移分页的响应 `nextCursor` 固定为 `null`。游标分页在页面满 `pageSize` 时返回下一枚不透明游标，末页返回 `null`；数据量恰好为整页时，最后一个游标请求可以返回空数组后结束。首页使用 `light=true`、游标分页和 `excludeIds[]`，详情页再请求完整正文。
 
@@ -169,8 +175,8 @@ interface NoticeItem {
 | `GET /stats`             | 聚合统计：首页统计条与数据新鲜度提示                                         |
 
 - 批量详情请求体为 `{ "ids": string[] }`，响应 `{ "items": NoticeItem[], "missing": string[] }`，`items` 按发布日期倒序，重复 ID 自动去重。
-- 日历轻量条目仅含 `id` / `title` / `source` / `publishDate` / `deadline`，发布日或截止日命中即返回，上限 500 条。
-- 截止日期端点支持 `days=1..365`、`sources[]` 和分页，按截止日升序返回 `{ items, total }`；轻量条目含 `id` / `title` / `source` / `publishDate` / `deadline` / `aiSummary` / `targetAudience`。
+- 日历轻量条目含 `id` / `title` / `source` / `contentType` / `publishDate` / `deadline`，发布日或截止日命中即返回，上限 500 条。
+- 截止日期端点支持 `days=1..365`、`sources[]` 和分页，按截止日升序返回 `{ items, total }`；轻量条目含 `id` / `title` / `source` / `contentType` / `publishDate` / `deadline` / `aiSummary` / `targetAudience`。日历和截止日期端点不使用首页临时内容类型筛选。
 - 来源条目为 `{ name, group, noticeCount }`，`group` 如「校级部门」「二级学院」「其他」。
 - 分类条目为 `{ key, name, description, noticeCount }`；通知中的 `categories` 只保存英文 key，前端映射为中文名称。
 - 统计响应为 `{ total, sourceCount, last7DaysDdl, last24hNew, lastCrawlAt }`，`lastCrawlAt` 可为 `null`。

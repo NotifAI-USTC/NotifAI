@@ -4,6 +4,7 @@ export interface NoticeItem {
   title: string // 原始标题
   source: string // 发布来源,如 "教务处", "计算机学院"
   categories: NoticeCategoryKey[] // AI 分类，最多 3 项
+  contentType: NoticeContentType | null // AI 文体；null 表示尚无有效分析
   publishDate: string // 发布日期 YYYY-MM-DD
   aiSummary: string // AI 提炼的 40 字以内一句话摘要
   deadline: string | null // 格式化截止时间,无则为 null
@@ -55,6 +56,32 @@ export function isNoticeCategoryKey(value: unknown): value is NoticeCategoryKey 
 
 export function getNoticeCategoryName(key: NoticeCategoryKey): string {
   return NOTICE_CATEGORY_NAME_MAP[key]
+}
+
+/** 后端 AI 流水线使用的通知文体，与主题分类独立。 */
+export const NOTICE_CONTENT_TYPE_DEFINITIONS = [
+  { key: 'news', name: '新闻' },
+  { key: 'notice', name: '通知/公告' },
+  { key: 'public_notice', name: '公示' },
+  { key: 'other', name: '其他' },
+] as const
+
+export type NoticeContentType = (typeof NOTICE_CONTENT_TYPE_DEFINITIONS)[number]['key']
+
+const NOTICE_CONTENT_TYPE_NAME_MAP = Object.fromEntries(
+  NOTICE_CONTENT_TYPE_DEFINITIONS.map(({ key, name }) => [key, name]),
+) as Readonly<Record<NoticeContentType, string>>
+
+const NOTICE_CONTENT_TYPE_KEYS = new Set<NoticeContentType>(
+  NOTICE_CONTENT_TYPE_DEFINITIONS.map(({ key }) => key),
+)
+
+export function isNoticeContentType(value: unknown): value is NoticeContentType {
+  return typeof value === 'string' && NOTICE_CONTENT_TYPE_KEYS.has(value as NoticeContentType)
+}
+
+export function getNoticeContentTypeName(type: NoticeContentType): string {
+  return NOTICE_CONTENT_TYPE_NAME_MAP[type]
 }
 
 /** 通知列表 API 响应 */
@@ -140,6 +167,7 @@ export interface CalendarItem {
   id: string
   title: string
   source: string
+  contentType: NoticeContentType | null
   publishDate: string
   deadline: string | null
 }
@@ -154,6 +182,7 @@ export interface DeadlineItem {
   id: string
   title: string
   source: string
+  contentType: NoticeContentType | null
   publishDate: string
   deadline: string
   aiSummary: string

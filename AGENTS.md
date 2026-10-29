@@ -9,16 +9,16 @@ NotifAI-USTC is a Vue 3 and Vuetify frontend for browsing USTC campus notices. I
 ## Commands
 
 ```bash
-npm run dev
-npm run lint
-npm run type-check
-npm run test
-npm run test:e2e
-npm run build
-npm run check
+pnpm run dev
+pnpm run lint
+pnpm run type-check
+pnpm run test
+pnpm run test:e2e
+pnpm run build
+pnpm run check
 ```
 
-Lint is read-only by default. Use `npm run lint:fix` and `npm run format` only when edits are intended.
+Lint is read-only by default. Use `pnpm run lint:fix` and `pnpm run format` only when edits are intended.
 
 ## Stack
 

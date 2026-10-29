@@ -118,6 +118,18 @@ describe('mock notice API', () => {
       ),
     ).toBe(true)
   })
+  it('filters content type independently of categories before pagination', () => {
+    const publicNotices = mockFetchNotices({ contentType: 'public_notice', pageSize: 1 })
+    expect(publicNotices.total).toBe(1)
+    expect(publicNotices.items.map((notice) => notice.id)).toEqual(['contest-006'])
+    expect(mockFetchNotices({ contentType: 'public_notice', categories: ['competition'] }).items.map((notice) => notice.id)).toEqual(['contest-006'])
+    const notices = mockFetchNotices({ contentType: 'notice', pageSize: 1000 })
+    expect(notices.items.map((notice) => notice.id)).not.toContain('contest-006')
+    expect(notices.items.map((notice) => notice.id)).not.toContain('campus-008')
+    expect(mockFetchNotices({ pageSize: 1000 }).items.map((notice) => notice.id)).toContain('campus-008')
+    expect(mockFetchNotices({ contentType: 'news' }).total).toBe(0)
+    expect(mockFetchNotices({ contentType: 'other' }).total).toBe(0)
+  })
 })
 
 describe('mock new endpoints', () => {

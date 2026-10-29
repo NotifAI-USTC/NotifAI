@@ -14,6 +14,7 @@ function makeNotice(overrides: Partial<NoticeItem> = {}): NoticeItem {
     id: 'notice-1',
     title: '测试通知',
     source: '教务处',
+    contentType: null,
     categories: [],
     publishDate: '2026-08-01',
     aiSummary: '测试摘要',
@@ -37,7 +38,7 @@ describe('noticeFeedCache', () => {
   it('round-trips a validated feed entry through the cache', async () => {
     await writeNoticeFeedCache({
       key: 'home-default',
-      items: [makeNotice()],
+      items: [makeNotice({ contentType: 'public_notice' })],
       total: 1,
       nextPage: 2,
       finished: true,
@@ -46,7 +47,7 @@ describe('noticeFeedCache', () => {
     })
 
     await expect(readNoticeFeedCache('home-default')).resolves.toMatchObject({
-      items: [makeNotice()],
+      items: [makeNotice({ contentType: 'public_notice' })],
       total: 1,
       nextPage: 2,
       finished: true,
@@ -85,7 +86,7 @@ describe('noticeFeedCache', () => {
   })
 
   it('persists complete notice details independently from the feed cache', async () => {
-    const notice = makeNotice({ cleanContent: '# 完整正文\n\n详情内容' })
+    const notice = makeNotice({ cleanContent: '# 完整正文\n\n详情内容', contentType: 'other' })
     await writeNoticeDetailCache(notice)
 
     await expect(readNoticeDetailCache(notice.id)).resolves.toMatchObject({

@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
 import { ApiConfigurationError, fetchNoticeById } from '../utils/request'
-import { getNoticeCategoryName } from '../types/notice'
+import { getNoticeCategoryName, getNoticeContentTypeName } from '../types/notice'
 import type { NoticeItem } from '../types/notice'
 import ShareDialog from '../components/ShareDialog.vue'
 import ImagePreview from '../components/ImagePreview.vue'
@@ -257,7 +257,16 @@ function handleContentKeydown(event: KeyboardEvent): void {
                 · 最近抓取于 {{ formatCrawlTime(notice.lastCrawl) }}
               </span>
             </v-card-subtitle>
-            <v-card-text v-if="notice.categories.length" class="d-flex flex-wrap ga-2 pt-2">
+            <v-card-text v-if="notice.contentType !== null || notice.categories.length" class="d-flex flex-wrap ga-2 pt-2">
+              <v-chip
+                v-if="notice.contentType !== null"
+                color="on-surface-variant"
+                variant="tonal"
+                size="small"
+                :aria-label="`内容类型：${getNoticeContentTypeName(notice.contentType)}`"
+              >
+                {{ getNoticeContentTypeName(notice.contentType) }}
+              </v-chip>
               <v-chip
                 v-for="category in notice.categories"
                 :key="category"

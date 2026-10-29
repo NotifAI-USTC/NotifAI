@@ -1,8 +1,10 @@
 import { DEPARTMENTS, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
 import type {
+  CalendarListResponse,
   DeadlineListResponse,
   NoticeCategoryItem,
   NoticeCategoryKey,
+  NoticeContentType,
   NoticeItem,
   NoticeListResponse,
 } from '../types/notice'
@@ -64,6 +66,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   // ===== 教务通知 =====
   {
     id: 'edu-001',
+    contentType: 'notice',
     title: '关于本学期本科生选课安排的通知',
     source: '教务处',
     publishDate: getPastDate(2),
@@ -95,6 +98,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'edu-002',
+    contentType: 'notice',
     title: '假期期间图书馆开放时间调整',
     source: '图书馆',
     publishDate: getPastDate(1),
@@ -121,6 +125,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'edu-003',
+    contentType: 'notice',
     title: '关于本学期教材领取的通知',
     source: '教务处',
     publishDate: getPastDate(3),
@@ -147,6 +152,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'edu-004',
+    contentType: 'notice',
     title: '国家奖学金与校级优秀学生奖学金申报提醒',
     source: '学工部',
     publishDate: getPastDate(7),
@@ -174,6 +180,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'edu-005',
+    contentType: 'notice',
     title: '关于选派学生参加海外交换学习项目的报名通知',
     source: '国际合作与交流部',
     publishDate: getPastDate(4),
@@ -201,6 +208,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'edu-006',
+    contentType: 'notice',
     title: '实验室安全准入考试开放通知',
     source: '科研部',
     publishDate: getPastDate(2),
@@ -223,6 +231,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'edu-007',
+    contentType: 'notice',
     title: '期末考试成绩复核申请',
     source: '本科生院',
     publishDate: getPastDate(10),
@@ -241,6 +250,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'edu-008',
+    contentType: 'notice',
     title: '考试周考场安排及诚信考试提示',
     source: '教务处',
     publishDate: getDate(0),
@@ -267,6 +277,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   // ===== 学术讲座 =====
   {
     id: 'lecture-001',
+    contentType: 'notice',
     title: '人工智能前沿讲座：大语言模型的未来',
     source: '计算机学院',
     publishDate: getPastDate(1),
@@ -296,6 +307,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'lecture-002',
+    contentType: 'notice',
     title: '量子计算前沿讲座：从理论到实践',
     source: '物理学院',
     publishDate: getPastDate(2),
@@ -325,6 +337,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
 
   {
     id: 'lecture-003',
+    contentType: 'notice',
     title: '数据科学前沿论坛：让大模型读懂科学数据',
     source: '大数据学院',
     publishDate: getDate(0),
@@ -351,6 +364,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'lecture-004',
+    contentType: 'notice',
     title: '新能源材料系列讲座：下一代固态电池界面调控',
     source: '化学与材料科学学院',
     publishDate: getPastDate(3),
@@ -371,6 +385,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'lecture-005',
+    contentType: 'notice',
     title: '生命医学交叉讲座：单细胞技术与精准医学',
     source: '生命科学与医学部',
     publishDate: getPastDate(5),
@@ -395,6 +410,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'lecture-006',
+    contentType: 'notice',
     title: '地球观测午间学术沙龙',
     source: '地球与空间科学学院',
     publishDate: getPastDate(6),
@@ -413,6 +429,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'lecture-007',
+    contentType: 'notice',
     title: '集成电路名家讲堂：先进封装与芯片系统协同设计',
     source: '信息科学技术学院',
     publishDate: getPastDate(8),
@@ -436,6 +453,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'lecture-008',
+    contentType: 'notice',
     title: '交叉科学论坛报名结束及直播回放说明',
     source: '科研部',
     publishDate: getPastDate(12),
@@ -456,6 +474,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   // ===== 学科竞赛 =====
   {
     id: 'contest-001',
+    contentType: 'notice',
     title: '本年度美国大学生数学建模竞赛报名通知',
     source: '数学科学学院',
     publishDate: getPastDate(4),
@@ -489,6 +508,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'contest-002',
+    contentType: 'notice',
     title: '第十六届"挑战杯"全国大学生课外学术科技作品竞赛通知',
     source: '校团委',
     publishDate: getPastDate(5),
@@ -523,6 +543,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
 
   {
     id: 'contest-003',
+    contentType: 'notice',
     title: 'ACM程序设计校赛组队及报名通知',
     source: '计算机学院',
     publishDate: getPastDate(1),
@@ -545,6 +566,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'contest-004',
+    contentType: 'notice',
     title: '校园数据创新应用竞赛作品征集',
     source: '大数据学院',
     publishDate: getPastDate(4),
@@ -570,6 +592,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'contest-005',
+    contentType: 'notice',
     title: '全国大学生物理实验竞赛校内选拔',
     source: '物理学院',
     publishDate: getPastDate(9),
@@ -592,6 +615,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'contest-006',
+    contentType: 'public_notice',
     title: '大学生化学创新实验设计竞赛结果公示',
     source: '化学与材料科学学院',
     publishDate: getPastDate(15),
@@ -615,6 +639,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'contest-007',
+    contentType: 'notice',
     title: '大学生网络安全攻防竞赛报名',
     source: '信息科学技术学院',
     publishDate: getPastDate(2),
@@ -638,6 +663,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   // ===== 校园生活 =====
   {
     id: 'campus-001',
+    contentType: 'notice',
     title: '假期食堂及浴室开放安排',
     source: '后勤保障处',
     publishDate: getPastDate(2),
@@ -663,6 +689,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'campus-002',
+    contentType: 'notice',
     title: '校园电动车充电桩新增及使用规范',
     source: '保卫处',
     publishDate: getPastDate(1),
@@ -693,6 +720,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'campus-003',
+    contentType: 'notice',
     title: '大型校园招聘会预告',
     source: '就业指导中心',
     publishDate: getPastDate(3),
@@ -729,6 +757,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
 
   {
     id: 'campus-004',
+    contentType: 'notice',
     title: '毕业生集中体检预约通知',
     source: '生命科学与医学部',
     publishDate: getPastDate(1),
@@ -753,6 +782,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'campus-005',
+    contentType: 'notice',
     title: '宿舍停水提醒',
     source: '后勤保障处',
     publishDate: getDate(0),
@@ -772,6 +802,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'campus-006',
+    contentType: 'notice',
     title: '心理健康主题月活动一览',
     source: '学工部',
     publishDate: getPastDate(3),
@@ -800,6 +831,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'campus-007',
+    contentType: 'notice',
     title: '国际组织与涉外机构专场招聘会',
     source: '国际合作与交流部',
     publishDate: getPastDate(6),
@@ -825,6 +857,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'campus-008',
+    contentType: null,
     title: '近期失物招领信息汇总',
     source: '保卫处',
     publishDate: getPastDate(18),
@@ -847,6 +880,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'campus-009',
+    contentType: 'notice',
     title: '图书逾期免罚归还周',
     source: '图书馆',
     publishDate: getPastDate(35),
@@ -874,6 +908,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   // ===== 迎新特辑 =====
   {
     id: 'freshman-001',
+    contentType: 'notice',
     title: '新生入学须知（重要，请仔细阅读）',
     source: '本科生院',
     publishDate: getPastDate(1),
@@ -910,6 +945,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'freshman-002',
+    contentType: 'notice',
     title: '新生选课指导讲座',
     source: '教务处',
     publishDate: getPastDate(2),
@@ -939,6 +975,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'freshman-003',
+    contentType: 'notice',
     title: '新生体检分批预约安排',
     source: '生命科学与医学部',
     publishDate: getPastDate(1),
@@ -963,6 +1000,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'freshman-004',
+    contentType: 'notice',
     title: '新生宿舍入住与生活用品领取指南',
     source: '后勤保障处',
     publishDate: getPastDate(2),
@@ -986,6 +1024,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'freshman-005',
+    contentType: 'notice',
     title: '新生绿色通道及奖助学金政策说明',
     source: '学工部',
     publishDate: getPastDate(4),
@@ -1011,6 +1050,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
   },
   {
     id: 'freshman-006',
+    contentType: 'notice',
     title: '新生安全教育学习与在线考试通知',
     source: '保卫处',
     publishDate: getPastDate(5),
@@ -1066,6 +1106,7 @@ export function mockFetchNotices(params: {
   source?: string
   sources?: string[]
   categories?: NoticeCategoryKey[]
+  contentType?: NoticeContentType
   dateFrom?: string
   dateTo?: string
   rangeFrom?: string
@@ -1083,6 +1124,7 @@ export function mockFetchNotices(params: {
     source,
     sources,
     categories,
+    contentType,
     dateFrom,
     dateTo,
     rangeFrom,
@@ -1112,6 +1154,9 @@ export function mockFetchNotices(params: {
   }
   if (source) filtered = filtered.filter((notice) => notice.source === source)
   if (sources) filtered = filtered.filter((notice) => sources.includes(notice.source))
+  if (contentType !== undefined) {
+    filtered = filtered.filter((notice) => notice.contentType === contentType)
+  }
   if (categories?.length) {
     filtered = filtered.filter((notice) =>
       notice.categories.some((category) => categories.includes(category)),
@@ -1197,15 +1242,7 @@ function isoWeekStart(year: number, week: number): Date | null {
 }
 
 /** 模拟获取日历轻量视图（GET /notices/calendar） */
-export function mockFetchCalendarNotices(params: { month?: string; week?: string }): {
-  items: Array<{
-    id: string
-    title: string
-    source: string
-    publishDate: string
-    deadline: string | null
-  }>
-} {
+export function mockFetchCalendarNotices(params: { month?: string; week?: string }): CalendarListResponse {
   let start: Date
   let end: Date
 
@@ -1244,6 +1281,7 @@ export function mockFetchCalendarNotices(params: { month?: string; week?: string
       source: notice.source,
       publishDate: notice.publishDate,
       deadline: notice.deadline,
+      contentType: notice.contentType,
     }))
     .sort((a, b) => b.publishDate.localeCompare(a.publishDate) || a.id.localeCompare(b.id))
 
@@ -1278,6 +1316,7 @@ export function mockFetchDeadlineNotices(params: {
       source: notice.source,
       publishDate: notice.publishDate,
       deadline: notice.deadline,
+      contentType: notice.contentType,
       aiSummary: notice.aiSummary,
       targetAudience: notice.targetAudience,
     })),

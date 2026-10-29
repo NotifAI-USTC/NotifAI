@@ -12,11 +12,12 @@ import type { FetchNoticesParams } from '../utils/request'
 import type {
   DeadlineItem,
   NoticeCategoryKey,
+  NoticeContentType,
   NoticeItem,
   NoticePaginationMode,
   StatsResponse,
 } from '../types/notice'
-import { getNoticeCategoryName, normalizeNoticeSource } from '../types/notice'
+import { getNoticeCategoryName, getNoticeContentTypeName, normalizeNoticeSource } from '../types/notice'
 import NoticeCard from '../components/NoticeCard.vue'
 import DdlNoticeBar from '../components/DdlNoticeBar.vue'
 import SkeletonLoader from '../components/SkeletonLoader.vue'
@@ -38,6 +39,7 @@ interface QueryContext {
   keyword: string
   source: string
   categories: NoticeCategoryKey[]
+  contentType?: NoticeContentType
   dateFrom: string
   dateTo: string
   hasDeadline?: boolean
@@ -104,6 +106,7 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null
 let requestController: AbortController | null = null
 let statsController: AbortController | null = null
 let loadSequence = 0
+let refreshingQueryKey: string | null = null
 
 const serverStats = ref<StatsResponse | null>(null)
 const urgentDeadlines = ref<DeadlineItem[]>([])
@@ -130,6 +133,7 @@ function buildQueryContext(): QueryContext {
     keyword: (filters ? filters.keyword : searchQuery.value).trim().toLocaleLowerCase(),
     source: filters?.source ? normalizeNoticeSource(filters.source) : '',
     categories: selectedCategories,
+    contentType: filters?.contentType ?? undefined,
     dateFrom: filters?.dateFrom || '',
     dateTo: filters?.dateTo || '',
     hasDeadline: triStateBoolean(filters?.hasDeadline ?? 'any'),
@@ -159,6 +163,7 @@ function buildServerParams(
     keyword: context.keyword || undefined,
     source: context.source || undefined,
     categories: context.categories.length > 0 ? context.categories : undefined,
+    contentType: context.contentType,
     sources: context.subscribedSources,
     dateFrom: context.dateFrom || undefined,
     dateTo: context.dateTo || undefined,
@@ -181,6 +186,7 @@ function getQueryKey(context: QueryContext): string {
 function matchesLocalFilters(notice: NoticeItem, context: QueryContext): boolean {
   const source = normalizeNoticeSource(notice.source)
   if (context.source && source !== context.source) return false
+  if (context.contentType !== undefined && notice.contentType !== context.contentType) return false
   if (
     context.categories.length > 0 &&
     !notice.categories.some((category) => context.categories.includes(category))
@@ -628,15 +634,22 @@ async function loadMore(): Promise<void> {
 }
 
 async function refresh(): Promise<void> {
-  if (refreshing.value) return
+  const queryKey = getQueryKey(buildQueryContext())
+  if (refreshing.value && queryKey === refreshingQueryKey) return
 
   refreshing.value = true
+  refreshingQueryKey = queryKey
   requestError.value = ''
 
+  const pending = loadInitial({ force: true })
+  const sequence = loadSequence
   try {
-    await loadInitial({ force: true })
+    await pending
   } finally {
-    refreshing.value = false
+    if (sequence === loadSequence) {
+      refreshing.value = false
+      refreshingQueryKey = null
+    }
   }
 }
 
@@ -942,6 +955,9 @@ onBeforeUnmount(() => {
       <span class="text-body-small">
         高级搜索已启用
         <span v-if="advancedFilters.keyword">· 关键词: {{ advancedFilters.keyword }}</span>
+        <span v-if="advancedFilters.contentType">
+          · 类型: {{ getNoticeContentTypeName(advancedFilters.contentType) }}
+        </span>
         <span v-if="advancedFilters.categories.length">
           · 分类:
           {{ advancedFilters.categories.map(getNoticeCategoryName).join('、') }}

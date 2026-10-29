@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
+import { NOTICE_CATEGORY_DEFINITIONS, NOTICE_CONTENT_TYPE_DEFINITIONS } from '../types/notice'
 import { fetchCategories } from '../utils/request'
-import type { NoticeCategoryItem, NoticeCategoryKey } from '../types/notice'
+import type { NoticeCategoryItem, NoticeCategoryKey, NoticeContentType } from '../types/notice'
 import { clearSearchHistory, loadSearchHistory, recordSearchHistory } from '../utils/searchHistory'
 import { useSourceCatalog } from '../composables/useSourceCatalog'
 
@@ -20,6 +20,7 @@ export type TriStateFilter = 'any' | 'yes' | 'no'
 export interface SearchFilters {
   keyword: string
   source: string
+  contentType: NoticeContentType | null
   categories: NoticeCategoryKey[]
   dateFrom: string
   dateTo: string
@@ -33,6 +34,7 @@ function emptyFilters(): SearchFilters {
   return {
     keyword: '',
     source: '',
+    contentType: null,
     categories: [],
     dateFrom: '',
     dateTo: '',
@@ -68,6 +70,11 @@ const sources = computed(() => {
     group: item.group || '其他',
   }))
 })
+
+const contentTypes = NOTICE_CONTENT_TYPE_DEFINITIONS.map(({ key, name }) => ({
+  title: name,
+  value: key,
+}))
 
 async function loadSources(signal: AbortSignal): Promise<void> {
   // 共享来源目录的取消和回退逻辑；组件自己的 signal 只用于生命周期守卫。
@@ -180,12 +187,21 @@ function resetFilters() {
         <!-- 来源 -->
         <v-select v-model="filters.source" :items="sources" label="来源" clearable />
 
+        <v-select
+          v-model="filters.contentType"
+          class="content-type-select"
+          :items="contentTypes"
+          label="内容类型"
+          placeholder="全部类型"
+          persistent-hint
+          clearable
+        />
+
         <!-- AI 分类（多选为 OR 语义） -->
         <v-autocomplete
           v-model="filters.categories"
           :items="categories"
           label="通知分类"
-          hint="可多选，命中任一分类即显示；不选则临时查看全部分类"
           persistent-hint
           multiple
           chips
@@ -307,6 +323,10 @@ function resetFilters() {
 @layer notifai-components {
   .search-form {
     max-height: 60vh;
+  }
+
+  .content-type-select :deep(.v-messages__message) {
+    line-height: 1.4;
   }
 
   .tri-state-filters {

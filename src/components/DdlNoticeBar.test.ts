@@ -27,6 +27,7 @@ function makeNotice(overrides: Partial<DeadlineItem> = {}): DeadlineItem {
     id: 'notice-1',
     title: '测试通知',
     source: '教务处',
+    contentType: null,
     publishDate: '2026-08-01',
     aiSummary: '',
     deadline: '2026-08-05',

@@ -1,6 +1,6 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DeadlineItem, NoticeItem } from '../types/notice'
+import type { CalendarItem, DeadlineItem, NoticeItem } from '../types/notice'
 
 interface MockSettingsStore {
   subscriptionMode: string
@@ -115,6 +115,7 @@ function makeNotice(overrides: Partial<NoticeItem> = {}): NoticeItem {
     id: 'notice-1',
     title: '测试通知',
     source: '教务处',
+    contentType: null,
     categories: [],
     publishDate: '2026-07-30',
     aiSummary: '测试摘要',
@@ -128,19 +129,12 @@ function makeNotice(overrides: Partial<NoticeItem> = {}): NoticeItem {
   }
 }
 
-function makeCalendarItem(
-  overrides: Partial<{
-    id: string
-    title: string
-    source: string
-    publishDate: string
-    deadline: string | null
-  }> = {},
-): { id: string; title: string; source: string; publishDate: string; deadline: string | null } {
+function makeCalendarItem(overrides: Partial<CalendarItem> = {}): CalendarItem {
   return {
     id: 'notice-1',
     title: '测试通知',
     source: '教务处',
+    contentType: null,
     publishDate: '2026-07-30',
     deadline: '2026-08-10',
     ...overrides,
@@ -152,6 +146,7 @@ function makeDeadlineItem(overrides: Partial<DeadlineItem> = {}): DeadlineItem {
     id: 'notice-1',
     title: '测试通知',
     source: '教务处',
+    contentType: null,
     publishDate: '2026-07-30',
     deadline: '2026-08-10',
     aiSummary: '测试摘要',
@@ -162,6 +157,7 @@ function makeDeadlineItem(overrides: Partial<DeadlineItem> = {}): DeadlineItem {
 
 const stubs = {
   AppBanner: {
+    name: 'AppBanner',
     template: '<div v-bind="$attrs"><slot /><slot name="prepend" /><slot name="append" /></div>',
   },
   AdvancedSearch: true,
@@ -385,6 +381,7 @@ describe('view request lifecycle', () => {
       keyword: '',
       source: '',
       categories: [],
+      contentType: null,
       dateFrom: '',
       dateTo: '',
       hasDeadline: 'any',
@@ -402,6 +399,106 @@ describe('view request lifecycle', () => {
     wrappers.splice(wrappers.indexOf(wrapper), 1)
     storeState.categoryMode = 'all'
     storeState.subscribedCategories = []
+  })
+
+  it('keeps the selected content type through refresh and pagination with separate cache keys', async () => {
+    mocks.fetchNotices.mockImplementation(async (params: { contentType?: string; cursor?: string }) => ({
+      items: params.contentType === 'other'
+        ? [makeNotice({ id: params.cursor ? 'other-2' : 'other-1', title: params.cursor ? '其他第二页' : '其他第一页', contentType: 'other' }), makeNotice({ id: 'unknown', title: '未知类型' })]
+        : [makeNotice({ id: 'unknown', title: '未知类型' })],
+      total: params.contentType === 'other' ? 2 : 1,
+      invalidItemCount: 0,
+      nextCursor: params.contentType === 'other' && !params.cursor ? 'other-next' : null,
+    }))
+
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+    expect(wrapper.text()).toContain('未知类型')
+
+    const filters = { keyword: '', source: '', categories: [], contentType: 'other', dateFrom: '', dateTo: '', hasDeadline: 'any', isRead: 'any', isStarred: 'any', tags: [] }
+    await wrapper.find('[title="高级搜索"]').trigger('click')
+    wrapper.findComponent({ name: 'AdvancedSearch' }).vm.$emit('search', filters)
+    await flushPromises()
+    expect(wrapper.text()).toContain('其他第一页')
+    expect(wrapper.text()).not.toContain('未知类型')
+    expect(wrapper.text()).toContain('类型: 其他')
+    expect(mocks.fetchNotices).toHaveBeenLastCalledWith(expect.objectContaining({ contentType: 'other', cursor: undefined }), expect.any(AbortSignal))
+
+    await wrapper.get('.notice-grid').trigger('scroll')
+    await flushPromises()
+    expect(mocks.fetchNotices).toHaveBeenLastCalledWith(expect.objectContaining({ contentType: 'other', cursor: 'other-next' }), expect.any(AbortSignal))
+    expect(wrapper.text()).toContain('其他第二页')
+
+    await wrapper.find('[title="高级搜索"]').trigger('click')
+    wrapper.findComponent({ name: 'AdvancedSearch' }).vm.$emit('search', filters)
+    await flushPromises()
+    expect(mocks.fetchNotices).toHaveBeenLastCalledWith(expect.objectContaining({ contentType: 'other', cursor: undefined }), expect.any(AbortSignal))
+    expect(wrapper.text()).not.toContain('其他第二页')
+
+    const keys = mocks.writeNoticeFeedCache.mock.calls.map(([entry]) => entry.key as string)
+    expect(keys).toContain('{"keyword":"","source":"","categories":[],"dateFrom":"","dateTo":"","isRead":"any","isStarred":"any","tags":[],"blacklistKeywords":[]}')
+    expect(keys.some((key) => JSON.parse(key).contentType === 'other')).toBe(true)
+    expect(new Set(keys).size).toBe(2)
+  })
+
+  it('replaces in-flight type searches and ignores stale completions including A to B to A', async () => {
+    const pending: Array<{ params: { contentType?: string }; resolve: (value: { items: NoticeItem[]; total: number; invalidItemCount: number; nextCursor: null }) => void; reject: (reason: Error) => void }> = []
+    mocks.fetchNotices.mockImplementation((params: { contentType?: string }) => {
+      let resolve!: (value: { items: NoticeItem[]; total: number; invalidItemCount: number; nextCursor: null }) => void
+      let reject!: (reason: Error) => void
+      const promise = new Promise<{ items: NoticeItem[]; total: number; invalidItemCount: number; nextCursor: null }>((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise
+        reject = rejectPromise
+      })
+      pending.push({ params, resolve, reject })
+      return promise
+    })
+    const response = (title: string, contentType: NoticeItem['contentType']) => ({ items: [makeNotice({ title, contentType })], total: 1, invalidItemCount: 0, nextCursor: null })
+    const filters = { keyword: '', source: '', categories: [], contentType: 'news', dateFrom: '', dateTo: '', hasDeadline: 'any', isRead: 'any', isStarred: 'any', tags: [] }
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+    pending[0]!.resolve(response('初始未知', null))
+    await flushPromises()
+
+    await wrapper.find('[title="高级搜索"]').trigger('click')
+    wrapper.findComponent({ name: 'AdvancedSearch' }).vm.$emit('search', filters)
+    await flushPromises()
+    await wrapper.find('[title="高级搜索"]').trigger('click')
+    wrapper.findComponent({ name: 'AdvancedSearch' }).vm.$emit('search', { ...filters, contentType: 'public_notice' })
+    await flushPromises()
+    await wrapper.find('[title="高级搜索"]').trigger('click')
+    wrapper.findComponent({ name: 'AdvancedSearch' }).vm.$emit('search', filters)
+    await flushPromises()
+    expect(pending.map(({ params }) => params.contentType)).toEqual([undefined, 'news', 'public_notice', 'news'])
+
+    pending[1]!.resolve(response('过期新闻', 'news'))
+    pending[2]!.reject(new Error('过期错误'))
+    await flushPromises()
+    await wrapper.find('[title="高级搜索"]').trigger('click')
+    wrapper.findComponent({ name: 'AdvancedSearch' }).vm.$emit('search', filters)
+    await flushPromises()
+    expect(pending).toHaveLength(4)
+    expect(wrapper.text()).not.toContain('过期新闻')
+    expect(wrapper.text()).not.toContain('过期错误')
+    expect(wrapper.findComponent({ name: 'SkeletonLoader' }).exists()).toBe(true)
+
+    const banner = wrapper.findAllComponents({ name: 'AppBanner' }).find((item) => item.text().includes('高级搜索已启用'))!
+    banner.vm.$emit('click:close')
+    await flushPromises()
+    expect(pending).toHaveLength(5)
+    expect(pending[4]!.params.contentType).toBeUndefined()
+    pending[4]!.resolve(response('恢复未知', null))
+    await flushPromises()
+    pending[3]!.resolve(response('过期最新新闻', 'news'))
+    await flushPromises()
+    expect(wrapper.text()).toContain('恢复未知')
+    expect(wrapper.text()).not.toContain('过期最新新闻')
+    expect(wrapper.text()).not.toContain('过期错误')
+    expect(wrapper.text()).not.toContain('高级搜索已启用')
+    expect(wrapper.findComponent({ name: 'SkeletonLoader' }).exists()).toBe(false)
+    expect(wrapper.find('v-progress-linear-stub').exists()).toBe(false)
   })
 
   it('shows a persisted Home cache immediately while refreshing in the background', async () => {

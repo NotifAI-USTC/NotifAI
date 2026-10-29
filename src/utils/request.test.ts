@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { AxiosResponse } from 'axios'
+import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
 import type { NoticeItem } from '../types/notice'
@@ -22,12 +22,14 @@ import request, {
   fetchSources,
   fetchStats,
 } from './request'
+import { DataValidationError } from './validation'
 
 function createNotice(id: string): NoticeItem {
   return {
     id,
     title: `Notice ${id}`,
     source: '教务处',
+    contentType: null,
     categories: [],
 
     publishDate: '2026-08-01',
@@ -139,6 +141,7 @@ describe('request cancellation', () => {
 
     await expect(
       request.get('/oversized', {
+        baseURL: 'http://localhost/api',
         maxContentLength: 32,
         suppressGlobalError: true,
       }),
@@ -380,6 +383,41 @@ describe('new API endpoints', () => {
     await expect(fetchNotices({ categories: ['not-a-category'] as never[] })).rejects.toThrow(
       /分类 key/,
     )
+  })
+
+  it('serializes a single content type and omits it when unspecified', async () => {
+    const originalAdapter = request.defaults.adapter
+    const urls: URL[] = []
+    const adapter = vi.fn(async (config: InternalAxiosRequestConfig) => {
+      urls.push(new URL(request.getUri(config), 'http://localhost'))
+      return { data: { items: [], total: 0 }, status: 200, statusText: 'OK', headers: {}, config }
+    })
+    request.defaults.adapter = adapter
+    try {
+      await fetchNotices({ contentType: 'public_notice', categories: ['scholarship'] })
+      expect(urls[0]?.searchParams.getAll('contentType')).toEqual(['public_notice'])
+      expect(urls[0]?.searchParams.getAll('categories[]')).toEqual(['scholarship'])
+      expect(urls[0]?.searchParams.has('contentType[]')).toBe(false)
+
+      await fetchNotices()
+      expect(urls[1]?.searchParams.has('contentType')).toBe(false)
+      expect(urls[1]?.searchParams.has('contentType[]')).toBe(false)
+
+      for (const contentType of ['news', 'notice', 'other'] as const) {
+        await fetchNotices({ contentType })
+        expect(urls.at(-1)?.searchParams.getAll('contentType')).toEqual([contentType])
+      }
+
+      const callsBeforeInvalid = adapter.mock.calls.length
+      for (const contentType of [null, '', 'null', 'NEWS', 'unknown', ['news'], 1]) {
+        await expect(fetchNotices({ contentType: contentType as never })).rejects.toThrow(
+          new DataValidationError('contentType 不是支持的内容类型'),
+        )
+      }
+      expect(adapter).toHaveBeenCalledTimes(callsBeforeInvalid)
+    } finally {
+      request.defaults.adapter = originalAdapter
+    }
   })
 
   it('rejects malformed category metadata and notice category payloads', async () => {

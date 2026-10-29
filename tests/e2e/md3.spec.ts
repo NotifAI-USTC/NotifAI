@@ -9,8 +9,17 @@ declare global {
   }
 }
 
+function deferred() {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
 // The same API fixtures exercise real Axios/validation in both dev and preview.
 // Production never enables the application mock module.
+const contentTypes: NoticeItem['contentType'][] = [
+  'public_notice', 'news', 'notice', 'other', null, 'public_notice', 'notice', null,
+]
 const notices: NoticeItem[] = Array.from({ length: 8 }, (_, index) => ({
   id: `migration-${index + 1}`,
   title:
@@ -18,7 +27,8 @@ const notices: NoticeItem[] = Array.from({ length: 8 }, (_, index) => ({
       ? '关于本学期本科生课程安排、考试报名和培养计划调整的通知（含多学院联合办理要求及详细说明）'
       : `校园通知 ${index + 1}`,
   source: index % 2 === 0 ? '教务处' : '计算机学院',
-  categories: index === 0 ? ['exam', 'course_info', 'scholarship'] : ['exam'],
+  contentType: contentTypes[index],
+  categories: index === 0 ? ['exam', 'course_info', 'scholarship'] : index === 2 ? [] : index === 3 ? ['other'] : ['exam'],
   publishDate: '2026-10-12',
   aiSummary: '请核对课程安排与报名时间，按通知要求完成办理。',
   deadline: index < 2 ? `2026-10-${13 + index}` : null,
@@ -34,6 +44,9 @@ interface ApiState {
   failList: boolean
   pauseList: Promise<void> | null
   resumeList: () => void
+  pauseDetail: Promise<void> | null
+  resumeDetail: () => void
+  listUrls: string[]
   nativeErrors: string[]
 }
 
@@ -42,6 +55,9 @@ async function installApi(page: Page): Promise<ApiState> {
     failList: false,
     pauseList: null,
     resumeList: () => undefined,
+    pauseDetail: null,
+    resumeDetail: () => undefined,
+    listUrls: [],
     nativeErrors: [],
   }
   // ResizeObserver reports through window.error rather than CDP pageerror.
@@ -55,7 +71,8 @@ async function installApi(page: Page): Promise<ApiState> {
     })
   })
   await page.route('**/api/**', async (route: Route) => {
-    const path = new URL(route.request().url()).pathname.replace('/api/', '')
+    const url = new URL(route.request().url())
+    const path = url.pathname.replace('/api/', '')
     let response: unknown
     if (path === 'sources') {
       response = [
@@ -81,16 +98,24 @@ async function installApi(page: Page): Promise<ApiState> {
       const body: { ids: string[] } = route.request().postDataJSON()
       response = { items: notices.filter((notice) => body.ids.includes(notice.id)), missing: [] }
     } else if (path.startsWith('notices/')) {
+      if (path === 'notices/migration-3' && state.pauseDetail) await state.pauseDetail
       response = notices.find((notice) => notice.id === path.slice('notices/'.length))
     } else if (path === 'notices') {
+      state.listUrls.push(url.href)
       if (state.pauseList) await state.pauseList
       if (state.failList) {
         await route.fulfill({ status: 503, json: { message: '暂时不可用' } })
         return
       }
+      const contentType = url.searchParams.get('contentType')
+      const categories = url.searchParams.getAll('categories[]')
+      const filtered = notices.filter((notice) =>
+        (contentType === null || notice.contentType === contentType) &&
+        (categories.length === 0 || notice.categories.some((category) => categories.includes(category))),
+      )
       response = {
-        items: notices.map((notice) => ({ ...notice, cleanContent: '' })),
-        total: 8,
+        items: filtered.map((notice) => ({ ...notice, cleanContent: '' })),
+        total: filtered.length,
         nextCursor: null,
       }
     } else {
@@ -377,3 +402,198 @@ for (const theme of ['light', 'dark'] as const) {
     expect(state.nativeErrors).toEqual([])
   })
 }
+
+function cardFor(page: Page, index: number) {
+  return page.locator('.notice-card').filter({ has: page.getByRole('link', { name: `打开通知：${notices[index - 1].title}` }) })
+}
+
+async function expectCards(page: Page, indices: number[]) {
+  await expect(page.locator('.notice-card')).toHaveCount(indices.length)
+  for (let index = 1; index <= notices.length; index++) {
+    await expect(cardFor(page, index)).toHaveCount(indices.includes(index) ? 1 : 0)
+  }
+}
+
+async function selectContentType(page: Page, name: string) {
+  const select = page.getByRole('combobox', { name: '内容类型', exact: true })
+  await select.focus()
+  await select.press('ArrowDown')
+  await page.getByRole('option', { name, exact: true }).click()
+}
+
+async function clearSelect(page: Page, name: string) {
+  const input = page.locator('.v-input').filter({ has: page.getByRole('combobox', { name, exact: true }) })
+  await input.locator('.v-field__clearable').click()
+}
+
+for (const width of [320, 1280]) {
+  for (const theme of ['light', 'dark'] as const) {
+    test(`temporary content type filters at ${width}px in ${theme} theme`, async ({ page }, testInfo) => {
+      test.setTimeout(90_000)
+      const errors: string[] = []
+      page.on('pageerror', (error) => errors.push(error.message))
+      const state = await installApi(page)
+      await openApp(page, width, theme)
+      await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+      expect(new URL(state.listUrls.at(-1)!).searchParams.has('contentType')).toBe(false)
+      for (const [index, label] of [[1, '公示'], [2, '新闻'], [3, '通知/公告'], [4, '其他']] as const) {
+        await expect(cardFor(page, index).getByLabel(`内容类型：${label}`)).toBeVisible()
+      }
+      for (const index of [5, 8]) await expect(cardFor(page, index).locator('[aria-label^="内容类型："]')).toHaveCount(0)
+
+      await page.getByRole('button', { name: '打开高级搜索' }).click()
+      await page.getByRole('combobox', { name: '内容类型', exact: true }).focus()
+      await expectNoOverflow(page)
+      await page.screenshot({ path: testInfo.outputPath(`type-selector-${width}-${theme}.png`) })
+      await selectContentType(page, '公示')
+      await page.getByRole('button', { name: '搜索', exact: true }).click()
+      await expectCards(page, [1, 6])
+      let params = new URL(state.listUrls.at(-1)!).searchParams
+      expect(params.getAll('contentType')).toEqual(['public_notice'])
+      await expect(page.locator('.app-banner').filter({ hasText: '高级搜索已启用' })).toContainText('类型: 公示')
+      await expectNoOverflow(page)
+      await page.screenshot({ path: testInfo.outputPath(`type-results-${width}-${theme}.png`) })
+
+      await page.getByRole('button', { name: '打开高级搜索' }).click()
+      const category = page.getByRole('combobox', { name: '通知分类', exact: true })
+      await category.click()
+      await page.getByRole('option', { name: /^奖学金(?:（8）)?$/ }).click()
+      await page.keyboard.press('Escape')
+      await page.getByRole('button', { name: '搜索', exact: true }).click()
+      await expectCards(page, [1])
+      params = new URL(state.listUrls.at(-1)!).searchParams
+      expect(params.getAll('contentType')).toEqual(['public_notice'])
+      expect(params.getAll('categories[]')).toContain('scholarship')
+
+      await page.getByRole('button', { name: '打开高级搜索' }).click()
+      await clearSelect(page, '通知分类')
+      await selectContentType(page, '新闻')
+      await page.getByRole('button', { name: '搜索', exact: true }).click()
+      await expectCards(page, [2])
+      for (const [label, indices] of [['通知/公告', [3, 7]], ['其他', [4]]] as const) {
+        await page.getByRole('button', { name: '打开高级搜索' }).click()
+        await selectContentType(page, label)
+        await page.getByRole('button', { name: '搜索', exact: true }).click()
+        await expectCards(page, [...indices])
+      }
+      await expect(cardFor(page, 4).getByLabel('内容类型：其他')).toBeVisible()
+      await expect(cardFor(page, 4)).toContainText('其他通知')
+
+      await page.getByRole('button', { name: '打开高级搜索' }).click()
+      await expect(page.getByRole('dialog').getByText('其他', { exact: true })).toBeVisible()
+      await selectContentType(page, '新闻')
+      await page.getByRole('button', { name: '取消', exact: true }).click()
+      await expectCards(page, [4])
+      await page.getByRole('button', { name: '打开高级搜索' }).click()
+      await clearSelect(page, '内容类型')
+      await page.getByRole('button', { name: '搜索', exact: true }).click()
+      await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+      await page.getByRole('button', { name: '打开高级搜索' }).click()
+      await selectContentType(page, '新闻')
+      await page.getByRole('button', { name: '重置', exact: true }).click()
+      await page.getByRole('button', { name: '搜索', exact: true }).click()
+      await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+      await page.getByRole('button', { name: '打开高级搜索' }).click()
+      await selectContentType(page, '新闻')
+      await page.getByRole('button', { name: '搜索', exact: true }).click()
+      await expectCards(page, [2])
+      await page.locator('.app-banner').filter({ hasText: '高级搜索已启用' }).locator('.v-alert__close button').click()
+      await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+      await page.getByRole('button', { name: '打开高级搜索' }).click()
+      await selectContentType(page, '新闻')
+      await page.getByRole('button', { name: '搜索', exact: true }).click()
+      await expectCards(page, [2])
+      await page.reload()
+      await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+      await expect.poll(() => new URL(state.listUrls.at(-1)!).searchParams.has('contentType')).toBe(false)
+
+      await cardFor(page, 3).getByRole('link').click()
+      await expect(page.locator('.clean-content')).toContainText('通知正文')
+      await expect(page.getByLabel('内容类型：通知/公告')).toBeVisible()
+      await page.screenshot({ path: testInfo.outputPath(`type-detail-${width}-${theme}.png`) })
+      await page.goto('/#/')
+      await cardFor(page, 1).getByRole('button', { name: '收藏通知' }).click()
+      await page.getByRole('dialog').getByText('默认收藏', { exact: true }).click()
+      await page.goto('/#/favorites')
+      await expect(cardFor(page, 1).getByLabel('内容类型：公示')).toBeVisible()
+      await page.goto('/#/')
+      await page.getByRole('button', { name: '打开高级搜索' }).click()
+      await page.keyboard.press('Escape')
+      await expect(page.getByRole('dialog')).toHaveCount(0)
+      await expectNoOverflow(page)
+      expect(errors).toEqual([])
+      expect(state.nativeErrors).toEqual([])
+    })
+  }
+}
+
+test('legacy IndexedDB feed and detail without content type update from the network', async ({ page }) => {
+  const state = await installApi(page)
+  await openApp(page, 1280, 'light')
+  await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+  const key = '{"keyword":"","source":"","categories":[],"dateFrom":"","dateTo":"","isRead":"any","isStarred":"any","tags":[],"blacklistKeywords":[]}'
+  await expect.poll(() => page.evaluate(async (cacheKey) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('notifai-cache')
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    try {
+      return await new Promise<boolean>((resolve, reject) => {
+        const request = db.transaction('notice-feeds').objectStore('notice-feeds').get(cacheKey)
+        request.onsuccess = () => resolve(request.result?.schemaVersion === 2)
+        request.onerror = () => reject(request.error)
+      })
+    } finally { db.close() }
+  }, key)).toBe(true)
+  await page.evaluate(async ({ cacheKey, notice }) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('notifai-cache')
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(['notice-feeds', 'notice-details'], 'readwrite')
+        const feeds = transaction.objectStore('notice-feeds')
+        const request = feeds.get(cacheKey)
+        request.onsuccess = () => {
+          const entry = request.result
+          for (const item of entry.items) delete item.contentType
+          feeds.put(entry)
+          const oldNotice: Partial<typeof notice> = { ...notice }
+          delete oldNotice.contentType
+          transaction.objectStore('notice-details').put({ schemaVersion: 1, id: notice.id, notice: oldNotice, fetchedAt: new Date().toISOString() })
+        }
+        transaction.oncomplete = () => resolve()
+        transaction.onerror = () => reject(transaction.error)
+        transaction.onabort = () => reject(transaction.error)
+      })
+    } finally { db.close() }
+  }, { cacheKey: key, notice: notices[2] })
+  const listGate = deferred()
+  const detailGate = deferred()
+  state.pauseList = listGate.promise
+  state.resumeList = listGate.resolve
+  state.pauseDetail = detailGate.promise
+  state.resumeDetail = detailGate.resolve
+  try {
+    await page.reload()
+    await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+    await expect(page.locator('.app-banner').filter({ hasText: '正在同步最新通知' })).toBeVisible()
+    await expect(page.locator('.notice-card [aria-label^="内容类型："]')).toHaveCount(0)
+    state.resumeList()
+    state.pauseList = null
+    await expect(cardFor(page, 3).getByLabel('内容类型：通知/公告')).toBeVisible()
+    await cardFor(page, 3).getByRole('link').click()
+    await expect(page.locator('.clean-content')).toContainText('通知正文')
+    await expect(page.locator('[aria-label^="内容类型："]')).toHaveCount(0)
+    state.resumeDetail()
+    state.pauseDetail = null
+    await expect(page.getByLabel('内容类型：通知/公告')).toBeVisible()
+    expect(state.nativeErrors).toEqual([])
+  } finally {
+    state.resumeList()
+    state.resumeDetail()
+  }
+})

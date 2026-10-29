@@ -29,6 +29,7 @@ const notice: NoticeItem = {
   id: 'notice-1',
   title: '测试通知',
   source: '教务处',
+  contentType: null,
   categories: ['other'],
   publishDate: '2026-08-10',
   aiSummary: '测试摘要',

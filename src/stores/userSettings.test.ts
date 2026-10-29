@@ -20,6 +20,7 @@ function createNotice(index: number): NoticeItem {
     id: `notice-${index}`,
     title: `Notice ${index}`,
     source: '教务处',
+    contentType: null,
     categories: [],
     publishDate: '2026-07-31',
     aiSummary: '',

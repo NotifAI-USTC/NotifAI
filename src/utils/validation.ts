@@ -4,12 +4,13 @@ import type {
   DeadlineListResponse,
   NoticeCategoryItem,
   NoticeBatchResponse,
+  NoticeContentType,
   NoticeItem,
   NoticeListResponse,
   SourceItem,
   StatsResponse,
 } from '../types/notice'
-import { isNoticeCategoryKey, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
+import { isNoticeCategoryKey, isNoticeContentType, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
 
 const LIMITS = {
   id: 128,
@@ -111,6 +112,14 @@ function optionalIsoTimestamp(value: unknown, path: string): string | null {
   if (value === undefined || value === null) return null
   if (!isValidIsoTimestamp(value)) {
     throw new DataValidationError(`${path} 必须是 ISO8601 时间字符串或 null`)
+  }
+  return value
+}
+
+function parseNoticeContentType(value: unknown, path: string): NoticeContentType | null {
+  if (value === undefined || value === null) return null
+  if (!isNoticeContentType(value)) {
+    throw new DataValidationError(`${path} 必须是支持的内容类型或 null`)
   }
   return value
 }
@@ -223,6 +232,7 @@ function parseNoticeFields(record: Record<string, unknown>, path: string): Notic
     title: expectString(record.title, `${path}.title`, LIMITS.title),
     source: expectString(record.source, `${path}.source`, LIMITS.source),
     categories: parseNoticeCategories(record.categories, `${path}.categories`),
+    contentType: parseNoticeContentType(record.contentType, `${path}.contentType`),
     publishDate: expectDate(record.publishDate, `${path}.publishDate`),
     aiSummary: optionalString(record.aiSummary, LIMITS.summary),
     deadline: record.deadline == null ? null : expectDate(record.deadline, `${path}.deadline`),
@@ -368,6 +378,7 @@ export function parseCalendarItem(value: unknown, path = 'calendarItem'): Calend
     id: assertNoticeId(record.id, `${path}.id`),
     title: expectString(record.title, `${path}.title`, LIMITS.title),
     source: expectString(record.source, `${path}.source`, LIMITS.source),
+    contentType: parseNoticeContentType(record.contentType, `${path}.contentType`),
     publishDate: expectDate(record.publishDate, `${path}.publishDate`),
     deadline: record.deadline == null ? null : expectDate(record.deadline, `${path}.deadline`),
   }
@@ -412,6 +423,7 @@ export function parseDeadlineItem(value: unknown, path = 'deadlineItem'): Deadli
     id: assertNoticeId(record.id, `${path}.id`),
     title: expectString(record.title, `${path}.title`, LIMITS.title),
     source: expectString(record.source, `${path}.source`, LIMITS.source),
+    contentType: parseNoticeContentType(record.contentType, `${path}.contentType`),
     publishDate: expectDate(record.publishDate, `${path}.publishDate`),
     deadline: expectDate(record.deadline, `${path}.deadline`),
     aiSummary: optionalString(record.aiSummary, LIMITS.summary),

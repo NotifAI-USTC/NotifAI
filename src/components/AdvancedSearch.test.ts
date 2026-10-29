@@ -5,6 +5,7 @@ import { NOTICE_CATEGORY_DEFINITIONS, SOURCE_CATALOG_FALLBACK } from '../types/n
 import { resetSourceCatalogStateForTests } from '../composables/useSourceCatalog'
 import { clearSourceCatalogCache } from '../utils/sourceCatalogCache'
 import AdvancedSearch from './AdvancedSearch.vue'
+import type { SearchFilters } from './AdvancedSearch.vue'
 
 const mocks = vi.hoisted(() => ({
   fetchCategories: vi.fn(),
@@ -25,13 +26,21 @@ const stubs = {
   VDivider: true,
   VSpacer: true,
   VTextField: true,
-  VBtn: true,
+  VBtn: { template: '<button><slot /></button>' },
   VIcon: true,
   VChip: true,
   VBtnToggle: true,
   VSelect: {
     name: 'VSelectStub',
-    props: ['items'],
+    props: {
+      items: Array,
+      modelValue: String,
+      label: String,
+      placeholder: String,
+      hint: String,
+      clearable: Boolean,
+      persistentHint: Boolean,
+    },
     emits: ['update:modelValue'],
     template: '<div class="v-select-stub" />',
   },
@@ -43,8 +52,11 @@ const stubs = {
   },
 }
 
-function mountDialog() {
-  return shallowMount(AdvancedSearch, { global: { stubs, plugins: [createPinia()] } })
+function mountDialog(initialFilters?: SearchFilters) {
+  return shallowMount(AdvancedSearch, {
+    props: { initialFilters },
+    global: { stubs, plugins: [createPinia()] },
+  })
 }
 
 describe('AdvancedSearch source options', () => {
@@ -141,5 +153,80 @@ describe('AdvancedSearch source options', () => {
         subtitle: item.description,
       })),
     )
+  })
+
+  it('offers the four independent single content types and submits the selected value', async () => {
+    const wrapper = mountDialog()
+    const select = wrapper.findAllComponents({ name: 'VSelectStub' })[1]!
+
+    expect(select.props()).toMatchObject({
+      modelValue: null,
+      label: '内容类型',
+      placeholder: '全部类型',
+      clearable: true,
+      persistentHint: true,
+      items: [
+        { title: '新闻', value: 'news' },
+        { title: '通知/公告', value: 'notice' },
+        { title: '公示', value: 'public_notice' },
+        { title: '其他', value: 'other' },
+      ],
+    })
+
+    select.vm.$emit('update:modelValue', 'public_notice')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.emitted('search')).toBeUndefined()
+    await wrapper.findAll('button').find((button) => button.text().includes('搜索'))!.trigger('click')
+    expect(wrapper.emitted('search')?.[0]?.[0]).toMatchObject({
+      contentType: 'public_notice',
+      categories: [],
+    })
+  })
+
+  it('restores applied values after cancel and applies clearing or reset only on search', async () => {
+    const applied: SearchFilters = {
+      keyword: '奖学金',
+      source: '',
+      contentType: 'other',
+      categories: ['scholarship'],
+      dateFrom: '',
+      dateTo: '',
+      hasDeadline: 'any',
+      isRead: 'any',
+      isStarred: 'any',
+      tags: [],
+    }
+    const wrapper = mountDialog(applied)
+    const select = wrapper.findAllComponents({ name: 'VSelectStub' })[1]!
+    expect(select.props('modelValue')).toBe('other')
+    select.vm.$emit('update:modelValue', 'news')
+    await wrapper.findAll('button').find((button) => button.text() === '取消')!.trigger('click')
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    expect(wrapper.emitted('search')).toBeUndefined()
+    expect(applied.contentType).toBe('other')
+    wrapper.unmount()
+
+    const reopened = mountDialog(applied)
+    const reopenedSelect = reopened.findAllComponents({ name: 'VSelectStub' })[1]!
+    expect(reopenedSelect.props('modelValue')).toBe('other')
+    reopenedSelect.vm.$emit('update:modelValue', null)
+    await reopened.vm.$nextTick()
+    expect(reopened.emitted('search')).toBeUndefined()
+    await reopened.findAll('button').find((button) => button.text().includes('搜索'))!.trigger('click')
+    expect(reopened.emitted('search')?.[0]?.[0]).toMatchObject({
+      contentType: null,
+      categories: ['scholarship'],
+    })
+
+    reopenedSelect.vm.$emit('update:modelValue', 'notice')
+    await reopened.findAll('button').find((button) => button.text() === '重置')!.trigger('click')
+    expect(reopenedSelect.props('modelValue')).toBeNull()
+    expect(reopened.emitted('search')).toHaveLength(1)
+    await reopened.findAll('button').find((button) => button.text().includes('搜索'))!.trigger('click')
+    expect(reopened.emitted('search')?.[1]?.[0]).toMatchObject({
+      keyword: '',
+      contentType: null,
+      categories: [],
+    })
   })
 })

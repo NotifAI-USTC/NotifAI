@@ -4,6 +4,7 @@ import type {
   DeadlineListResponse,
   NoticeCategoryItem,
   NoticeCategoryKey,
+  NoticeContentType,
   NoticeBatchResponse,
   NoticeItem,
   SourceItem,
@@ -25,7 +26,7 @@ import {
   isValidIsoTimestamp,
 } from './validation'
 import type { ValidatedNoticeListResponse } from './validation'
-import { isNoticeCategoryKey } from '../types/notice'
+import { isNoticeCategoryKey, isNoticeContentType } from '../types/notice'
 import { isValidApiBaseUrl } from './apiBaseUrl'
 
 declare module 'axios' {
@@ -112,6 +113,8 @@ export interface FetchNoticesParams {
   sources?: string[]
   /** AI 分类 key；多项为 OR 语义。 */
   categories?: NoticeCategoryKey[]
+  /** AI 内容类型，单选精确匹配。 */
+  contentType?: NoticeContentType
   dateFrom?: string
   dateTo?: string
   /** Match notices whose publish date or deadline overlaps this date-only range. */
@@ -214,6 +217,9 @@ export async function fetchNotices(
       }
     })
   }
+  if (params.contentType !== undefined && !isNoticeContentType(params.contentType)) {
+    throw new DataValidationError('contentType 不是支持的内容类型')
+  }
   const dateFrom =
     params.dateFrom === undefined ? undefined : assertDateOnly(params.dateFrom, 'dateFrom')
   const dateTo = params.dateTo === undefined ? undefined : assertDateOnly(params.dateTo, 'dateTo')
@@ -264,6 +270,7 @@ export async function fetchNotices(
     source,
     sources: params.sources ? [...new Set(params.sources)] : undefined,
     categories: params.categories ? [...new Set(params.categories)] : undefined,
+    contentType: params.contentType,
     dateFrom,
     dateTo,
     rangeFrom,

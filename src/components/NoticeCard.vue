@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useUserSettingsStore } from '../stores/userSettings'
-import { getNoticeCategoryName } from '../types/notice'
+import { getNoticeCategoryName, getNoticeContentTypeName } from '../types/notice'
 import type { NoticeItem } from '../types/notice'
 import { isUrgent, formatRemaining } from '../utils/date'
 import { hapticStar, hapticRead, hapticMedium } from '../utils/haptics'
@@ -109,6 +109,16 @@ function removeTag(tag: string) {
       <div class="d-flex flex-wrap ga-2">
         <v-chip size="small" color="primary-darken-1" variant="tonal">
           {{ notice.source }}
+        </v-chip>
+
+        <v-chip
+          v-if="notice.contentType !== null"
+          size="small"
+          color="on-surface-variant"
+          variant="tonal"
+          :aria-label="`内容类型：${getNoticeContentTypeName(notice.contentType)}`"
+        >
+          {{ getNoticeContentTypeName(notice.contentType) }}
         </v-chip>
 
         <v-chip

@@ -33,6 +33,7 @@ const notice: NoticeItem = {
   id: 'notice-1',
   title: '通知',
   source: '教务处',
+  contentType: null,
   categories: [],
 
   publishDate: '2026-08-01',

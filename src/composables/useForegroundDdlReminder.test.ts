@@ -41,6 +41,7 @@ function deadline(overrides: Partial<DeadlineItem> = {}): DeadlineItem {
     id: 'notice-1',
     title: '明天截止',
     source: '教务处',
+    contentType: null,
     publishDate: '2026-08-01',
     deadline: '2026-08-12',
     aiSummary: '请及时办理',
