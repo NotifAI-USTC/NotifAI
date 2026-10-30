@@ -28,6 +28,10 @@ android/
 ios/
 .capacitor/
 
+# The independent Flutter client owns its native projects.
+!mobile/android/
+!mobile/ios/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
