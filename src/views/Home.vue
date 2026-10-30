@@ -894,6 +894,7 @@ onBeforeUnmount(() => {
         density="compact"
         variant="outlined"
         clearable
+        class="mx-2"
         @update:model-value="onSearch"
         @click:clear="onSearchClear"
       />
@@ -914,7 +915,7 @@ onBeforeUnmount(() => {
     <!-- 已加载数据统计概览 -->
     <div
       v-if="!initialLoading && !requestError"
-      class="d-flex flex-wrap align-center ga-2 px-4 pt-2"
+      class="d-flex flex-wrap align-center ga-2 px-2 pt-2 pb-2"
       role="status"
       aria-label="通知统计概览"
     >

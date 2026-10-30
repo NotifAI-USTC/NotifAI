@@ -214,6 +214,7 @@ function resetFilters() {
           chips
           closable-chips
           clearable
+          class="mb-4"
         />
 
         <!-- 日期范围 -->
