@@ -67,17 +67,27 @@ watch(
 <template>
   <v-app>
     <!-- 桌面端：侧边导航栏（悬停展开显示文字） -->
-    <v-navigation-drawer v-if="!isMobile" permanent rail expand-on-hover>
+    <v-navigation-drawer
+      v-if="!isMobile"
+      permanent
+      rail
+      expand-on-hover
+      rail-width="48"
+      class="app-nav"
+    >
       <v-list nav density="compact">
         <v-list-item
           v-for="tab in tabs"
           :key="tab.name"
-          :prepend-icon="tab.icon"
           :title="tab.label"
           :active="activeTab === tab.name"
           rounded="lg"
           @click="router.push(tab.path)"
-        />
+        >
+          <template #prepend>
+            <v-icon :icon="tab.icon" size="20" />
+          </template>
+        </v-list-item>
       </v-list>
     </v-navigation-drawer>
 
@@ -121,6 +131,13 @@ watch(
      layout observer doesn't interrupt a padding transition mid-resize. */
   .app-main {
     transition: none;
+  }
+
+  .app-nav.v-navigation-drawer--rail.v-navigation-drawer--expand-on-hover:not(
+      .v-navigation-drawer--is-hovering
+    )
+    .v-list-item {
+    padding-inline: 6px;
   }
 }
 </style>
