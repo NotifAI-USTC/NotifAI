@@ -76,6 +76,13 @@ const contentTypes = NOTICE_CONTENT_TYPE_DEFINITIONS.map(({ key, name }) => ({
   value: key,
 }))
 
+const sourceModel = computed({
+  get: () => filters.value.source || null,
+  set: (value: string | null) => {
+    filters.value.source = value ?? ''
+  },
+})
+
 async function loadSources(signal: AbortSignal): Promise<void> {
   // 共享来源目录的取消和回退逻辑；组件自己的 signal 只用于生命周期守卫。
   if (signal.aborted) return
@@ -185,7 +192,7 @@ function resetFilters() {
         />
 
         <!-- 来源 -->
-        <v-select v-model="filters.source" :items="sources" label="来源" clearable />
+        <v-select v-model="sourceModel" :items="sources" label="来源" clearable />
 
         <v-select
           v-model="filters.contentType"

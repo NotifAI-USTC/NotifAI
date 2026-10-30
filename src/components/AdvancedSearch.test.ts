@@ -229,4 +229,93 @@ describe('AdvancedSearch source options', () => {
       categories: [],
     })
   })
+
+  it('maps the empty source filter to null so the label stays inside the field', async () => {
+    mocks.fetchSources.mockResolvedValue([])
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const sourceSelect = wrapper.findAllComponents({ name: 'VSelectStub' })[0]!
+    expect(sourceSelect.props('label')).toBe('来源')
+    expect(sourceSelect.props('modelValue')).toBeNull()
+    expect(sourceSelect.props('clearable')).toBe(true)
+  })
+
+  it('restores, updates, and clears the applied source according to search or clear', async () => {
+    mocks.fetchSources.mockResolvedValue([])
+    const applied: SearchFilters = {
+      keyword: '',
+      source: '教务处',
+      contentType: null,
+      categories: [],
+      dateFrom: '',
+      dateTo: '',
+      hasDeadline: 'any',
+      isRead: 'any',
+      isStarred: 'any',
+      tags: [],
+    }
+    const wrapper = mountDialog(applied)
+    await flushPromises()
+    const sourceSelect = wrapper.findAllComponents({ name: 'VSelectStub' })[0]!
+    expect(sourceSelect.props('modelValue')).toBe('教务处')
+
+    sourceSelect.vm.$emit('update:modelValue', '图书馆')
+    await wrapper.vm.$nextTick()
+    expect(sourceSelect.props('modelValue')).toBe('图书馆')
+    await wrapper.findAll('button').find((button) => button.text().includes('搜索'))!.trigger('click')
+    expect(wrapper.emitted('search')?.[0]?.[0]).toMatchObject({ source: '图书馆' })
+
+    sourceSelect.vm.$emit('update:modelValue', null)
+    await wrapper.vm.$nextTick()
+    expect(sourceSelect.props('modelValue')).toBeNull()
+    await wrapper.findAll('button').find((button) => button.text().includes('搜索'))!.trigger('click')
+    expect(wrapper.emitted('search')?.[1]?.[0]).toMatchObject({ source: '' })
+  })
+
+  it('returns the source to unselected on 重置 without emitting search', async () => {
+    mocks.fetchSources.mockResolvedValue([])
+    const applied: SearchFilters = {
+      keyword: '',
+      source: '教务处',
+      contentType: null,
+      categories: [],
+      dateFrom: '',
+      dateTo: '',
+      hasDeadline: 'any',
+      isRead: 'any',
+      isStarred: 'any',
+      tags: [],
+    }
+    const wrapper = mountDialog(applied)
+    const sourceSelect = wrapper.findAllComponents({ name: 'VSelectStub' })[0]!
+    expect(sourceSelect.props('modelValue')).toBe('教务处')
+
+    await wrapper.findAll('button').find((button) => button.text() === '重置')!.trigger('click')
+    expect(sourceSelect.props('modelValue')).toBeNull()
+    expect(wrapper.emitted('search')).toBeUndefined()
+
+    await wrapper.findAll('button').find((button) => button.text().includes('搜索'))!.trigger('click')
+    expect(wrapper.emitted('search')?.[0]?.[0]).toMatchObject({ source: '' })
+  })
+
+  it('keeps the label inside the field when reopened with an empty stored source', async () => {
+    mocks.fetchSources.mockResolvedValue([])
+    const applied: SearchFilters = {
+      keyword: '奖学金',
+      source: '',
+      contentType: null,
+      categories: [],
+      dateFrom: '',
+      dateTo: '',
+      hasDeadline: 'any',
+      isRead: 'any',
+      isStarred: 'any',
+      tags: [],
+    }
+    const wrapper = mountDialog(applied)
+    await flushPromises()
+    const sourceSelect = wrapper.findAllComponents({ name: 'VSelectStub' })[0]!
+    expect(sourceSelect.props('modelValue')).toBeNull()
+  })
 })
