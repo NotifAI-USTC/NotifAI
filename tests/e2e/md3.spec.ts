@@ -174,9 +174,57 @@ async function expectNoOverflow(page: Page) {
   ).toBe(false)
 }
 
+async function expectAlignedCardRows(page: Page): Promise<void> {
+  await page.mouse.move(page.viewportSize()!.width - 1, 0)
+  const cards = page.locator('.notice-card')
+  await cards.evaluateAll(async (elements) => {
+    await Promise.all(
+      elements.flatMap((element) =>
+        element.parentElement!.getAnimations({ subtree: true })
+          .filter((animation) =>
+            Number.isFinite(Number(animation.effect?.getComputedTiming().endTime)) &&
+            animation.playState !== 'paused',
+          )
+          .map((animation) => animation.finished.catch(() => undefined)),
+      ),
+    )
+  })
+  const geometry = await cards.evaluateAll((elements) =>
+    elements.map((element) => {
+      const card = element.getBoundingClientRect()
+      return {
+        rowTop: element.parentElement!.getBoundingClientRect().top,
+        height: card.height,
+        bottom: card.bottom,
+        actionsBottom: element.querySelector('.card-actions')!.getBoundingClientRect().bottom,
+        overflowX: element.scrollWidth - element.clientWidth,
+        overflowY: element.scrollHeight - element.clientHeight,
+      }
+    }),
+  )
+  const rows: Array<typeof geometry> = []
+  for (const card of geometry) {
+    expect(card.overflowX).toBeLessThanOrEqual(1)
+    expect(card.overflowY).toBeLessThanOrEqual(1)
+    expect(card.actionsBottom).toBeLessThanOrEqual(card.bottom + 1)
+    const row = rows.find((items) => Math.abs(items[0].rowTop - card.rowTop) <= 1)
+    if (row) row.push(card)
+    else rows.push([card])
+  }
+  if (page.viewportSize()!.width >= 960) {
+    expect(rows.some((row) => row.length > 1)).toBe(true)
+    for (const row of rows) {
+      for (const field of ['height', 'bottom', 'actionsBottom'] as const) {
+        const values = row.map((card) => card[field])
+        expect(Math.max(...values) - Math.min(...values), `same-row ${field}`).toBeLessThanOrEqual(1)
+      }
+    }
+  }
+}
+
 for (const width of [320, 390, 768, 960, 1280, 1440]) {
   for (const theme of ['light', 'dark'] as const) {
-    test(`MD3 layout and DDL stay compact at ${width}px in ${theme} theme`, async ({ page }) => {
+    test(`MD3 layout and DDL stay compact at ${width}px in ${theme} theme`, async ({ page }, testInfo) => {
       const problems: string[] = []
       page.on('pageerror', (error) => problems.push(error.message))
       page.on('console', (message) => {
@@ -206,6 +254,18 @@ for (const width of [320, 390, 768, 960, 1280, 1440]) {
         await card.evaluate((element) => parseFloat(getComputedStyle(element).borderRadius)),
       ).toBeGreaterThanOrEqual(8)
       await expectNoOverflow(page)
+      await expectAlignedCardRows(page)
+      if (width === 320 || width === 1280) {
+        await page.screenshot({ path: testInfo.outputPath(`aligned-cards-${width}-${theme}.png`) })
+        const share = card.getByRole('button', { name: '分享通知', exact: true })
+        await share.focus()
+        await expect(share).toBeFocused()
+        await expect.poll(() => card.locator('.card-actions').evaluate((element) =>
+          Number(getComputedStyle(element).opacity),
+        )).toBe(1)
+        await expectAlignedCardRows(page)
+        await page.screenshot({ path: testInfo.outputPath(`aligned-actions-${width}-${theme}.png`) })
+      }
       await page
         .getByRole('link', { name: /^打开通知：/ })
         .first()
@@ -216,6 +276,25 @@ for (const width of [320, 390, 768, 960, 1280, 1440]) {
       expect(state.nativeErrors).toEqual([])
     })
   }
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`aligned favorite cards in ${theme} theme`, async ({ page }, testInfo) => {
+    const state = await installApi(page)
+    await openApp(page, 1280, theme)
+    await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+    for (const index of [1, 2, 3, 4]) {
+      await cardFor(page, index).getByRole('button', { name: '收藏通知', exact: true }).click()
+      await page.getByRole('dialog').getByText('默认收藏', { exact: true }).click()
+      await expect(page.getByRole('dialog')).toHaveCount(0)
+    }
+    await page.goto('/#/favorites')
+    await expectCards(page, [1, 2, 3, 4])
+    await expectAlignedCardRows(page)
+    await expectNoOverflow(page)
+    await page.screenshot({ path: testInfo.outputPath(`aligned-favorites-${theme}.png`) })
+    expect(state.nativeErrors).toEqual([])
+  })
 }
 
 for (const width of [390, 1280]) {

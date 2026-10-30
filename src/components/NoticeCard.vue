@@ -237,6 +237,10 @@ function removeTag(tag: string) {
 <style scoped>
 @layer notifai-components {
   .notice-card {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
   }

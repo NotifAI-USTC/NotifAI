@@ -176,6 +176,7 @@ onBeforeUnmount(() => {
             :sm="isMobile ? 12 : 6"
             :md="isMobile ? 12 : 4"
             :lg="isMobile ? 12 : 3"
+            class="d-flex"
           >
             <NoticeCard
               :notice="notice"
