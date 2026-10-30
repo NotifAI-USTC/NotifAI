@@ -606,6 +606,29 @@ for (const width of [320, 1280]) {
   }
 }
 
+test('detail return retains feed filters but switching sections resets the visit', async ({ page }) => {
+  const state = await installApi(page)
+  await openApp(page, 390, 'light')
+  await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+  await page.getByRole('button', { name: '打开高级搜索' }).click()
+  await selectContentType(page, '通知/公告')
+  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await expectCards(page, [3, 7])
+  const requestsBefore = state.listUrls.length
+  await cardFor(page, 7).getByRole('link').click()
+  await expect(page.locator('.clean-content')).toContainText('通知正文')
+  await page.getByRole('button', { name: '返回上一页' }).click()
+  await expectCards(page, [3, 7])
+  await expect(page.locator('.app-banner').filter({ hasText: '高级搜索已启用' })).toContainText('类型: 通知/公告')
+  expect(state.listUrls).toHaveLength(requestsBefore)
+  await page.getByRole('link', { name: '日历', exact: true }).click()
+  await expect(page).toHaveURL(/#\/calendar$/)
+  await page.getByRole('link', { name: '首页', exact: true }).click()
+  await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+  await expect(page.locator('.app-banner').filter({ hasText: '高级搜索已启用' })).toHaveCount(0)
+  expect(state.nativeErrors).toEqual([])
+})
+
 test('legacy IndexedDB feed and detail without content type update from the network', async ({ page }) => {
   const state = await installApi(page)
   await openApp(page, 1280, 'light')

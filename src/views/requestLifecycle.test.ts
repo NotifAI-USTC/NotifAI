@@ -63,6 +63,7 @@ vi.mock('../utils/noticeFeedCache', () => ({
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: mocks.push }),
+  onBeforeRouteLeave: vi.fn(),
 }))
 
 vi.mock('../stores/userSettings', async () => {

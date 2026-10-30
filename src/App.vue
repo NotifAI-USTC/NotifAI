@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useTheme } from 'vuetify'
 import { useRouter } from 'vue-router'
 import { useUserSettingsStore } from './stores/userSettings'
@@ -14,6 +14,11 @@ const theme = useTheme()
 const { isMobile } = useWindowSize()
 const snackbar = useSnackbar()
 useForegroundDdlReminder()
+
+// Retain the feed only while browsing a notice; other sections start a new feed visit.
+const retainedPages = computed(() =>
+  ['Home', 'Detail'].includes(String(router.currentRoute.value.name)) ? ['Home'] : [],
+)
 
 const activeTab = ref('Home')
 const tabs = [
@@ -78,7 +83,11 @@ watch(
 
     <!-- 主内容区 -->
     <v-main class="app-main">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <keep-alive :include="retainedPages">
+          <component :is="Component" />
+        </keep-alive>
+      </router-view>
     </v-main>
 
     <!-- 首次使用引导：持久化完成前不允许误触关闭。 -->

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
 import {
   ApiConfigurationError,
@@ -107,6 +107,8 @@ let requestController: AbortController | null = null
 let statsController: AbortController | null = null
 let loadSequence = 0
 let refreshingQueryKey: string | null = null
+let savedScrollTop = 0
+let pageActive = true
 
 const serverStats = ref<StatsResponse | null>(null)
 const urgentDeadlines = ref<DeadlineItem[]>([])
@@ -697,6 +699,7 @@ function handleStar(id: string): void {
 }
 
 function onScroll(): void {
+  if (!pageActive) return
   const el = noticeGrid.value
   if (!el || loading.value || finished.value || requestError.value) return
   // 滚动到距底部 240px 内时加载下一页
@@ -863,6 +866,22 @@ watch(
     refresh()
   },
 )
+
+onBeforeRouteLeave(() => {
+  savedScrollTop = noticeGrid.value?.scrollTop ?? 0
+})
+
+onDeactivated(() => {
+  pageActive = false
+  pullDistance.value = 0
+  pullStartY = null
+})
+
+onActivated(async () => {
+  pageActive = true
+  await nextTick()
+  if (pageActive && noticeGrid.value) noticeGrid.value.scrollTop = savedScrollTop
+})
 
 onMounted(() => {
   initialLoading.value = true
