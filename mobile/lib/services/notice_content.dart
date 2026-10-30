@@ -18,8 +18,9 @@ Uri? safeHttpUri(String value, {Uri? base, bool trusted = false}) {
   if (RegExp(
     r'^(?:[a-z][a-z0-9+.-]*:)?//[^/?#]*@',
     caseSensitive: false,
-  ).hasMatch(value.trim()))
+  ).hasMatch(value.trim())) {
     return null;
+  }
   final candidate = Uri.tryParse(value.trim());
   if (candidate == null) return null;
   final uri = base == null ? candidate : base.resolveUri(candidate);
