@@ -236,9 +236,22 @@ for (const width of [320, 390, 768, 960, 1280, 1440]) {
       const banner = page.locator('.ddl-notice-bar')
       await expectNaturalBannerHeight(banner)
       expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(72)
-      const deadline = await banner.locator('.ddl-notice-bar__chip-deadline').first().boundingBox()
-      const slider = await banner.locator('.v-slide-group__container').boundingBox()
-      expect(deadline!.x + deadline!.width).toBeLessThanOrEqual(slider!.x + slider!.width)
+      if (width < 960) {
+        // 移动端：单条展示，标题/来源与截止时间分两行，右下角翻页
+        const slides = banner.locator('.ddl-notice-bar__slides')
+        await expect(banner.locator('.ddl-notice-bar__slide-title')).toHaveCount(2)
+        const title = await banner.locator('.ddl-notice-bar__slide-title').first().boundingBox()
+        const slideArea = await slides.boundingBox()
+        expect(title!.x + title!.width).toBeLessThanOrEqual(slideArea!.x + slideArea!.width)
+        await expect(banner.locator('.ddl-notice-bar__pager-count')).toHaveText('1/2')
+        await banner.getByRole('button', { name: '下一条紧急 DDL' }).click()
+        await expect(banner.locator('.ddl-notice-bar__pager-count')).toHaveText('2/2')
+        await expect(banner.getByRole('button', { name: '下一条紧急 DDL' })).toBeDisabled()
+      } else {
+        const deadline = await banner.locator('.ddl-notice-bar__chip-deadline').first().boundingBox()
+        const slider = await banner.locator('.v-slide-group__container').boundingBox()
+        expect(deadline!.x + deadline!.width).toBeLessThanOrEqual(slider!.x + slider!.width)
+      }
       await expect
         .poll(() =>
           page.locator('.notice-col').evaluateAll((cols) => {

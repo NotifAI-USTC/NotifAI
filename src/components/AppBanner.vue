@@ -12,7 +12,8 @@ const props = withDefaults(
     type?: BannerType
     variant?: BannerVariant
     density?: BannerDensity
-    icon?: string
+    /** false 时隐藏 Vuetify 按 type 自动添加的图标 */
+    icon?: string | false
   }>(),
   {
     type: 'info',
