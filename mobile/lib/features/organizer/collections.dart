@@ -168,11 +168,6 @@ class _SavedNoticesState extends State<_SavedNotices> {
             child: Text('${_ids.length} 条已读记录 · 本机缓存可离线查看'),
           ),
         if (!widget.important && !widget.readHistory) ...[
-          Text(
-            '${_ids.length} 条收藏 · 本机保存收藏状态',
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
-          const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             runSpacing: 8,

@@ -22,7 +22,6 @@ class _FeedScreenState extends State<FeedScreen> {
   final _search = TextEditingController();
   final _scroll = ScrollController();
   Timer? _debounce;
-  Stats? _stats;
   List<DeadlineEntry> _deadlines = [];
   String? _ddlError;
   int _ddlGeneration = 0;
@@ -74,12 +73,6 @@ class _FeedScreenState extends State<FeedScreen> {
       if (mounted && sequence == _ddlGeneration) {
         setState(() => _ddlError = '近期截止通知加载失败：$error');
       }
-    }
-    try {
-      final stats = await repository.stats();
-      if (mounted && sequence == _ddlGeneration) setState(() => _stats = stats);
-    } catch (_) {
-      /* Overview is supplementary; don't replace the feed's error state. */
     }
   }
 
@@ -224,18 +217,6 @@ class _FeedScreenState extends State<FeedScreen> {
                                 ),
                               ),
                             ),
-                          SliverToBoxAdapter(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 8,
-                              ),
-                              child: Text(
-                                '当前列表 ${visible.length} 条 · ${visible.map((n) => normalizeSource(n.source)).toSet().length} 个来源${_stats == null ? '' : ' · 全站 ${_stats!.total} 条'}',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ),
-                          ),
                           if (feed.filters != null)
                             SliverToBoxAdapter(
                               child: Padding(
