@@ -6,6 +6,7 @@ import '../app.dart';
 import '../data/models.dart';
 import '../state/notice_feed.dart';
 import '../ui/common.dart';
+import '../ui/deadline_notice_bar.dart';
 import '../ui/notice_card.dart';
 import 'detail.dart';
 
@@ -208,101 +209,20 @@ class _FeedScreenState extends State<FeedScreen> {
                         controller: _scroll,
                         physics: const AlwaysScrollableScrollPhysics(),
                         slivers: [
-                          if (deadlines.isNotEmpty)
-                            SliverToBoxAdapter(
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  4,
-                                  16,
-                                  8,
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      '近期截止',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleSmall,
-                                    ),
-                                    const SizedBox(height: 6),
-                                    SizedBox(
-                                      height:
-                                          56 +
-                                          3 *
-                                              MediaQuery.textScalerOf(context)
-                                                  .scale(20),
-                                      child: ListView.separated(
-                                        scrollDirection: Axis.horizontal,
-                                        itemCount: deadlines.length,
-                                        separatorBuilder: (_, index) =>
-                                            const SizedBox(width: 8),
-                                        itemBuilder: (context, index) {
-                                          final entry = deadlines[index];
-                                          return SizedBox(
-                                            width: 260,
-                                            child: Card.filled(
-                                              child: InkWell(
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                onTap: () => Navigator.push(
-                                                  context,
-                                                  MaterialPageRoute<void>(
-                                                    builder: (_) =>
-                                                        DetailScreen(
-                                                          services:
-                                                              widget.services,
-                                                          id: entry.id,
-                                                        ),
-                                                  ),
-                                                ),
-                                                child: Padding(
-                                                  padding: const EdgeInsets.all(
-                                                    12,
-                                                  ),
-                                                  child: Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      Text(
-                                                        entry.title,
-                                                        maxLines: 2,
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                      ),
-                                                      const Spacer(),
-                                                      Text(
-                                                        deadlineLabel(
-                                                          entry.deadline,
-                                                        ),
-                                                        semanticsLabel:
-                                                            '${entry.source} · ${deadlineLabel(entry.deadline)}',
-                                                        maxLines: 1,
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                        style: TextStyle(
-                                                          color: Theme.of(
-                                                            context,
-                                                          ).colorScheme.error,
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ],
+                          SliverToBoxAdapter(
+                            child: DeadlineNoticeBar(
+                              notices: deadlines,
+                              onOpen: (id) => Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => DetailScreen(
+                                    services: widget.services,
+                                    id: id,
+                                  ),
                                 ),
                               ),
                             ),
+                          ),
                           if (_ddlError != null)
                             SliverToBoxAdapter(
                               child: Padding(
