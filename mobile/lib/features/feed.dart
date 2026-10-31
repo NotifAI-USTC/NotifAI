@@ -120,18 +120,7 @@ class _FeedScreenState extends State<FeedScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('通知看板'),
-      actions: [
-        IconButton(
-          tooltip: '刷新通知',
-          onPressed: _refresh,
-          icon: const Icon(Icons.refresh),
-        ),
-      ],
-    ),
     body: SafeArea(
-      top: false,
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(

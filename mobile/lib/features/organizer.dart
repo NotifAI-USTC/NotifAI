@@ -17,7 +17,6 @@ class _PageBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SafeArea(
-    top: false,
     child: Align(
       alignment: Alignment.topCenter,
       child: ConstrainedBox(

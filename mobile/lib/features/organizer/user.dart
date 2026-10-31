@@ -478,7 +478,6 @@ class _UserScreenState extends State<UserScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('我的')),
     body: _PageBody(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),

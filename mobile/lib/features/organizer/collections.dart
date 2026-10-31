@@ -6,7 +6,6 @@ class FavoritesScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('我的收藏')),
     body: _PageBody(child: _SavedNotices(services: services)),
   );
 }
@@ -556,7 +555,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
       grouped.putIfAbsent(event.date, () => []).add(event);
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('通知日历')),
       body: _PageBody(
         child: RefreshIndicator(
           onRefresh: _load,
