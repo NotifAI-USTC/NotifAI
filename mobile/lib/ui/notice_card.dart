@@ -12,10 +12,12 @@ class NoticeCard extends StatelessWidget {
     required this.notice,
     required this.services,
     this.onOpen,
+    this.showActions = true,
   });
   final Notice notice;
   final AppServices services;
   final VoidCallback? onOpen;
+  final bool showActions;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -47,7 +49,7 @@ class NoticeCard extends StatelessWidget {
                     ),
                   ),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                padding: EdgeInsets.fromLTRB(16, 16, 16, showActions ? 8 : 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -126,63 +128,71 @@ class NoticeCard extends StatelessWidget {
                 ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  IconButton(
-                    tooltip: important ? '取消重要标记' : '标记为重要',
-                    isSelected: important,
-                    selectedIcon: Icon(Icons.error, color: colors.error),
-                    icon: const Icon(Icons.error_outline),
-                    onPressed: () => perform(context, () async {
-                      await services.settings.toggleImportant(notice.id);
-                      await HapticFeedback.selectionClick();
-                    }),
-                  ),
-                  IconButton(
-                    tooltip: starred ? '管理收藏' : '收藏通知',
-                    isSelected: starred,
-                    selectedIcon: Icon(Icons.star, color: colors.primary),
-                    icon: const Icon(Icons.star_border),
-                    onPressed: () => chooseFavorite(context, services, notice),
-                  ),
-                  PopupMenuButton<String>(
-                    tooltip: '更多通知操作',
-                    onSelected: (action) => perform(context, () async {
-                      switch (action) {
-                        case 'read':
-                          await services.settings.markRead(notice.id);
-                        case 'pin':
-                          await services.settings.togglePin(notice.id);
-                        case 'tags':
-                          if (context.mounted) {
-                            await editTags(context, services, notice);
-                          }
-                        case 'share':
-                          if (context.mounted) {
-                            await services.actions.showShareOptions(
-                              context,
-                              notice,
-                            );
-                          }
-                      }
-                    }),
-                    itemBuilder: (_) => [
-                      if (!read)
-                        const PopupMenuItem(value: 'read', child: Text('标记已读')),
-                      PopupMenuItem(
-                        value: 'pin',
-                        child: Text(pinned ? '取消置顶' : '置顶通知'),
-                      ),
-                      const PopupMenuItem(value: 'tags', child: Text('管理标签')),
-                      const PopupMenuItem(value: 'share', child: Text('分享通知')),
-                    ],
-                  ),
-                ],
+            if (showActions)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    IconButton(
+                      tooltip: important ? '取消重要标记' : '标记为重要',
+                      isSelected: important,
+                      selectedIcon: Icon(Icons.error, color: colors.error),
+                      icon: const Icon(Icons.error_outline),
+                      onPressed: () => perform(context, () async {
+                        await services.settings.toggleImportant(notice.id);
+                        await HapticFeedback.selectionClick();
+                      }),
+                    ),
+                    IconButton(
+                      tooltip: starred ? '管理收藏' : '收藏通知',
+                      isSelected: starred,
+                      selectedIcon: Icon(Icons.star, color: colors.primary),
+                      icon: const Icon(Icons.star_border),
+                      onPressed: () =>
+                          chooseFavorite(context, services, notice),
+                    ),
+                    PopupMenuButton<String>(
+                      tooltip: '更多通知操作',
+                      onSelected: (action) => perform(context, () async {
+                        switch (action) {
+                          case 'read':
+                            await services.settings.markRead(notice.id);
+                          case 'pin':
+                            await services.settings.togglePin(notice.id);
+                          case 'tags':
+                            if (context.mounted) {
+                              await editTags(context, services, notice);
+                            }
+                          case 'share':
+                            if (context.mounted) {
+                              await services.actions.showShareOptions(
+                                context,
+                                notice,
+                              );
+                            }
+                        }
+                      }),
+                      itemBuilder: (_) => [
+                        if (!read)
+                          const PopupMenuItem(
+                            value: 'read',
+                            child: Text('标记已读'),
+                          ),
+                        PopupMenuItem(
+                          value: 'pin',
+                          child: Text(pinned ? '取消置顶' : '置顶通知'),
+                        ),
+                        const PopupMenuItem(value: 'tags', child: Text('管理标签')),
+                        const PopupMenuItem(
+                          value: 'share',
+                          child: Text('分享通知'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       );

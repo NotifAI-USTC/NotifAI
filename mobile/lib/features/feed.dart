@@ -7,7 +7,7 @@ import '../data/models.dart';
 import '../state/notice_feed.dart';
 import '../ui/common.dart';
 import '../ui/deadline_notice_bar.dart';
-import '../ui/notice_card.dart';
+import '../ui/home_notice_card.dart';
 import 'detail.dart';
 
 class FeedScreen extends StatefulWidget {
@@ -271,7 +271,8 @@ class _FeedScreenState extends State<FeedScreen> {
                             const SliverToBoxAdapter(child: LoadingView()),
                           SliverList.builder(
                             itemCount: visible.length,
-                            itemBuilder: (context, index) => NoticeCard(
+                            itemBuilder: (context, index) => HomeNoticeCard(
+                              key: ValueKey(visible[index].id),
                               notice: visible[index],
                               services: widget.services,
                             ),

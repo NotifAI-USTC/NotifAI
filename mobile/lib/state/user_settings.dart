@@ -600,6 +600,18 @@ class UserSettings extends ChangeNotifier {
 
   Future<void> markRead(String id) => markLoadedRead([id]);
 
+  Future<void> toggleRead(String id) => _enqueue(() async {
+    _validateId(id);
+    final read = [..._value.readIds];
+    if (read.contains(id)) {
+      read.remove(id);
+    } else {
+      read.add(id);
+      if (read.length > _maxItems) read.removeAt(0);
+    }
+    await _commit(_value.copyWith(readIds: read));
+  });
+
   Future<void> markLoadedRead(Iterable<String> ids) {
     final captured = ids.toList();
     return _enqueue(() async {
