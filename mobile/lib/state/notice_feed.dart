@@ -93,8 +93,9 @@ class NoticeFeed extends ChangeNotifier {
     final p = settings.value;
     final text = '${n.title} ${normalizeSource(n.source)} ${n.aiSummary}'
         .toLowerCase();
-    return (q.keyword == null || text.contains(q.keyword!.toLowerCase())) &&
-        (q.source == null || normalizeSource(n.source) == q.source) &&
+    // The server searches full content; light responses omit that content, so
+    // keyword matches cannot be rechecked against only the visible fields.
+    return (q.source == null || normalizeSource(n.source) == q.source) &&
         (q.sources.isEmpty || q.sources.contains(normalizeSource(n.source))) &&
         (q.categories.isEmpty || n.categories.any(q.categories.contains)) &&
         (q.contentType == null || n.contentType == q.contentType) &&

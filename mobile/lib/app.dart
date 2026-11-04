@@ -16,11 +16,11 @@ import 'state/user_settings.dart';
 
 const defaultApiBase = String.fromEnvironment(
   'VITE_API_BASE_URL',
-  defaultValue: 'https://notifai-api.enthusjast.cc/api',
+  defaultValue: 'https://api.notifai.top/api',
 );
 const defaultWebBase = String.fromEnvironment(
   'WEB_BASE_URL',
-  defaultValue: 'https://notifai.enthusjast.cc',
+  defaultValue: 'https://notifai.top',
 );
 
 class AppServices {

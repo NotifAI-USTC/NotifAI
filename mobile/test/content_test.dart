@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html;
+import 'package:notifai_mobile/app.dart' show defaultWebBase;
 import 'package:notifai_mobile/services/notice_content.dart';
 import 'package:notifai_mobile/services/notice_link.dart';
 
@@ -61,7 +62,7 @@ void main() {
     expect(safeHttpUri('data:image/png;base64,AA==', trusted: true), isNull);
   });
   test('仅接受受信域名及有效通知ID的外部入口', () {
-    const web = 'https://notifai.enthusjast.cc';
+    const web = defaultWebBase;
     expect(
       noticeIdFromUri(Uri.parse('notifai://detail/abc_123'), webBaseUrl: web),
       'abc_123',
@@ -78,7 +79,8 @@ void main() {
       'https://evil.test/#/detail/abc',
       'notifai://detail/abc/def',
       'notifai://detail/%2Fetc',
-      'https://user@notifai.enthusjast.cc/#/detail/abc',
+      'https://user@notifai.top/#/detail/abc',
+      'https://notifai.enthusjast.cc/#/detail/abc',
     ]) {
       expect(noticeIdFromUri(Uri.parse(link), webBaseUrl: web), isNull);
     }

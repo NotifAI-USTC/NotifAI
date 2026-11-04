@@ -65,6 +65,170 @@ void main() {
     await server.close(force: true);
     await store.close();
   });
+  test('普通搜索保留仅正文命中的轻量结果，跨页及离线恢复不丢失', () async {
+    await settings.update(settings.value.copyWith(blacklistKeywords: ['屏蔽']));
+    final records = [
+      Notice(
+        id: 'body-1',
+        title: '第一项办理安排',
+        source: '教务处',
+        publishDate: '2026-10-30',
+        originUrl: 'https://ustc.edu.cn/body-1',
+        cleanContent: '正文中的量子芯片实验室安排。',
+      ),
+      Notice(
+        id: 'blocked',
+        title: '屏蔽通知',
+        source: '教务处',
+        publishDate: '2026-10-30',
+        originUrl: 'https://ustc.edu.cn/blocked',
+        cleanContent: '量子芯片实验室安排。',
+      ),
+      Notice(
+        id: 'body-2',
+        title: '第二项办理安排',
+        source: '教务处',
+        publishDate: '2026-10-29',
+        originUrl: 'https://ustc.edu.cn/body-2',
+        cleanContent: '量子芯片实验室安排。',
+      ),
+    ];
+    var offline = false;
+    final requests = <Uri>[];
+    handle = (request) async {
+      requests.add(request.uri);
+      if (offline) {
+        respond(request, [], 0, status: 503);
+        return;
+      }
+      final word = request.uri.queryParameters['keyword'] ?? '';
+      final matches = records
+          .where(
+            (n) => '${n.title} ${n.source} ${n.aiSummary} ${n.cleanContent}'
+                .contains(word),
+          )
+          .toList();
+      final next = request.uri.queryParameters['cursor'] != null;
+      final page = next ? matches.skip(2) : matches.take(2);
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'items': page
+              .map((n) => {...n.toJson(), 'cleanContent': ''})
+              .toList(),
+          'total': matches.length,
+          'nextCursor': !next && matches.length > 2 ? 'body-next' : null,
+        }),
+      );
+      await request.response.close();
+    };
+    feed = NoticeFeed(repository, settings);
+    await feed!.search('量子芯片');
+    expect(feed!.visible.map((n) => n.id), ['body-1']);
+    expect(feed!.visible.single.cleanContent, isEmpty);
+    expect(feed!.finished, isFalse);
+    await feed!.loadMore();
+    expect(feed!.visible.map((n) => n.id), ['body-1', 'body-2']);
+    expect(feed!.finished, isTrue);
+    expect(
+      requests.every(
+        (uri) =>
+            uri.queryParameters['keyword'] == '量子芯片' &&
+            uri.queryParameters['light'] == 'true',
+      ),
+      isTrue,
+    );
+    expect(requests.last.queryParameters['cursor'], 'body-next');
+    feed!.dispose();
+    offline = true;
+    feed = NoticeFeed(repository, settings);
+    await feed!.search('量子芯片');
+    expect(feed!.visible.map((n) => n.id), ['body-1', 'body-2']);
+    expect(feed!.error, contains('503'));
+  });
+
+  test('高级搜索保留正文命中，同时继续应用本地订阅、已读、收藏、标签和屏蔽规则', () async {
+    Notice item(
+      String id, {
+      String source = '教务处',
+      List<String> categories = const ['research'],
+      String contentType = 'notice',
+    }) => Notice(
+      id: id,
+      title: id == 'blocked' ? '屏蔽通知' : '办理安排',
+      source: source,
+      categories: categories,
+      contentType: contentType,
+      publishDate: '2026-10-30',
+      deadline: '2026-11-02',
+      originUrl: 'https://ustc.edu.cn/$id',
+      cleanContent: '仅正文包含实验室安排。',
+    );
+    final records = [
+      item('kept'),
+      item('unread'),
+      item('unstarred'),
+      item('untagged'),
+      item('blocked'),
+      item('source', source: '研究生院'),
+      item('category', categories: ['exam']),
+      item('type', contentType: 'news'),
+    ];
+    await settings.update(
+      settings.value.copyWith(
+        subscriptionMode: 'custom',
+        subscribedDepts: ['教务处'],
+        categoryMode: 'custom',
+        subscribedCategories: ['exam'],
+        readIds: records
+            .where((n) => n.id != 'unread')
+            .map((n) => n.id)
+            .toList(),
+        starredIds: records
+            .where((n) => n.id != 'unstarred')
+            .map((n) => n.id)
+            .toList(),
+        customTags: {
+          for (final n in records.where((n) => n.id != 'untagged'))
+            n.id: ['跟进'],
+        },
+        blacklistKeywords: ['屏蔽'],
+      ),
+    );
+    handle = (request) async {
+      final word = request.uri.queryParameters['keyword'] ?? '';
+      final matches = records
+          .where((n) => n.cleanContent.contains(word))
+          .toList();
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'items': matches
+              .map((n) => {...n.toJson(), 'cleanContent': ''})
+              .toList(),
+          'total': matches.length,
+          'nextCursor': null,
+        }),
+      );
+      await request.response.close();
+    };
+    feed = NoticeFeed(repository, settings);
+    await feed!.apply(
+      const FeedFilters(
+        keyword: '实验室安排',
+        categories: ['research'],
+        contentType: 'notice',
+        isRead: true,
+        isStarred: true,
+        tags: ['跟进'],
+        hasDeadline: true,
+        dateFrom: '2026-10-01',
+        dateTo: '2026-10-31',
+      ),
+    );
+    expect(feed!.visible.map((n) => n.id), ['kept']);
+    expect(feed!.visible.single.cleanContent, isEmpty);
+  });
   test('清除高级筛选后不会留下不可见的旧搜索词', () async {
     final dataset = [notice('course', '课程安排'), notice('award', '奖学金')];
     handle = (request) async {

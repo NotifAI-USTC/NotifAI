@@ -38,7 +38,7 @@ void main() {
       store: store,
       repository: repository,
       settings: settings,
-      actions: PlatformActions(webBaseUrl: 'https://notifai.enthusjast.cc'),
+      actions: PlatformActions(webBaseUrl: defaultWebBase),
       reminders: ReminderService(store, repository, settings),
     );
   });
@@ -139,6 +139,20 @@ void main() {
     await tester.tap(find.text('分享通知'));
     await tester.pumpAndSettle();
     expect(find.text('复制链接'), findsOneWidget);
+  });
+  testWidgets('分享二维码使用新公开域名并保留网页详情地址', (tester) async {
+    await render(tester);
+    await tester.longPress(find.text('选课安排'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('分享通知'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('显示二维码'));
+    await tester.pumpAndSettle();
+    expect(find.text('https://notifai.top/#/detail/one'), findsOneWidget);
+    expect(
+      find.text('https://notifai.enthusjast.cc/#/detail/one'),
+      findsNothing,
+    );
   });
   testWidgets('键盘可切换已读置顶并打开长按菜单', (tester) async {
     await render(tester);
