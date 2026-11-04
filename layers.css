@@ -1,0 +1,20 @@
+/* Load this order before any bundled stylesheet, including lazy page CSS. */
+@layer notifai-base,
+  vuetify-core,
+  vuetify-components,
+  vuetify-overrides,
+  notifai-components,
+  vuetify-utilities,
+  vuetify-final;
+
+@layer vuetify-core {
+  @layer reset, base;
+}
+
+@layer vuetify-utilities {
+  @layer theme-base, typography, helpers, theme-background, theme-foreground;
+}
+
+@layer vuetify-final {
+  @layer transitions, trumps;
+}
