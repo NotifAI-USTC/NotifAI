@@ -1149,7 +1149,7 @@ export function mockFetchNotices(params: {
   if (keyword) {
     const query = keyword.toLocaleLowerCase()
     filtered = filtered.filter((notice) =>
-      `${notice.title} ${notice.source} ${notice.aiSummary}`.toLocaleLowerCase().includes(query),
+      `${notice.title} ${notice.source} ${notice.aiSummary} ${notice.cleanContent}`.toLocaleLowerCase().includes(query),
     )
   }
   if (source) filtered = filtered.filter((notice) => notice.source === source)

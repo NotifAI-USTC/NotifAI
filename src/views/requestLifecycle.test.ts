@@ -402,6 +402,39 @@ describe('view request lifecycle', () => {
     storeState.subscribedCategories = []
   })
 
+  it('keeps body-only keyword matches from light responses across pages while applying local rules', async () => {
+    mocks.storeState!.blacklistKeywords = ['屏蔽']
+    mocks.fetchNotices.mockImplementation(async (params: { keyword?: string; cursor?: string }) => ({
+      items: !params.keyword ? [] : params.cursor
+        ? [makeNotice({ id: 'body-2', title: '第二页正文匹配', cleanContent: '' })]
+        : [
+            makeNotice({ id: 'body-1', title: '第一页正文匹配', cleanContent: '' }),
+            makeNotice({ id: 'blocked', title: '屏蔽通知', cleanContent: '' }),
+          ],
+      total: params.keyword ? 3 : 0,
+      invalidItemCount: 0,
+      nextCursor: params.keyword && !params.cursor ? 'body-next' : null,
+    }))
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+    await wrapper.find('[title="高级搜索"]').trigger('click')
+    wrapper.findComponent({ name: 'AdvancedSearch' }).vm.$emit('search', {
+      keyword: '量子芯片', source: '', categories: [], contentType: null,
+      dateFrom: '', dateTo: '', hasDeadline: 'any', isRead: 'any', isStarred: 'any', tags: [],
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('第一页正文匹配')
+    expect(wrapper.text()).not.toContain('屏蔽通知')
+    await wrapper.get('.notice-grid').trigger('scroll')
+    await flushPromises()
+    expect(wrapper.text()).toContain('第二页正文匹配')
+    expect(mocks.fetchNotices).toHaveBeenLastCalledWith(
+      expect.objectContaining({ keyword: '量子芯片', light: true, cursor: 'body-next' }),
+      expect.any(AbortSignal),
+    )
+  })
+
   it('keeps the selected content type through refresh and pagination with separate cache keys', async () => {
     mocks.fetchNotices.mockImplementation(async (params: { contentType?: string; cursor?: string }) => ({
       items: params.contentType === 'other'

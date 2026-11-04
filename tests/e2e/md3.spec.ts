@@ -36,7 +36,8 @@ const notices: NoticeItem[] = Array.from({ length: 8 }, (_, index) => ({
   coreAction: '登录教务系统办理',
   originUrl: `https://www.teach.ustc.edu.cn/notice/${index + 1}.html`,
   cleanContent:
-    '# 通知正文\n\n请在截止日期前完成申请。\n\n| 办理事项 | 地点 |\n| --- | --- |\n| 课程报名 | 教务系统 |',
+    '# 通知正文\n\n请在截止日期前完成申请。\n\n| 办理事项 | 地点 |\n| --- | --- |\n| 课程报名 | 教务系统 |' +
+    (index === 2 ? '\n\n量子芯片实验室安排。' : ''),
   attachments: [{ name: '课程安排.pdf', url: 'https://www.teach.ustc.edu.cn/files/courses.pdf' }],
 }))
 
@@ -109,9 +110,11 @@ async function installApi(page: Page): Promise<ApiState> {
       }
       const contentType = url.searchParams.get('contentType')
       const categories = url.searchParams.getAll('categories[]')
+      const keyword = url.searchParams.get('keyword')?.toLocaleLowerCase()
       const filtered = notices.filter((notice) =>
         (contentType === null || notice.contentType === contentType) &&
-        (categories.length === 0 || notice.categories.some((category) => categories.includes(category))),
+        (categories.length === 0 || notice.categories.some((category) => categories.includes(category))) &&
+        (!keyword || `${notice.title} ${notice.source} ${notice.aiSummary} ${notice.cleanContent}`.toLocaleLowerCase().includes(keyword)),
       )
       response = {
         items: filtered.map((notice) => ({ ...notice, cleanContent: '' })),
@@ -618,6 +621,29 @@ for (const width of [320, 1280]) {
     })
   }
 }
+
+test('ordinary and advanced search keep body-only matches from light API results', async ({ page }) => {
+  const state = await installApi(page)
+  await openApp(page, 390, 'light')
+  await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+  const response = page.waitForResponse((response) =>
+    new URL(response.url()).searchParams.get('keyword') === '量子芯片',
+  )
+  await page.getByPlaceholder('搜索通知...').fill('量子芯片')
+  const result = await (await response).json()
+  expect(result.items.map((notice: NoticeItem) => notice.id)).toEqual(['migration-3'])
+  expect(result.items[0].cleanContent).toBe('')
+  await expectCards(page, [3])
+  expect(new URL(state.listUrls.at(-1)!).searchParams.get('light')).toBe('true')
+  await page.getByRole('button', { name: '打开高级搜索' }).click()
+  await page.getByRole('textbox', { name: '关键词', exact: true }).fill('实验室安排')
+  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await expect.poll(() => new URL(state.listUrls.at(-1)!).searchParams.get('keyword')).toBe('实验室安排')
+  await expectCards(page, [3])
+  await cardFor(page, 3).getByRole('link').click()
+  await expect(page.locator('.clean-content')).toContainText('量子芯片实验室安排')
+  expect(state.nativeErrors).toEqual([])
+})
 
 test('detail return retains feed filters but switching sections resets the visit', async ({ page }) => {
   const state = await installApi(page)

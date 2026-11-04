@@ -75,6 +75,14 @@ describe('mock notice API', () => {
     expect(`${response.items[0]?.title} ${response.items[0]?.aiSummary}`).toContain('选课')
   })
 
+  it('searches body-only text before producing light results and pagination totals', () => {
+    const response = mockFetchNotices({ keyword: '补退选阶段', light: true, pageSize: 1 })
+    expect(response.total).toBe(1)
+    expect(response.items.map((notice) => notice.id)).toEqual(['edu-001'])
+    expect(response.items[0]?.cleanContent).toBe('')
+    expect(mockFetchNotices({ keyword: '补退选阶段', light: true, pageSize: 1, page: 2 }).items).toEqual([])
+  })
+
   it('matches either publish date or deadline for calendar ranges', () => {
     const target = mockNotices.find(
       (notice) => notice.deadline && notice.deadline !== notice.publishDate,

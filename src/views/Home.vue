@@ -202,10 +202,7 @@ function matchesLocalFilters(notice: NoticeItem, context: QueryContext): boolean
   }
   if (context.subscribedSources && !context.subscribedSources.includes(source)) return false
 
-  if (context.keyword) {
-    const searchableText = `${notice.title} ${source} ${notice.aiSummary}`.toLocaleLowerCase()
-    if (!searchableText.includes(context.keyword)) return false
-  }
+  // keyword 由服务端全文搜索匹配；light 列表不含正文，不能在本地重复判断。
 
   if (context.isRead === 'yes' && !store.isRead(notice.id)) return false
   if (context.isRead === 'no' && store.isRead(notice.id)) return false
