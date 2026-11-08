@@ -53,9 +53,10 @@ String buildCalendarIcs(
   ];
   final emitted = <String>{};
   for (final entry in entries) {
+    final publishDate = entry.publishDate;
     final dates = <(String, String)>[
-      ('publish', entry.publishDate),
-      if (entry.deadline != null && entry.deadline != entry.publishDate)
+      if (publishDate != null) ('publish', publishDate),
+      if (entry.deadline != null && entry.deadline != publishDate)
         ('deadline', entry.deadline!),
     ];
     for (final (kind, value) in dates) {

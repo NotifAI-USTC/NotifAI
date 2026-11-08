@@ -229,6 +229,24 @@ void main() {
     expect(feed!.visible.map((n) => n.id), ['kept']);
     expect(feed!.visible.single.cleanContent, isEmpty);
   });
+  test('来源筛选对旧别名归一后本地匹配', () async {
+    handle = (request) async {
+      expect(request.uri.queryParameters['source'], '本科招生网');
+      respond(request, [
+        Notice(
+          id: 'alias-source',
+          title: '招生通知',
+          source: '招生办公室',
+          publishDate: '2026-10-30',
+          originUrl: 'https://ustc.edu.cn/alias-source',
+        ),
+      ], 1);
+    };
+    feed = NoticeFeed(repository, settings);
+    await feed!.apply(const FeedFilters(source: '招生办公室'));
+    expect(feed!.visible.map((n) => n.id), ['alias-source']);
+  });
+
   test('清除高级筛选后不会留下不可见的旧搜索词', () async {
     final dataset = [notice('course', '课程安排'), notice('award', '奖学金')];
     handle = (request) async {
@@ -266,6 +284,24 @@ void main() {
     await old;
     expect(feed!.visible.map((n) => n.id), ['new']);
     expect(feed!.error, isNull);
+  });
+  test('空发布日期无日期筛选时可见，设置日期范围时排除', () async {
+    handle = (request) async {
+      respond(request, [
+        Notice(
+          id: 'unknown-date',
+          title: '发布日期未知',
+          source: '教务处',
+          publishDate: null,
+          originUrl: 'https://ustc.edu.cn/unknown-date',
+        ),
+      ], 1);
+    };
+    feed = NoticeFeed(repository, settings);
+    await feed!.refresh();
+    expect(feed!.visible.single.id, 'unknown-date');
+    await feed!.apply(const FeedFilters(dateFrom: '2026-10-01'));
+    expect(feed!.visible, isEmpty);
   });
   test('本地屏蔽仅扫描有限页并提供继续查找，不误报全部为空', () async {
     await settings.update(settings.value.copyWith(blacklistKeywords: ['屏蔽']));

@@ -159,8 +159,10 @@ class _HomeNoticeCardState extends State<HomeNoticeCard> {
           bindings: {
             const SingleActivator(LogicalKeyboardKey.f10, shift: true): _menu,
             const SingleActivator(LogicalKeyboardKey.contextMenu): _menu,
-            const SingleActivator(LogicalKeyboardKey.keyR, alt: true): () => _action('read'),
-            const SingleActivator(LogicalKeyboardKey.keyP, alt: true): () => _action('pin'),
+            const SingleActivator(LogicalKeyboardKey.keyR, alt: true): () =>
+                _action('read'),
+            const SingleActivator(LogicalKeyboardKey.keyP, alt: true): () =>
+                _action('pin'),
           },
           child: Focus(
             child: GestureDetector(

@@ -33,8 +33,33 @@ class DataValidationException implements Exception {
   String toString() => '通知数据无效：$message';
 }
 
-String normalizeSource(String source) =>
-    source == '计算机科学与技术学院' ? '计算机学院' : source;
+const sourceAliases = {
+  '计算机科学与技术学院': '计算机学院',
+  '招生办公室': '本科招生网',
+  '国际合作与交流部': '国际合作交流',
+};
+
+String normalizeSource(String source) => sourceAliases[source] ?? source;
+
+const trustedNoticeHosts = ['ustc.edu.cn', 'ustclug.org'];
+
+bool isTrustedNoticeHost(String host) {
+  final value = host.toLowerCase();
+  return trustedNoticeHosts.any(
+    (domain) => value == domain || value.endsWith('.$domain'),
+  );
+}
+
+String publishDateLabel(String? value) =>
+    value == null || value.isEmpty ? '未知' : value;
+
+int comparePublishDates(String? a, String? b) {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return a.compareTo(b);
+}
+
 bool isValidNoticeId(Object? value) =>
     value is String &&
     RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$').hasMatch(value);
@@ -103,6 +128,16 @@ String _date(Object? value) {
     throw const DataValidationException('日期格式无效');
   }
   return dateOnly(parseDateOnly(input.substring(0, 10)));
+}
+
+String? _optionalDate(Object? value) {
+  if (value == null) return null;
+  if (value is! String) {
+    throw const DataValidationException('publishDate 必须是字符串或 null');
+  }
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return null;
+  return _date(trimmed);
 }
 
 int remainingDays(String deadline, {DateTime? now}) {
@@ -205,15 +240,21 @@ String _url(Object? value, {bool trusted = false}) {
   final uri = hasRawUrlCredentials(text) ? null : Uri.tryParse(text);
   if (uri == null ||
       !isValidHttpUri(uri) ||
-      (trusted &&
-          (uri.scheme != 'https' ||
-              !(uri.host.toLowerCase() == 'ustc.edu.cn' ||
-                  uri.host.toLowerCase().endsWith('.ustc.edu.cn'))))) {
+      (trusted && (uri.scheme != 'https' || !isTrustedNoticeHost(uri.host)))) {
     throw DataValidationException(
-      trusted ? '原文必须是无凭据的中国科大 HTTPS 地址' : '附件必须是无凭据的 HTTP(S) 地址',
+      trusted ? '原文必须是无凭据的中国科大或 LUG HTTPS 地址' : '附件必须是无凭据的 HTTP(S) 地址',
     );
   }
   return uri.toString();
+}
+
+String _originUrl(Object? value) {
+  if (value == null) return '';
+  if (value is! String) {
+    throw const DataValidationException('原文网址必须是字符串');
+  }
+  if (value.trim().isEmpty) return '';
+  return _url(value, trusted: true);
 }
 
 class NoticeAttachment {
@@ -251,13 +292,12 @@ class Notice {
   final String id,
       title,
       source,
-      publishDate,
       aiSummary,
       targetAudience,
       coreAction,
       originUrl,
       cleanContent;
-  final String? deadline, contentType, firstSeen, lastCrawl;
+  final String? publishDate, deadline, contentType, firstSeen, lastCrawl;
   final List<String> categories;
   final List<NoticeAttachment> attachments;
   factory Notice.fromJson(Object? json) {
@@ -279,14 +319,14 @@ class Notice {
       id: validatedNoticeId(r['id']),
       title: _text(r['title'], '标题', 500),
       source: normalizeSource(_text(r['source'], '来源', 200)),
-      publishDate: _date(r['publishDate']),
+      publishDate: _optionalDate(r['publishDate']),
       categories: rawCategories.cast<String>(),
       contentType: _contentType(r['contentType']),
       aiSummary: _optionalText(r['aiSummary'], 10000),
       deadline: r['deadline'] == null ? null : _date(r['deadline']),
       targetAudience: _optionalText(r['targetAudience'], 2000),
       coreAction: _optionalText(r['coreAction'], 2000),
-      originUrl: _url(r['originUrl'], trusted: true),
+      originUrl: _originUrl(r['originUrl']),
       cleanContent: _optionalText(r['cleanContent'], 500000),
       attachments: rawAttachments.map(NoticeAttachment.fromJson).toList(),
       firstSeen: validatedTimestamp(r['firstSeen']),
@@ -441,15 +481,15 @@ class CalendarEntry {
     this.deadline,
     this.contentType,
   });
-  final String id, title, source, publishDate;
-  final String? deadline, contentType;
+  final String id, title, source;
+  final String? publishDate, deadline, contentType;
   factory CalendarEntry.fromJson(Object? json) {
     final r = validatedRecord(json);
     return CalendarEntry(
       id: validatedNoticeId(r['id']),
       title: _text(r['title'], '标题', 500),
       source: normalizeSource(_text(r['source'], '来源', 200)),
-      publishDate: _date(r['publishDate']),
+      publishDate: _optionalDate(r['publishDate']),
       deadline: r['deadline'] == null ? null : _date(r['deadline']),
       contentType: _contentType(r['contentType']),
     );
@@ -500,6 +540,35 @@ class DeadlineEntry extends CalendarEntry {
   };
 }
 
+class CalendarResult {
+  const CalendarResult({
+    required this.entries,
+    required this.total,
+    required this.truncated,
+  });
+  final List<CalendarEntry> entries;
+  final int total;
+  final bool truncated;
+  factory CalendarResult.fromJson(Object? json) {
+    final r = validatedRecord(json);
+    final rows = validatedRows(r['items'], CalendarEntry.fromJson, (n) => n.id);
+    final total = r['total'] == null
+        ? rows.items.length
+        : validatedCount(r['total'], max: 10000000);
+    if (total < rows.items.length) {
+      throw const DataValidationException('日历总数小于实际通知数量');
+    }
+    if (r['truncated'] != null && r['truncated'] is! bool) {
+      throw const DataValidationException('日历截断标记必须是布尔值');
+    }
+    return CalendarResult(
+      entries: rows.items,
+      total: total,
+      truncated: r['truncated'] == true,
+    );
+  }
+}
+
 class Stats {
   const Stats({
     required this.total,
@@ -547,7 +616,7 @@ const _unchanged = Object();
 class NoticeQuery {
   NoticeQuery({
     this.keyword,
-    this.source,
+    String? source,
     this.contentType,
     this.dateFrom,
     this.dateTo,
@@ -559,7 +628,8 @@ class NoticeQuery {
     this.page = 1,
     this.pageSize = 15,
     this.light = true,
-  }) : sources = List.unmodifiable(sources),
+  }) : source = source == null ? null : normalizeSource(source),
+       sources = List.unmodifiable(sources.map(normalizeSource)),
        categories = List.unmodifiable(categories),
        excludeIds = List.unmodifiable(excludeIds);
   final String? keyword, source, contentType, dateFrom, dateTo, cursor;

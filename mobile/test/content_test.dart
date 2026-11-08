@@ -56,6 +56,10 @@ void main() {
     expect(document.querySelector('em')?.text, '原文');
     expect(result.images, ['https://ustc.edu.cn/a.png']);
     expect(
+      safeHttpUri('https://servers.ustclug.org/a.png', trusted: true)?.host,
+      'servers.ustclug.org',
+    );
+    expect(
       safeHttpUri('https://user@ustc.edu.cn/a.png', trusted: true),
       isNull,
     );

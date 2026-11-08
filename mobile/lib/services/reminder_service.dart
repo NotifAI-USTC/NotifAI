@@ -442,6 +442,7 @@ class ReminderService extends ChangeNotifier {
       try {
         latest = await _repository.batch(
           candidates.map((plan) => plan.id).toList(),
+          light: true,
         );
       } catch (failure) {
         failures.add('未能核对最新截止日期，保留已有有效提醒：$failure');

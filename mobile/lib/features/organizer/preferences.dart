@@ -436,7 +436,7 @@ class _PreferenceEditorState extends State<_PreferenceEditor> {
           if (collegeOnly || !widget.onboarding) _sourceChoices(group: '二级学院'),
           if (!_allSources && unknown.isNotEmpty) ...[
             const SizedBox(height: 12),
-            const Text('目录暂未包含的已选来源'),
+            const Text('目录暂未包含的已选来源（来源已合并或暂不可用，仍会保留）'),
             Wrap(
               spacing: 8,
               runSpacing: 4,

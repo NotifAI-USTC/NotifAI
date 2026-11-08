@@ -107,6 +107,24 @@ void main() {
     expect(settings.value.subscribedDepts, hasLength(100));
   });
 
+  test(
+    'legacy persisted source aliases normalize and deduplicate on load',
+    () async {
+      await store.write(settingsStorageKey, {
+        'schemaVersion': 2,
+        'subscriptionMode': 'custom',
+        'subscribedDepts': ['招生办公室', '本科招生网', '国际合作与交流部'],
+      });
+      final loaded = UserSettings(store);
+      try {
+        await loaded.initialize();
+        expect(loaded.value.subscribedDepts, ['本科招生网', '国际合作交流']);
+      } finally {
+        loaded.dispose();
+      }
+    },
+  );
+
   test('legacy local source lists remain intact until an explicit valid replacement', () async {
     final sources = List.generate(103, (index) => '旧来源-$index');
     await store.write(settingsStorageKey, {

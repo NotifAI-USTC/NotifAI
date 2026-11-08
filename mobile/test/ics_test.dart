@@ -54,6 +54,28 @@ void main() {
     },
   );
 
+  test('null publication date exports only the deadline event', () {
+    final result = unfold(
+      buildCalendarIcs(
+        const [
+          CalendarEntry(
+            id: 'unknown-publish',
+            title: '发布日期未知',
+            source: '学院',
+            publishDate: null,
+            deadline: '2026-10-30',
+          ),
+        ],
+        rangeStart: '2026-10-01',
+        rangeEnd: '2026-10-31',
+      ),
+    );
+    expect(RegExp('BEGIN:VEVENT').allMatches(result), hasLength(1));
+    expect(result, contains('SUMMARY:截止 · 发布日期未知'));
+    expect(result, contains('DTSTART;VALUE=DATE:20261030'));
+    expect(result, isNot(contains('SUMMARY:发布')));
+  });
+
   test('same-day publication and deadline export one all-day event', () {
     const entry = CalendarEntry(
       id: 'same',

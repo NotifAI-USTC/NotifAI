@@ -179,18 +179,18 @@ class NoticeRepository {
       if (notice.id != id) throw const DataValidationException('详情 ID 与请求不一致');
       return notice;
     });
-    await saveDetail(notice);
+    await _tryCache(() => saveDetail(notice));
     return notice;
   }
 
-  Future<List<Notice>> batch(List<String> ids) async {
+  Future<List<Notice>> batch(List<String> ids, {bool light = false}) async {
     if (ids.isEmpty || ids.length > 500) {
       throw const DataValidationException('批量通知 ID 必须是 1 到 500 项');
     }
     final requested = ids.map(validatedNoticeId).toSet();
     final json = await _request(
       'notices/batch',
-      body: {'ids': requested.toList()},
+      body: {'ids': requested.toList(), if (light) 'light': true},
     );
     final items = _parse(() {
       final r = validatedRecord(json);
@@ -212,15 +212,19 @@ class NoticeRepository {
       }
       return rows.items;
     });
-    await _serial(() => _saveDetails(items));
+    await _tryCache(
+      () => _serial(() => light ? _saveSummaries(items) : _saveDetails(items)),
+    );
     return items;
   }
 
   Future<List<SourceItem>> sources() async {
     final json = await _request('sources');
     final items = _parse(() => _sourceItems(json));
-    await _serial(
-      () => _saveCatalog('sources', items.map((s) => s.toJson()).toList()),
+    await _tryCache(
+      () => _serial(
+        () => _saveCatalog('sources', items.map((s) => s.toJson()).toList()),
+      ),
     );
     return items;
   }
@@ -228,8 +232,10 @@ class NoticeRepository {
   Future<List<CategoryItem>> categories() async {
     final json = await _request('categories');
     final items = _parse(() => _categoryItems(json));
-    await _serial(
-      () => _saveCatalog('categories', items.map((c) => c.toJson()).toList()),
+    await _tryCache(
+      () => _serial(
+        () => _saveCatalog('categories', items.map((c) => c.toJson()).toList()),
+      ),
     );
     return items;
   }
@@ -239,7 +245,7 @@ class NoticeRepository {
     return _parse(() => Stats.fromJson(json));
   }
 
-  Future<List<CalendarEntry>> calendar({String? month, String? week}) async {
+  Future<CalendarResult> calendar({String? month, String? week}) async {
     if ((month == null) == (week == null)) {
       throw const DataValidationException('month 与 week 必须二选一');
     }
@@ -270,13 +276,7 @@ class NoticeRepository {
       'notices/calendar',
       query: month != null ? {'month': month} : {'week': week},
     );
-    return _parse(
-      () => validatedRows(
-        validatedRecord(json)['items'],
-        CalendarEntry.fromJson,
-        (n) => n.id,
-      ).items,
-    );
+    return _parse(() => CalendarResult.fromJson(json));
   }
 
   Future<List<DeadlineEntry>> deadlines({
@@ -354,6 +354,14 @@ class NoticeRepository {
     return result;
   }
 
+  Future<void> _tryCache(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (error) {
+      _cacheWarning = '离线缓存写入失败，在线数据仍可用：$error';
+    }
+  }
+
   Future<List<String>> _index(String kind, int max) async {
     Object? raw;
     try {
@@ -380,7 +388,11 @@ class NoticeRepository {
     // The index is non-authoritative. Discard its entire cache class so orphan
     // entries cannot bypass the finite cache bounds after recovery.
     await store.removePrefix('$_prefix$kind.');
-    final label = kind == 'detail' ? '详情' : '列表';
+    final label = switch (kind) {
+      'detail' => '详情',
+      'summary' => '摘要',
+      _ => '列表',
+    };
     _cacheWarning = '离线$label缓存索引损坏，已清理并重置；旧离线内容需重新下载。';
     return [];
   }
@@ -416,18 +428,22 @@ class NoticeRepository {
         return _cached(r, _categoryItems(r['value']));
       });
 
-  Future<CachedValue<Notice>?> _readDetail(String id) async {
+  Future<CachedValue<Notice>?> _readNotice(String kind, String id) async {
     validatedNoticeId(id);
-    final raw = await store.read('${_prefix}detail.$id');
+    final raw = await store.read('$_prefix$kind.$id');
     if (raw == null) return null;
     final r = _envelope(raw);
     final notice = Notice.fromJson(r['value']);
-    if (notice.id != id) throw const DataValidationException('离线详情 ID 不一致');
+    if (notice.id != id) {
+      throw const DataValidationException('离线通知 ID 不一致');
+    }
     return _cached(r, notice);
   }
 
   Future<CachedValue<Notice>?> cachedDetail(String id) =>
-      _serial(() => _readDetail(id));
+      _serial(() => _readNotice('detail', id));
+  Future<CachedValue<Notice>?> cachedSummary(String id) =>
+      _serial(() => _readNotice('summary', id));
   Future<void> saveDetail(Notice notice) =>
       _serial(() => _saveDetails([notice]));
   Future<void> _saveDetails(List<Notice> notices) async {
@@ -448,6 +464,27 @@ class NoticeRepository {
       changes['${_prefix}detail.${index.removeAt(0)}'] = null;
     }
     changes['${_prefix}detail.index'] = index;
+    await store.writeAll(changes);
+  }
+
+  Future<void> _saveSummaries(List<Notice> notices) async {
+    if (notices.isEmpty) return;
+    final index = await _index('summary', 500);
+    final changes = <String, Object?>{};
+    for (final notice in notices) {
+      final value = Notice.fromJson(notice.toJson()).toJson();
+      final envelope = _wrap(value);
+      if (utf8.encode(jsonEncode(envelope)).length > 512 * 1024) {
+        throw const DataValidationException('单条通知摘要缓存超过 512 KiB');
+      }
+      index.remove(notice.id);
+      index.add(notice.id);
+      changes['${_prefix}summary.${notice.id}'] = envelope;
+    }
+    while (index.length > 500) {
+      changes['${_prefix}summary.${index.removeAt(0)}'] = null;
+    }
+    changes['${_prefix}summary.index'] = index;
     await store.writeAll(changes);
   }
 
@@ -514,8 +551,12 @@ class NoticeRepository {
         }
       }
     }
+    for (final id in await _index('summary', 500)) {
+      final cached = await _readNotice('summary', id);
+      if (cached != null) items.putIfAbsent(id, () => cached.value);
+    }
     for (final id in await _index('detail', 500)) {
-      final cached = await _readDetail(id);
+      final cached = await _readNotice('detail', id);
       if (cached != null) items[id] = cached.value;
     }
     return List.unmodifiable(items.values);

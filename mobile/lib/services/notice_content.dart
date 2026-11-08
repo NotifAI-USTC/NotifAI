@@ -2,6 +2,8 @@ import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html;
 import 'package:markdown/markdown.dart' as markdown;
 
+import '../data/models.dart';
+
 class NoticeContent {
   const NoticeContent(this.html, this.images, {this.limited = false});
   final String html;
@@ -29,9 +31,7 @@ Uri? safeHttpUri(String value, {Uri? base, bool trusted = false}) {
       uri.userInfo.isNotEmpty) {
     return null;
   }
-  if (trusted &&
-      (uri.scheme != 'https' ||
-          !(uri.host == 'ustc.edu.cn' || uri.host.endsWith('.ustc.edu.cn')))) {
+  if (trusted && (uri.scheme != 'https' || !isTrustedNoticeHost(uri.host))) {
     return null;
   }
   return uri;
@@ -39,7 +39,7 @@ Uri? safeHttpUri(String value, {Uri? base, bool trusted = false}) {
 
 NoticeContent sanitizeNoticeContent(String content, String originUrl) {
   if (content.length > 500000) throw const FormatException('通知正文超过安全大小限制');
-  final base = safeHttpUri(originUrl, trusted: true);
+  final base = originUrl.isEmpty ? null : safeHttpUri(originUrl, trusted: true);
   final looksHtml = RegExp(
     r'^\s*</?(?:h[1-6]|p|div|table|ul|ol|li|blockquote|section|article|pre|style|iframe|form|svg|a|img)\b',
     caseSensitive: false,

@@ -652,7 +652,10 @@ void main() {
         baseUrl: 'https://example.org',
         client: client,
       );
-      expect((await repository.calendar(month: '2026-10')).single.id, 'n1');
+      expect(
+        (await repository.calendar(month: '2026-10')).entries.single.id,
+        'n1',
+      );
       expect((await repository.deadlines()).single.deadline, '2026-11-02');
       response = pageJson([noticeJson(), noticeJson()]);
       await expectLater(
@@ -664,6 +667,36 @@ void main() {
         'total': 0,
       };
       await expectLater(repository.deadlines(), throwsA(isA<ApiException>()));
+      repository.dispose();
+      client.close();
+    });
+
+    test('截止接口转发多来源与页码，短页不触发客户端补扫', () async {
+      final requests = <Uri>[];
+      final client = StreamingClient((request) async {
+        requests.add(request.url);
+        return jsonResponse({
+          'items': [noticeJson('short-page')],
+          'total': 100,
+        });
+      });
+      final repository = NoticeRepository(
+        store: store,
+        baseUrl: 'https://example.org',
+        client: client,
+      );
+      final items = await repository.deadlines(
+        days: 7,
+        sources: const ['教务处', '本科招生网'],
+        page: 2,
+        pageSize: 1,
+      );
+      expect(items.single.id, 'short-page');
+      expect(requests, hasLength(1));
+      expect(requests.single.queryParameters['page'], '2');
+      expect(requests.single.queryParameters['pageSize'], '1');
+      expect(requests.single.queryParameters['days'], '7');
+      expect(requests.single.queryParametersAll['sources[]'], ['教务处', '本科招生网']);
       repository.dispose();
       client.close();
     });
@@ -716,6 +749,50 @@ void main() {
       repository.dispose();
       restarted.dispose();
       other.dispose();
+    });
+    test('light batch 只写摘要，不覆盖已有完整详情，缓存失败仍返回网络数据', () async {
+      final bodies = <Map<String, dynamic>>[];
+      final client = StreamingClient((request) async {
+        final body = jsonDecode((request as http.Request).body) as Map;
+        bodies.add(body.cast<String, dynamic>());
+        final ids = (body['ids'] as List).cast<String>();
+        return jsonResponse({
+          'items': [
+            for (final id in ids) {...noticeJson(id), 'cleanContent': ''},
+          ],
+          'missing': [],
+        });
+      });
+      final repository = NoticeRepository(
+        store: store,
+        baseUrl: 'https://example.org',
+        client: client,
+      );
+      await repository.saveDetail(Notice.fromJson(noticeJson('n1')));
+      final items = await repository.batch(['n1', 'n2'], light: true);
+      expect(items, hasLength(2));
+      expect(bodies.single['light'], isTrue);
+      expect(
+        (await repository.cachedDetail('n1'))!.value.cleanContent,
+        contains('完整正文'),
+      );
+      expect((await repository.cachedSummary('n1'))!.value.cleanContent, '');
+      final cached = await repository.cachedNotices();
+      expect(
+        cached.firstWhere((n) => n.id == 'n1').cleanContent,
+        contains('完整正文'),
+      );
+      expect(cached.firstWhere((n) => n.id == 'n2').cleanContent, '');
+
+      await store.database.execute(
+        "CREATE TRIGGER reject_summary BEFORE INSERT ON kv WHEN NEW.key LIKE '%summary.%' BEGIN SELECT RAISE(ABORT, 'summary blocked'); END",
+      );
+      final stillReturned = await repository.batch(['n3'], light: true);
+      expect(stillReturned.single.id, 'n3');
+      expect(repository.cacheWarning, contains('离线缓存写入失败'));
+      expect(await repository.cachedSummary('n3'), isNull);
+      repository.dispose();
+      client.close();
     });
     test('详情最多 500 条、列表最多 20 组，淘汰持久化且不相互覆盖', () async {
       final client = StreamingClient(
@@ -891,7 +968,7 @@ void main() {
         await subscription.cancel();
       }
     });
-    test('SQLite 索引恢复失败不能被伪装成成功或空 API 数据', () async {
+    test('SQLite 索引恢复失败只降级缓存，不把成功的网络响应变成异常', () async {
       final client = StreamingClient(
         (_) async => jsonResponse(noticeJson('n1')),
       );
@@ -914,11 +991,9 @@ void main() {
         await store.database.execute(
           "CREATE TRIGGER reject_recovery BEFORE DELETE ON kv WHEN OLD.key LIKE '%detail.%' BEGIN SELECT RAISE(ABORT, 'recovery blocked'); END",
         );
-        await expectLater(
-          repository.detail('n1'),
-          throwsA(isA<DatabaseException>()),
-        );
-        expect(repository.cacheWarning, isNull);
+        final detail = await repository.detail('n1');
+        expect(detail.id, 'n1');
+        expect(repository.cacheWarning, contains('离线缓存写入失败'));
         expect(await repository.cachedDetail('n1'), isNull);
         expect((await repository.cachedDetail('old'))!.value.id, 'old');
       } finally {

@@ -292,7 +292,7 @@ class _UserScreenState extends State<UserScreen> {
                       builder: (_) => Scaffold(
                         appBar: AppBar(title: const Text('已读通知')),
                         body: _PageBody(
-                          child: _SavedNotices(
+                          child: SavedNotices(
                             services: widget.services,
                             readHistory: true,
                           ),
@@ -513,7 +513,7 @@ class _UserScreenState extends State<UserScreen> {
                   ),
                 ),
                 if (_importantOpen)
-                  _SavedNotices(services: widget.services, important: true),
+                  SavedNotices(services: widget.services, important: true),
               ],
             ),
           ),

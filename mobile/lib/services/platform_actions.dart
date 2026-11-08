@@ -65,10 +65,11 @@ class PlatformActions {
     return Rect.fromLTWH(size.width / 2, size.height / 2, 1, 1);
   }
 
-  String _shareText(Notice notice) => [
+  String shareText(Notice notice) => [
     '【通知】${notice.title}',
     '【摘要】${notice.aiSummary}',
     '【来源】${notice.source}',
+    '【发布时间】${publishDateLabel(notice.publishDate)}',
     if (notice.deadline != null) '【截止】${notice.deadline}',
     '',
     '【链接】${_noticeUrl(notice)}',
@@ -80,7 +81,7 @@ class PlatformActions {
       // a destination was selected, not that the recipient received anything.
       await SharePlus.instance.share(
         ShareParams(
-          text: _shareText(notice),
+          text: shareText(notice),
           subject: notice.title,
           sharePositionOrigin: _shareOrigin(origin),
         ),
@@ -147,12 +148,12 @@ class PlatformActions {
             if (content.isNotEmpty) ...['', content],
             '',
             '来源: ${notice.source}',
-            '发布时间: ${notice.publishDate}',
+            '发布时间: ${publishDateLabel(notice.publishDate)}',
             if (notice.deadline != null) '截止日期: ${notice.deadline}',
           ].join('\n'),
         );
       case _ShareAction.text:
-        await copy(_shareText(notice));
+        await copy(shareText(notice));
       case _ShareAction.qr:
         final url = _noticeUrl(notice);
         await showDialog<void>(
@@ -207,11 +208,8 @@ class PlatformActions {
 
   Future<void> openUrl(String value, {bool trusted = false}) async {
     final uri = _httpUri(value);
-    final host = uri.host.toLowerCase();
-    if (trusted &&
-        (uri.scheme != 'https' ||
-            !(host == 'ustc.edu.cn' || host.endsWith('.ustc.edu.cn')))) {
-      throw const PlatformActionException('原文链接必须来自中国科学技术大学 HTTPS 网站');
+    if (trusted && (uri.scheme != 'https' || !isTrustedNoticeHost(uri.host))) {
+      throw const PlatformActionException('原文链接必须来自中国科学技术大学或 LUG 的 HTTPS 网站');
     }
     // External applications only: attachments never execute inside our app,
     // and arbitrary custom schemes / credentials are never forwarded.

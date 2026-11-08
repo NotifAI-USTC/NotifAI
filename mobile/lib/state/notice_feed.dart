@@ -99,8 +99,12 @@ class NoticeFeed extends ChangeNotifier {
         (q.sources.isEmpty || q.sources.contains(normalizeSource(n.source))) &&
         (q.categories.isEmpty || n.categories.any(q.categories.contains)) &&
         (q.contentType == null || n.contentType == q.contentType) &&
-        (q.dateFrom == null || n.publishDate.compareTo(q.dateFrom!) >= 0) &&
-        (q.dateTo == null || n.publishDate.compareTo(q.dateTo!) <= 0) &&
+        (q.dateFrom == null ||
+            (n.publishDate != null &&
+                n.publishDate!.compareTo(q.dateFrom!) >= 0)) &&
+        (q.dateTo == null ||
+            (n.publishDate != null &&
+                n.publishDate!.compareTo(q.dateTo!) <= 0)) &&
         (q.hasDeadline == null || (n.deadline != null) == q.hasDeadline) &&
         (filters?.isRead == null ||
             p.readIds.contains(n.id) == filters!.isRead) &&
@@ -183,6 +187,20 @@ class NoticeFeed extends ChangeNotifier {
     await _fetch(query, _generation, replacing: false);
   }
 
+  bool _mayFilterLocally(NoticeQuery q) {
+    final f = filters;
+    final preferences = settings.value;
+    if (preferences.blacklistKeywords.isNotEmpty) return true;
+    if (f == null) return false;
+    if (f.isRead == true || f.isStarred == true || f.tags.isNotEmpty) {
+      return true;
+    }
+    // excludeIds is capped at 500 server-side; larger stores can still need
+    // local filtering for read/starred "not" queries.
+    return q.excludeIds.length >= 500 &&
+        (f.isRead == false || f.isStarred == false);
+  }
+
   Future<void> _fetch(
     NoticeQuery q,
     int generation, {
@@ -195,6 +213,7 @@ class NoticeFeed extends ChangeNotifier {
     var invalid = replacing ? 0 : invalidItemCount;
     var done = false;
     var count = total;
+    final needsScan = _mayFilterLocally(q);
     final cursors = <String>{?cursor};
     try {
       for (var attempt = 0; attempt < 5; attempt++) {
@@ -214,7 +233,7 @@ class NoticeFeed extends ChangeNotifier {
             response.rawItemCount == 0 ||
             (cursorMode ? cursor == null : page * q.pageSize >= count);
         page++;
-        if (done || batch.any((n) => _matches(n, q))) break;
+        if (done || batch.any((n) => _matches(n, q)) || !needsScan) break;
       }
       if (!_current(generation)) return;
       final merged = <String, Notice>{
@@ -231,7 +250,7 @@ class NoticeFeed extends ChangeNotifier {
       total = count;
       invalidItemCount = invalid;
       finished = done;
-      scanPaused = !done && !batch.any((n) => _matches(n, q));
+      scanPaused = needsScan && !done && !batch.any((n) => _matches(n, q));
       cacheMessage = null;
       error = null;
       // Persist a safe first-page snapshot. Pagination resumes from the server on

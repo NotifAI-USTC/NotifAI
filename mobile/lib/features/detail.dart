@@ -293,7 +293,7 @@ class _DetailScreenState extends State<DetailScreen> {
       ),
       const SizedBox(height: 12),
       Text(
-        '${normalizeSource(notice.source)} · ${notice.publishDate}',
+        '${normalizeSource(notice.source)} · ${publishDateLabel(notice.publishDate)}',
         style: theme.textTheme.bodyMedium?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
         ),
@@ -429,16 +429,17 @@ class _DetailScreenState extends State<DetailScreen> {
       Row(
         children: [
           Expanded(child: Text('通知原文', style: theme.textTheme.titleLarge)),
-          TextButton(
-            onPressed: () => perform(
-              context,
-              () => widget.services.actions.openUrl(
-                notice.originUrl,
-                trusted: true,
+          if (notice.originUrl.isNotEmpty)
+            TextButton(
+              onPressed: () => perform(
+                context,
+                () => widget.services.actions.openUrl(
+                  notice.originUrl,
+                  trusted: true,
+                ),
               ),
+              child: const Text('查看官网'),
             ),
-            child: const Text('查看官网'),
-          ),
         ],
       ),
       const SizedBox(height: 12),

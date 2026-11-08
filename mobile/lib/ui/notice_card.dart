@@ -67,7 +67,7 @@ class NoticeCard extends StatelessWidget {
                           ),
                         Expanded(
                           child: Text(
-                            '${normalizeSource(notice.source)} · ${notice.publishDate}',
+                            '${normalizeSource(notice.source)} · ${publishDateLabel(notice.publishDate)}',
                             style: Theme.of(context).textTheme.labelMedium,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,

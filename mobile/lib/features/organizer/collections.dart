@@ -6,12 +6,13 @@ class FavoritesScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    body: _PageBody(child: _SavedNotices(services: services)),
+    body: _PageBody(child: SavedNotices(services: services)),
   );
 }
 
-class _SavedNotices extends StatefulWidget {
-  const _SavedNotices({
+class SavedNotices extends StatefulWidget {
+  const SavedNotices({
+    super.key,
     required this.services,
     this.important = false,
     this.readHistory = false,
@@ -21,100 +22,199 @@ class _SavedNotices extends StatefulWidget {
   final bool readHistory;
 
   @override
-  State<_SavedNotices> createState() => _SavedNoticesState();
+  State<SavedNotices> createState() => _SavedNoticesState();
 }
 
-class _SavedNoticesState extends State<_SavedNotices> {
+class _SavedNoticesState extends State<SavedNotices> {
+  static const int _pageSize = 50;
   final Map<String, Notice> _notices = {};
-  List<String> _ids = [];
+  final Set<String> _loadedIds = {};
+  final ScrollController _scroll = ScrollController();
+  List<String> _allIds = [];
+  List<String> _visibleIds = [];
   String? _folder;
   String? _error;
   String? _cacheMessage;
   List<String> _unavailable = [];
   bool _loading = false;
   int _sequence = 0;
-  int _displayLimit = 10;
+  Timer? _loadTimer;
 
   UserSettings get _settings => widget.services.settings;
+
+  List<String> get _sourceIds => widget.important
+      ? _settings.value.importantIds
+      : widget.readHistory
+      ? _settings.value.readIds.reversed.toList()
+      : _settings.value.starredIds;
+
+  List<String> _computeVisible() {
+    final preferences = _settings.value;
+    return _sourceIds
+        .where(
+          (id) =>
+              widget.important ||
+              widget.readHistory ||
+              _folder == null ||
+              (preferences.starredFolderMap[id] ?? 'default') == _folder,
+        )
+        .toList();
+  }
 
   @override
   void initState() {
     super.initState();
     _settings.addListener(_settingsChanged);
-    _settingsChanged();
+    _scroll.addListener(_scrollChanged);
+    _settingsChanged(debounce: false);
   }
 
   @override
   void dispose() {
     _sequence++;
+    _loadTimer?.cancel();
+    _scroll.dispose();
     _settings.removeListener(_settingsChanged);
     super.dispose();
   }
 
-  void _settingsChanged() {
-    final ids = widget.important
-        ? _settings.value.importantIds
-        : widget.readHistory
-        ? _settings.value.readIds
-        : _settings.value.starredIds;
-    final changed =
-        ids.length != _ids.length ||
-        Iterable<int>.generate(ids.length)
-            .any((index) => ids[index] != _ids[index]);
-    if (_folder != null &&
-        !_settings.value.folders.any((folder) => folder.id == _folder)) {
-      _folder = null;
-    }
-    if (changed) {
-      _ids = [...ids];
-      _load();
+  void _settingsChanged({bool debounce = true}) {
+    final folderMissing =
+        _folder != null &&
+        !_settings.value.folders.any((folder) => folder.id == _folder);
+    if (folderMissing) _folder = null;
+    final ids = _sourceIds;
+    final visible = _computeVisible();
+    if (folderMissing ||
+        _visibleIds.isEmpty && visible.isNotEmpty ||
+        !listEquals(ids, _allIds)) {
+      _allIds = [...ids];
+      _updateWindow(visible, debounce: debounce);
+    } else if (!listEquals(visible, _visibleIds)) {
+      _updateWindow(visible, debounce: debounce);
     } else if (mounted) {
       setState(() {});
     }
   }
 
-  Future<void> _load() async {
-    final request = ++_sequence;
-    final ids = [..._ids];
+  void _updateWindow(List<String> next, {bool debounce = false}) {
+    final previous = _visibleIds.toSet();
+    final current = next.toSet();
+    for (final id in previous.difference(current)) {
+      _notices.remove(id);
+      _loadedIds.remove(id);
+    }
+    _visibleIds = next;
+    if (_loadedIds.isEmpty && next.isNotEmpty) {
+      _loadedIds.addAll(next.take(_pageSize));
+    } else {
+      _loadedIds.addAll(current.difference(previous));
+    }
+    _notices.removeWhere((id, _) => !_loadedIds.contains(id));
+    _unavailable = _unavailable.where(_loadedIds.contains).toList();
+    if (mounted) setState(() {});
+    if (debounce) {
+      _loadTimer?.cancel();
+      _loadTimer = Timer(const Duration(milliseconds: 250), () {
+        if (mounted) _loadWindow();
+      });
+    } else {
+      _loadWindow();
+    }
+  }
+
+  void _selectFolder(String? folder) {
     setState(() {
-      _loading = ids.isNotEmpty;
-      _error = null;
+      _folder = folder;
+      _loadedIds.clear();
+      _notices.clear();
       _unavailable = [];
-      if (ids.isEmpty) _cacheMessage = null;
     });
-    if (ids.isEmpty) return;
+    _updateWindow(_computeVisible());
+  }
+
+  void _scrollChanged() {
+    if (_scroll.hasClients && _scroll.position.extentAfter < 300) {
+      _loadNextPage();
+    }
+  }
+
+  Future<void> _loadNextPage() async {
+    if (_loading) return;
+    final next = _visibleIds
+        .where((id) => !_loadedIds.contains(id))
+        .take(_pageSize)
+        .toList();
+    if (next.isEmpty) return;
+    _loadedIds.addAll(next);
+    setState(() {});
+    await _loadWindow();
+  }
+
+  int get _unloadedCount =>
+      _visibleIds.where((id) => !_loadedIds.contains(id)).length;
+
+  Future<void> _loadWindow() async {
+    _loadTimer?.cancel();
+    if (_loadedIds.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = null;
+          _unavailable = [];
+          _cacheMessage = null;
+        });
+      }
+      return;
+    }
+    final request = ++_sequence;
+    final ids = _visibleIds.where(_loadedIds.contains).toList();
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     final errors = <String>[];
     var cachedCount = 0;
     var staleCount = 0;
-    // Read local snapshots first so a cold offline launch still shows saved details.
+    final missing = <String>[];
+    // Only the current window is read; a cold offline launch still shows
+    // whatever detail or summary data is already on disk.
     for (final id in ids) {
       if (!mounted || request != _sequence) return;
       if (_notices.containsKey(id)) continue;
       try {
-        final cached = await widget.services.repository.cachedDetail(id);
+        var cached = await widget.services.repository.cachedDetail(id);
         if (!mounted || request != _sequence) return;
+        if (cached == null) {
+          cached = await widget.services.repository.cachedSummary(id);
+          if (!mounted || request != _sequence) return;
+        }
         if (cached != null) {
           _notices[id] = cached.value;
           cachedCount++;
           if (cached.stale) staleCount++;
+        } else {
+          missing.add(id);
         }
       } catch (error) {
+        missing.add(id);
         if (errors.isEmpty) errors.add('读取离线缓存失败：$error');
       }
     }
     if (!mounted || request != _sequence) return;
-    setState(() {
-      _cacheMessage = cachedCount > 0
-          ? '已读取 $cachedCount 条离线缓存${staleCount > 0 ? '，其中 $staleCount 条超过30天' : ''}，正在更新…'
-          : null;
-    });
+    if (cachedCount > 0) {
+      setState(() {
+        _cacheMessage =
+            '已读取 $cachedCount 条离线缓存${staleCount > 0 ? '，其中 $staleCount 条超过30天' : ''}，正在更新…';
+      });
+    }
     var failed = false;
     final returned = <String>{};
-    for (var start = 0; start < ids.length; start += 500) {
-      final end = start + 500 < ids.length ? start + 500 : ids.length;
+    if (missing.isNotEmpty) {
       try {
         final notices = await widget.services.repository.batch(
-          ids.sublist(start, end),
+          missing,
+          light: true,
         );
         if (!mounted || request != _sequence) return;
         for (final notice in notices) {
@@ -124,8 +224,7 @@ class _SavedNoticesState extends State<_SavedNotices> {
         setState(() {});
       } catch (error) {
         failed = true;
-        errors.add('加载第 ${start + 1}–$end 条通知失败：$error');
-        if (!mounted || request != _sequence) return;
+        errors.add('加载前 ${ids.length} 条通知失败：$error');
       }
     }
     if (!mounted || request != _sequence) return;
@@ -142,20 +241,11 @@ class _SavedNoticesState extends State<_SavedNotices> {
     });
   }
 
-  List<Notice> get _visible {
-    final preferences = _settings.value;
-    return _ids
-        .where(
-          (id) =>
-              widget.important ||
-              widget.readHistory ||
-              _folder == null ||
-              (preferences.starredFolderMap[id] ?? 'default') == _folder,
-        )
-        .map((id) => _notices[id])
-        .whereType<Notice>()
-        .toList();
-  }
+  List<Notice> get _visible => _visibleIds
+      .where(_loadedIds.contains)
+      .map((id) => _notices[id])
+      .whereType<Notice>()
+      .toList();
 
   Widget _header() {
     final preferences = _settings.value;
@@ -165,7 +255,7 @@ class _SavedNoticesState extends State<_SavedNotices> {
         if (widget.readHistory)
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
-            child: Text('${_ids.length} 条已读记录 · 本机缓存可离线查看'),
+            child: Text('${_allIds.length} 条已读记录 · 本机缓存可离线查看'),
           ),
         if (!widget.important && !widget.readHistory) ...[
           Wrap(
@@ -175,7 +265,7 @@ class _SavedNoticesState extends State<_SavedNotices> {
               ChoiceChip(
                 label: const Text('全部目录'),
                 selected: _folder == null,
-                onSelected: (_) => setState(() => _folder = null),
+                onSelected: (_) => _selectFolder(null),
               ),
               for (final folder in preferences.folders)
                 ChoiceChip(
@@ -184,7 +274,7 @@ class _SavedNoticesState extends State<_SavedNotices> {
                     child: Text(folder.name),
                   ),
                   selected: _folder == folder.id,
-                  onSelected: (_) => setState(() => _folder = folder.id),
+                  onSelected: (_) => _selectFolder(folder.id),
                 ),
             ],
           ),
@@ -193,7 +283,7 @@ class _SavedNoticesState extends State<_SavedNotices> {
         if (_loading)
           const LinearProgressIndicator(semanticsLabel: '正在更新已保存通知'),
         if (_error != null)
-          ErrorNotice(message: _error!, onRetry: _loading ? null : _load),
+          ErrorNotice(message: _error!, onRetry: _loading ? null : _loadWindow),
         if (_cacheMessage != null)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -207,14 +297,14 @@ class _SavedNoticesState extends State<_SavedNotices> {
               children: [
                 Text('${_unavailable.length} 条通知暂不可用且没有离线详情，原有记录仍保留。'),
                 TextButton.icon(
-                  onPressed: _loading ? null : _load,
+                  onPressed: _loading ? null : _loadWindow,
                   icon: const Icon(Icons.refresh),
                   label: const Text('重试加载通知'),
                 ),
               ],
             ),
           ),
-        if (_ids.isEmpty)
+        if (_allIds.isEmpty)
           EmptyNotice(
             icon: widget.important
                 ? Icons.flag_outlined
@@ -247,30 +337,31 @@ class _SavedNoticesState extends State<_SavedNotices> {
   @override
   Widget build(BuildContext context) {
     final visible = _visible;
+    final hasMore = _unloadedCount > 0;
     if (widget.important) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _header(),
-          for (final notice in visible.take(_displayLimit))
+          for (final notice in visible)
             NoticeCard(
               notice: notice,
               services: widget.services,
               onOpen: () => _openNotice(context, widget.services, notice.id),
             ),
-          if (visible.length > _displayLimit)
+          if (hasMore)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: OutlinedButton(
-                onPressed: () => setState(() => _displayLimit += 10),
-                child: Text('继续显示重要事项（还有 ${visible.length - _displayLimit} 条）'),
+                onPressed: _loading ? null : _loadNextPage,
+                child: Text('继续加载重要事项（还有 $_unloadedCount 条）'),
               ),
             ),
-          if (_ids.isNotEmpty)
+          if (_allIds.isNotEmpty)
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
-                onPressed: _loading ? null : _load,
+                onPressed: _loading ? null : _loadWindow,
                 icon: const Icon(Icons.refresh),
                 label: const Text('刷新重要事项'),
               ),
@@ -279,22 +370,30 @@ class _SavedNoticesState extends State<_SavedNotices> {
       );
     }
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: _loadWindow,
       child: ListView.builder(
+        controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-        itemCount: visible.length + 1,
-        itemBuilder: (context, index) => index == 0
-            ? _header()
-            : NoticeCard(
-                notice: visible[index - 1],
-                services: widget.services,
-                onOpen: () => _openNotice(
-                  context,
-                  widget.services,
-                  visible[index - 1].id,
-                ),
+        itemCount: visible.length + 1 + (hasMore ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (index == 0) return _header();
+          if (index > visible.length) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: OutlinedButton(
+                onPressed: _loading ? null : _loadNextPage,
+                child: Text('继续加载（还有 $_unloadedCount 条）'),
               ),
+            );
+          }
+          final notice = visible[index - 1];
+          return NoticeCard(
+            notice: notice,
+            services: widget.services,
+            onOpen: () => _openNotice(context, widget.services, notice.id),
+          );
+        },
       ),
     );
   }
@@ -322,10 +421,18 @@ class _AgendaEvent {
 }
 
 class _CalendarSnapshot {
-  const _CalendarSnapshot(this.entries, this.start, this.end);
+  const _CalendarSnapshot(
+    this.entries,
+    this.start,
+    this.end, {
+    this.total = 0,
+    this.truncated = false,
+  });
   final List<CalendarEntry> entries;
   final DateTime start;
   final DateTime end;
+  final int total;
+  final bool truncated;
 }
 
 class _CalendarScreenState extends State<CalendarScreen> {
@@ -380,14 +487,20 @@ class _CalendarScreenState extends State<CalendarScreen> {
       if (_memory.containsKey(key)) _snapshot = _memory[key];
     });
     try {
-      final entries = await widget.services.repository.calendar(
+      final result = await widget.services.repository.calendar(
         month: week
             ? null
             : '${start.year}-${start.month.toString().padLeft(2, '0')}',
         week: week ? _isoWeek(start) : null,
       );
       if (!mounted || request != _sequence) return;
-      final snapshot = _CalendarSnapshot(entries, start, end);
+      final snapshot = _CalendarSnapshot(
+        result.entries,
+        start,
+        end,
+        total: result.total,
+        truncated: result.truncated,
+      );
       setState(() {
         _snapshot = snapshot;
         _memory.remove(key);
@@ -417,20 +530,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
         date.compareTo(start) >= 0 && date.compareTo(end) <= 0;
     final events = <_AgendaEvent>[];
     for (final entry in snapshot.entries) {
+      final publishDate = entry.publishDate;
       final deadline = entry.deadline;
-      if (visible(entry.publishDate)) {
+      if (publishDate != null && visible(publishDate)) {
         events.add(
           _AgendaEvent(
             entry,
-            entry.publishDate,
-            deadline: deadline == entry.publishDate,
+            publishDate,
+            deadline: deadline == publishDate,
             published: true,
           ),
         );
       }
-      if (deadline != null &&
-          deadline != entry.publishDate &&
-          visible(deadline)) {
+      if (deadline != null && deadline != publishDate && visible(deadline)) {
         events.add(
           _AgendaEvent(entry, deadline, deadline: true, published: false),
         );
@@ -632,6 +744,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Text(
                     '以下仍显示上次成功内容：${_rangeText(snapshot.start, snapshot.end)}。导出仅包含下方实际显示的日期范围。',
+                  ),
+                ),
+              if (_error != null && snapshot != null && !oldRange)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text('以下仍显示上次成功加载的内容，当前为缓存范围。'),
+                ),
+              if (snapshot != null && snapshot.truncated)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    '${_week ? '本周' : '本月'}通知超过 500 条，仅显示前 500 条（共 ${snapshot.total} 条）。',
                   ),
                 ),
               if (snapshot != null) ...[
