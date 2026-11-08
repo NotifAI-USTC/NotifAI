@@ -55,9 +55,9 @@ describe('noticeFeedCache', () => {
     })
   })
 
-  it('rejects malformed cached notices instead of returning them', async () => {
+  it('clears unsafe cached origin URLs instead of dropping the entry', async () => {
     await writeNoticeFeedCache({
-      key: 'invalid',
+      key: 'unsafe-origin',
       items: [makeNotice({ originUrl: 'javascript:alert(1)' })],
       total: 1,
       nextPage: 2,
@@ -66,7 +66,8 @@ describe('noticeFeedCache', () => {
       fetchedAt: new Date().toISOString(),
     })
 
-    await expect(readNoticeFeedCache('invalid')).resolves.toBeNull()
+    const entry = await readNoticeFeedCache('unsafe-origin')
+    expect(entry?.items[0]?.originUrl).toBe('')
   })
 
   it('marks old entries as stale while keeping them available for offline fallback', async () => {
@@ -96,9 +97,10 @@ describe('noticeFeedCache', () => {
     })
   })
 
-  it('rejects an invalid detail cache write', async () => {
+  it('clears an unsafe origin URL in detail cache writes', async () => {
     await writeNoticeDetailCache(makeNotice({ originUrl: 'javascript:alert(1)' }))
 
-    await expect(readNoticeDetailCache('notice-1')).resolves.toBeNull()
+    const entry = await readNoticeDetailCache('notice-1')
+    expect(entry?.notice.originUrl).toBe('')
   })
 })

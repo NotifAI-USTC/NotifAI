@@ -31,7 +31,7 @@ export default defineConfig({
       ],
   webServer: {
     command: preview
-      ? 'pnpm run preview --host 127.0.0.1 --port 4173'
+      ? 'pnpm run preview --host 127.0.0.1 --port 4173 --outDir dist-e2e'
       : 'pnpm run dev --host 127.0.0.1 --port 4173 --force',
     env: {
       VITE_USE_MOCK: migration ? 'false' : 'true',

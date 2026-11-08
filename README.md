@@ -7,6 +7,7 @@
 ## 已实现能力
 
 - 通知流、分页、刷新、服务端关键词、来源、AI 分类与日期筛选
+- 首页长列表按行虚拟滚动，只渲染视口附近的通知卡片；可用 `VITE_VIRTUAL_FEED=false` 关闭
 - 通知卡片和详情页展示 AI 主题分类及已分析的内容类型；高级搜索支持临时单选内容类型，默认显示全部（含未分析的通知）
 - 高级搜索主题分类选项由 `GET /categories` 动态提供；内容类型与主题分类独立，不作为持久化偏好
 - 四步入门引导会根据身份预设自动配置来源与关注分类，分类无需单独选择
@@ -113,7 +114,7 @@ pnpm run check
 
 - API 响应在 `src/utils/validation.ts` 做运行时校验，TypeScript 类型不被当作外部数据验证。
 - 浏览器在解析前限制 API 响应体：列表 16 MiB、详情 8 MiB；服务端和网关仍应设置更严格的业务上限。
-- 通知原文（`cleanContent`）统一先按 Markdown 渲染（`html:true` 保留已存在的 HTML，自动识别链接与换行），再经 DOMPurify 和 DOM 二次过滤；事件属性、表单、iframe、内联样式、非可信图片来源和 `javascript:` 链接会被移除。
+- 通知原文（`cleanContent`）统一先按 Markdown 渲染（`html:true` 保留已存在的 HTML，自动识别链接与换行），再经 DOMPurify 和 DOM 二次过滤；事件属性、表单、iframe、内联样式、机构域名（`ustc.edu.cn` / `ustclug.org` 及其子域）之外的图片来源和 `javascript:` 链接会被移除。
 - LocalStorage 数据带版本与迁移逻辑；损坏数据会回退到安全默认值。
 - 生产部署仍应在服务器设置 CSP、HSTS、CORS 和缓存策略。
 
@@ -128,12 +129,12 @@ interface NoticeItem {
   source: string // 发布来源，如 "教务处"、"计算机学院"
   contentType: 'news' | 'notice' | 'public_notice' | 'other' | null // 内容文体；null 表示尚无有效分析
   categories: string[] // 0~3 个 AI 分类英文 key
-  publishDate: string // 发布日期 YYYY-MM-DD
+  publishDate: string | null // 发布日期 YYYY-MM-DD；未知时为 null（页面显示“未知”）
   aiSummary: string // AI 提炼的一句话摘要，可为空字符串
   deadline: string | null // 截止日期 YYYY-MM-DD，无则为 null
   targetAudience: string // 面向对象，如 "全体本科生"，可为空字符串
   coreAction: string // 核心行动/地点，可为空字符串
-  originUrl: string // 官网原始链接（仅 ustc.edu.cn 或其子域的无凭据 HTTPS）
+  originUrl: string // 可为空；仅接受 ustc.edu.cn / ustclug.org 及其子域的无凭据 HTTPS
   cleanContent: string // 通知原文：Markdown / 轻量 HTML / 纯文本，可为空字符串（前端按 Markdown 渲染）
   attachments: Array<{ name: string; url: string }> // 附件列表，可为空数组
   firstSeen: string | null // 首次抓取时间 ISO8601
@@ -151,14 +152,14 @@ interface NoticeItem {
 | `contentType`           | 单个内容类型精确筛选，仅 `GET /notices` 支持；省略时包含未知类型            |
 | `dateFrom` / `dateTo`   | 发布日期范围，格式为 `YYYY-MM-DD`                                           |
 | `rangeFrom` / `rangeTo` | 日历范围；发布日或截止日任一命中即返回                                      |
-| `hasDeadline`           | 是否具有截止日期                                                            |
+| `hasDeadline`           | `true` 仅有截止日期，`false` 仅无截止日期                                   |
 | `since`                 | ISO8601 增量查询：仅返回 `first_seen >= since` 的通知，用于「有新通知」轮询 |
 | `light`                 | 轻量列表模式；为 `true` 时 `cleanContent` 保留字段但为空字符串              |
 | `excludeIds[]`          | 服务端排除通知 ID，最多 500 项，并参与 `total` 统计                         |
 | `cursor`                | 不透明游标；传入后忽略 `page`                                               |
 | `page` / `pageSize`     | 偏移分页；`page` 从 1 开始，`pageSize` 最大 1000                            |
 
-`GET /notices/:id` 返回完整 `NoticeItem`。`contentType` 缺失或为 `null` 时按未知类型处理，不等同于 `other`；非法非空值会被拒绝。类型分别显示为新闻、通知/公告、公示和其他，与多值主题分类独立，组合筛选时为 AND。`aiSummary`、`targetAudience`、`coreAction`、`cleanContent` 和 `attachments` 为可选字段，缺失时前端按空值处理；日期使用本地日历日字符串；`originUrl` 只接受 `ustc.edu.cn` 或其子域的无凭据 HTTPS 地址，附件 URL 接受无凭据的 HTTP(S) 地址。详细边界见 `src/utils/validation.ts`。
+`GET /notices/:id` 返回完整 `NoticeItem`。`contentType` 缺失或为 `null` 时按未知类型处理，不等同于 `other`；非法非空值会被拒绝。类型分别显示为新闻、通知/公告、公示和其他，与多值主题分类独立，组合筛选时为 AND。`aiSummary`、`targetAudience`、`coreAction`、`cleanContent` 和 `attachments` 为可选字段，缺失时前端按空值处理；`publishDate` 可为 `null` 或空字符串，前端归一化为 `null` 并显示“未知”；`firstSeen` / `lastCrawl` / `lastCrawlAt` 是 UTC ISO8601，展示时转为浏览器本地时间，而 `publishDate` / `deadline` 始终按本地日历日解析；`originUrl` 可为空，只接受 `ustc.edu.cn` / `ustclug.org` 及其子域的无凭据 HTTPS 地址，附件 URL 接受无凭据的 HTTP(S) 地址。来源旧名在 API 边界统一迁移为当前名称。详细边界见 `src/utils/validation.ts`。
 
 偏移分页的响应 `nextCursor` 固定为 `null`。游标分页在页面满 `pageSize` 时返回下一枚不透明游标，末页返回 `null`；数据量恰好为整页时，最后一个游标请求可以返回空数组后结束。首页使用 `light=true`、游标分页和 `excludeIds[]`，详情页再请求完整正文。
 
@@ -175,8 +176,8 @@ interface NoticeItem {
 | `GET /categories`        | 17 个 AI 分类及通知数：高级搜索分类多选和分类名称展示                        |
 | `GET /stats`             | 聚合统计：首页统计条与数据新鲜度提示                                         |
 
-- 批量详情请求体为 `{ "ids": string[] }`，响应 `{ "items": NoticeItem[], "missing": string[] }`，`items` 按发布日期倒序，重复 ID 自动去重。
-- 日历轻量条目含 `id` / `title` / `source` / `contentType` / `publishDate` / `deadline`，发布日或截止日命中即返回，上限 500 条。
+- 批量详情请求体为 `{ "ids": string[], "light"?: boolean }`，响应 `{ "items": NoticeItem[], "missing": string[] }`，`items` 按发布日期倒序，重复 ID 自动去重。收藏页和重要 DDL 使用 `light: true`，只取列表字段并合并已有正文缓存，避免用空正文覆盖详情。
+- 日历响应为 `{ "items": CalendarItem[], "total": number, "truncated": boolean }`。轻量条目含 `id` / `title` / `source` / `contentType` / `publishDate` / `deadline`，发布日或截止日命中即返回，上限 500 条；`truncated` 为真时页面提示服务端截断。
 - 截止日期端点支持 `days=1..365`、`sources[]` 和分页，按截止日升序返回 `{ items, total }`；轻量条目含 `id` / `title` / `source` / `contentType` / `publishDate` / `deadline` / `aiSummary` / `targetAudience`。日历和截止日期端点不使用首页临时内容类型筛选。
 - 来源条目为 `{ name, group, noticeCount }`，`group` 如「校级部门」「二级学院」「其他」。
 - 分类条目为 `{ key, name, description, noticeCount }`；通知中的 `categories` 只保存英文 key，前端映射为中文名称。

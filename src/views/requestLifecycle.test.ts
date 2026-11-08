@@ -1,10 +1,14 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
+import { nextTick } from 'vue'
+import { getLocalToday, shiftLocalMonth } from '../utils/date'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CalendarItem, DeadlineItem, NoticeItem } from '../types/notice'
 
 interface MockSettingsStore {
   subscriptionMode: string
   subscribedDepts: string[]
+  effectiveSubscribedDepts: string[]
+  unavailableSubscriptions: string[]
   categoryMode: string
   subscribedCategories: string[]
   blacklistKeywords: string[]
@@ -71,6 +75,8 @@ vi.mock('../stores/userSettings', async () => {
   const storeState = reactive({
     subscriptionMode: 'all',
     subscribedDepts: [] as string[],
+    effectiveSubscribedDepts: [] as string[],
+    unavailableSubscriptions: [] as string[],
     categoryMode: 'all',
     subscribedCategories: [] as string[],
     blacklistKeywords: [] as string[],
@@ -93,6 +99,10 @@ vi.mock('../stores/userSettings', async () => {
     setDarkMode: vi.fn(),
     markCachedNoticesRead: vi.fn(),
   })
+  Object.defineProperty(storeState, 'effectiveSubscribedDepts', {
+    get: () => storeState.subscribedDepts,
+  })
+  Object.defineProperty(storeState, 'unavailableSubscriptions', { get: () => [] })
   mocks.storeState = storeState
   return { useUserSettingsStore: () => storeState }
 })
@@ -402,6 +412,78 @@ describe('view request lifecycle', () => {
     storeState.subscribedCategories = []
   })
 
+  it('sends hasDeadline=false for the no-deadline advanced filter', async () => {
+    mocks.fetchNotices.mockResolvedValue({
+      items: [makeNotice({ id: 'no-deadline', title: '无截止日期通知', deadline: null })],
+      total: 1,
+      invalidItemCount: 0,
+      nextCursor: null,
+    })
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    await wrapper.find('[title="高级搜索"]').trigger('click')
+    wrapper.findComponent({ name: 'AdvancedSearch' }).vm.$emit('search', {
+      keyword: '',
+      source: '',
+      categories: [],
+      contentType: null,
+      dateFrom: '',
+      dateTo: '',
+      hasDeadline: 'no',
+      isRead: 'any',
+      isStarred: 'any',
+      tags: [],
+    })
+    await flushPromises()
+
+    expect(mocks.fetchNotices).toHaveBeenLastCalledWith(
+      expect.objectContaining({ hasDeadline: false }),
+      expect.any(AbortSignal),
+    )
+    expect(wrapper.text()).toContain('无截止日期通知')
+  })
+
+  it('excludes unknown publish dates when a date range filter is applied', async () => {
+    mocks.fetchNotices.mockResolvedValue({
+      items: [
+        makeNotice({ id: 'unknown-date', title: '未知日期通知', publishDate: null }),
+        makeNotice({ id: 'in-range', title: '范围内通知', publishDate: '2026-09-15' }),
+        makeNotice({ id: 'out-of-range', title: '范围外通知', publishDate: '2026-08-15' }),
+      ],
+      total: 3,
+      invalidItemCount: 0,
+      nextCursor: null,
+    })
+    const wrapper = shallowMount(Home, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    await wrapper.find('[title="高级搜索"]').trigger('click')
+    wrapper.findComponent({ name: 'AdvancedSearch' }).vm.$emit('search', {
+      keyword: '',
+      source: '',
+      categories: [],
+      contentType: null,
+      dateFrom: '2026-09-01',
+      dateTo: '2026-09-30',
+      hasDeadline: 'any',
+      isRead: 'any',
+      isStarred: 'any',
+      tags: [],
+    })
+    await flushPromises()
+
+    expect(mocks.fetchNotices).toHaveBeenLastCalledWith(
+      expect.objectContaining({ dateFrom: '2026-09-01', dateTo: '2026-09-30' }),
+      expect.any(AbortSignal),
+    )
+    expect(wrapper.text()).toContain('范围内通知')
+    expect(wrapper.text()).not.toContain('未知日期通知')
+    expect(wrapper.text()).not.toContain('范围外通知')
+  })
+
   it('keeps body-only keyword matches from light responses across pages while applying local rules', async () => {
     mocks.storeState!.blacklistKeywords = ['屏蔽']
     mocks.fetchNotices.mockImplementation(async (params: { keyword?: string; cursor?: string }) => ({
@@ -634,6 +716,46 @@ describe('view request lifecycle', () => {
     storeState.blacklistKeywords = []
   })
 
+  it('limits DOM rows when the home feed has 300 notices', async () => {
+    const originalClientHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'clientHeight',
+    )
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get() {
+        return this.classList.contains('notice-grid') ? 600 : 320
+      },
+    })
+
+    try {
+      mocks.fetchNotices.mockResolvedValue({
+        items: Array.from({ length: 300 }, (_, index) =>
+          makeNotice({ id: `notice-${index}`, title: `通知 ${index}` }),
+        ),
+        total: 300,
+        invalidItemCount: 0,
+        nextCursor: null,
+      })
+
+      const wrapper = shallowMount(Home, { global: { stubs } })
+      wrappers.push(wrapper)
+      await flushPromises()
+      await nextTick()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      const renderedRows = wrapper.findAll('.virtual-notice-row')
+      expect(renderedRows.length).toBeGreaterThan(0)
+      expect(renderedRows.length).toBeLessThan(75)
+      expect(wrapper.findAll('.notice-card-stub').length).toBeGreaterThan(0)
+      expect(wrapper.findAll('.notice-card-stub').length).toBeLessThan(300)
+    } finally {
+      if (originalClientHeight) {
+        Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalClientHeight)
+      }
+    }
+  })
+
   it('merges cursor pages without requiring offset overlap checks', async () => {
     mocks.fetchNotices.mockImplementation(async (params: { cursor?: string }) => ({
       items: params.cursor
@@ -668,6 +790,44 @@ describe('view request lifecycle', () => {
     expect(wrapper.text()).not.toContain('更多通知加载失败')
   })
 
+  it('renders deadline events when the publication date is unknown', async () => {
+    const today = getLocalToday()
+    mocks.fetchCalendarNotices.mockResolvedValue({
+      items: [
+        makeCalendarItem({
+          id: 'unknown-publish',
+          title: '仅截止通知',
+          publishDate: null,
+          deadline: today,
+        }),
+      ],
+      total: 1,
+      truncated: false,
+    })
+
+    const wrapper = shallowMount(Calendar, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('仅截止通知')
+    expect(wrapper.findAll('.event-chip')).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('null')
+  })
+
+  it('warns when the calendar response hit the server range limit', async () => {
+    mocks.fetchCalendarNotices.mockResolvedValue({
+      items: [],
+      total: 2000,
+      truncated: true,
+    })
+
+    const wrapper = shallowMount(Calendar, { global: { stubs } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('当前范围通知超过服务端单次上限')
+  })
+
   it('shows an error when the calendar request fails', async () => {
     mocks.fetchCalendarNotices.mockRejectedValue(new Error('network unavailable'))
 
@@ -677,6 +837,56 @@ describe('view request lifecycle', () => {
 
     expect(mocks.fetchCalendarNotices).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('无法加载当前范围通知')
+  })
+
+  it('keeps the previous calendar range visible and recovers on retry', async () => {
+    const today = getLocalToday()
+    mocks.fetchCalendarNotices
+      .mockResolvedValueOnce({
+        items: [makeCalendarItem({ id: 'current', title: '本月通知', publishDate: today })],
+        total: 1,
+        truncated: false,
+      })
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce({
+        items: [
+          makeCalendarItem({
+            id: 'next',
+            title: '下月通知',
+            publishDate: shiftLocalMonth(today, 1),
+          }),
+        ],
+        total: 1,
+        truncated: false,
+      })
+    const buttonStub = {
+      name: 'VBtn',
+      inheritAttrs: false,
+      emits: ['click'],
+      template: '<button v-bind="$attrs" @click="$emit(\'click\')"><slot /></button>',
+    }
+    const wrapper = shallowMount(Calendar, {
+      global: { stubs: { ...stubs, VBtn: buttonStub } },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('本月通知')
+
+    await wrapper.get('[aria-label="下一个月"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('本月通知')
+    expect(wrapper.text()).toContain('当前显示的是')
+    expect(wrapper.text()).toContain('旧数据')
+
+    const retry = wrapper.findAll('button').find((button) => button.text().includes('重试'))
+    expect(retry).toBeDefined()
+    await retry!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('旧数据')
+    expect(wrapper.text()).toContain('下月通知')
   })
 
   it('refreshes an important DDL even when a cached deadline is available', async () => {
@@ -689,7 +899,9 @@ describe('view request lifecycle', () => {
     wrappers.push(wrapper)
     await flushPromises()
 
-    expect(mocks.fetchNoticesByIds).toHaveBeenCalledWith(['notice-1'], expect.any(AbortSignal))
+    expect(mocks.fetchNoticesByIds).toHaveBeenCalledWith(['notice-1'], expect.any(AbortSignal), {
+      light: true,
+    })
     expect(mocks.cacheNotice).toHaveBeenCalledWith(refreshedNotice)
     expect(wrapper.html()).toContain('刷新后的通知')
   })

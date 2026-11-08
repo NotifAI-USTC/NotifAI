@@ -80,7 +80,7 @@ export async function copyNoticeLink(notice: NoticeItem): Promise<boolean> {
 
 // 复制通知内容
 export async function copyNoticeContent(notice: NoticeItem): Promise<boolean> {
-  const content = `${notice.title}\n\n${notice.aiSummary}\n\n来源: ${notice.source}\n发布时间: ${notice.publishDate}`
+  const content = `${notice.title}\n\n${notice.aiSummary}\n\n来源: ${notice.source}\n发布时间: ${notice.publishDate ?? '未知'}`
 
   return copyText(content)
 }

@@ -7,6 +7,7 @@ import NoticeCard from '../components/NoticeCard.vue'
 import SkeletonLoader from '../components/SkeletonLoader.vue'
 import { useWindowSize } from '../composables/useWindowSize'
 import { loadBatchNotices } from '../composables/useBatchNoticeLoader'
+import { comparePublishDate } from '../utils/date'
 import AppBanner from '../components/AppBanner.vue'
 
 const REQUEST_LIMIT = 1000
@@ -63,12 +64,14 @@ async function loadFavorites(): Promise<void> {
     const result = await loadBatchNotices(store.starredIds, {
       maxIds: REQUEST_LIMIT,
       signal: ctrl.signal,
+      light: true,
     })
     if (ctrl.signal.aborted || rid !== requestId) return
 
     // 与首页一致：按发布日期倒序，同日按 ID 稳定排序
     result.items.sort(
-      (a, b) => b.publishDate.localeCompare(a.publishDate) || a.id.localeCompare(b.id),
+      (a, b) =>
+        comparePublishDate(a.publishDate, b.publishDate, 'desc') || a.id.localeCompare(b.id),
     )
     notices.value = result.items
 

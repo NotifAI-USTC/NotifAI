@@ -1,7 +1,7 @@
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import type { NoticeItem } from '../types/notice'
-import { normalizeHttpUrl, normalizeTrustedNoticeUrl } from './validation'
+import { isTrustedNoticeHost, normalizeHttpUrl, normalizeTrustedNoticeUrl } from './validation'
 
 // cleanContent 是清洗后的纯文本/轻量 HTML/Markdown。
 // 统一先按 Markdown 渲染（html:true 保留已存在 HTML，linkify 自动识别 URL，
@@ -106,9 +106,8 @@ export function sanitizeNoticeContent(
 
   for (const image of Array.from(parsed.body.querySelectorAll('img'))) {
     const url = normalizeHttpUrl(image.getAttribute('src'), sourceUrl?.href)
-    const hostname = url ? new URL(url).hostname.toLowerCase() : ''
-    const isTrustedHost = hostname === 'ustc.edu.cn' || hostname.endsWith('.ustc.edu.cn')
-    if (!url || !isTrustedHost || imageUrls.size >= MAX_CONTENT_IMAGES) {
+    const hostname = url ? new URL(url).hostname : ''
+    if (!url || !isTrustedNoticeHost(hostname) || imageUrls.size >= MAX_CONTENT_IMAGES) {
       image.remove()
       continue
     }

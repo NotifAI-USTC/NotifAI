@@ -290,6 +290,25 @@ describe('Detail request lifecycle', () => {
     expect(wrapper.text()).toContain('教学安排')
   })
 
+  it('renders an unknown publication date without dropping the notice', async () => {
+    const loadedNotice = createNotice('notice-1')
+    loadedNotice.publishDate = null
+    loadedNotice.originUrl = ''
+    mocks.fetchNoticeById.mockResolvedValue(loadedNotice)
+
+    const router = createTestRouter()
+    await router.push('/detail/notice-1')
+    const wrapper = shallowMount(Detail, {
+      global: { plugins: [router], stubs: componentStubs },
+    })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('教务处 · 未知')
+    expect(wrapper.text()).not.toContain('null')
+    expect(mocks.cacheNotice).toHaveBeenCalledWith(loadedNotice)
+  })
+
   it('renders a file-type icon for each attachment', async () => {
     const loadedNotice = createNotice('notice-1')
     loadedNotice.attachments = [

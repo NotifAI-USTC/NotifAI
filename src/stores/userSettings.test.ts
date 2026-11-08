@@ -114,7 +114,13 @@ describe('user settings store', () => {
     window.localStorage.setItem(
       USER_SETTINGS_STORAGE_KEY,
       JSON.stringify({
-        subscribedDepts: ['计算机科学与技术学院', '计算机学院', 'x'.repeat(201)],
+        subscribedDepts: [
+          '计算机科学与技术学院',
+          '计算机学院',
+          '招生办公室',
+          '国际合作与交流部',
+          'x'.repeat(201),
+        ],
         starredIds: ['notice-1', 'constructor', '../invalid'],
         starredFolderMap: { 'notice-1': 'missing', constructor: 'default' },
         customTags: { 'notice-1': [' 竞赛 ', '竞赛', 42], constructor: ['安全'] },
@@ -127,7 +133,9 @@ describe('user settings store', () => {
     expect(store.subscriptionMode).toBe('custom')
     expect(store.categoryMode).toBe('all')
     expect(store.subscribedCategories).toEqual([])
-    expect(store.subscribedDepts).toEqual(['计算机学院'])
+    expect([...store.subscribedDepts].sort()).toEqual(
+      ['国际合作交流', '本科招生网', '计算机学院'].sort(),
+    )
     expect(store.starredIds).toEqual(['notice-1', 'constructor'])
     expect(store.starredFolderMap['notice-1']).toBe('default')
     expect(store.customTags['notice-1']).toEqual(['竞赛'])
@@ -1284,7 +1292,7 @@ describe('user settings store', () => {
     expect(store.subscribedDepts).toContain('新成立研究院')
   })
 
-  it('reconciles custom subscriptions with the latest backend source snapshot', () => {
+  it('keeps subscriptions that disappear from the backend snapshot until removed', () => {
     store = useUserSettingsStore()
     store.completeOnboarding({
       identity: 'custom',
@@ -1295,15 +1303,29 @@ describe('user settings store', () => {
 
     store.replaceAvailableSources(['教务处'])
     expect(store.subscriptionMode).toBe('custom')
-    expect(store.subscribedDepts).toEqual(['教务处'])
-    expect(store.isSubscribed('新成立研究院')).toBe(false)
+    expect(store.subscribedDepts).toEqual(['教务处', '新成立研究院'])
+    expect(store.effectiveSubscribedDepts).toEqual(['教务处'])
+    expect(store.unavailableSubscriptions).toEqual(['新成立研究院'])
 
-    // 如果目录更新后自定义列表全部失效，回到“全部来源”，避免首页变成
-    // 一个用户无法修复的空订阅状态。
-    store.replaceAvailableSources(['本科生院'])
-    expect(store.subscriptionMode).toBe('all')
-    expect(store.subscribedDepts).toEqual([])
-    expect(store.isSubscribed('本科生院')).toBe(true)
+    store.toggleDepartment('新成立研究院')
+    expect(store.subscribedDepts).toEqual(['教务处'])
+    expect(store.unavailableSubscriptions).toEqual([])
+  })
+
+  it('keeps subscriptions when an empty source snapshot arrives', () => {
+    store = useUserSettingsStore()
+    store.completeOnboarding({
+      identity: 'custom',
+      channels: ['教务处', '新成立研究院'],
+      categories: [],
+      keywords: [],
+    })
+
+    store.replaceAvailableSources([])
+
+    expect(store.subscriptionMode).toBe('custom')
+    expect(store.subscribedDepts).toEqual(['教务处', '新成立研究院'])
+    expect(store.isSubscribed('新成立研究院')).toBe(true)
   })
 
   it('normalizes a persisted empty custom subscription to all sources', () => {

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, onScopeDispose, ref } from 'vue'
+import { computed, onScopeDispose, reactive, ref } from 'vue'
 import type { NoticeCategoryKey, NoticeItem } from '../types/notice'
 import { isNoticeCategoryKey, SOURCE_CATALOG_FALLBACK } from '../types/notice'
 import { isValidNoticeId } from '../utils/validation'
@@ -187,10 +187,22 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   // The checked-in /sources snapshot is the fallback. Keep runtime sources
   // discovered from GET /sources so switching one of them can build a complete
   // custom list before the next settings checkpoint.
-  const availableSourceNames = new Set([
-    ...SOURCE_CATALOG_FALLBACK.map((source) => source.name),
-    ...saved.subscribedDepts,
-  ])
+  const availableSourceNames = reactive(
+    new Set([
+      ...SOURCE_CATALOG_FALLBACK.map((source) => source.name),
+      ...saved.subscribedDepts,
+    ]),
+  )
+
+  /** 已订阅但当前来源目录中不存在的来源；保留以便用户显式移除。 */
+  const unavailableSubscriptions = computed(() =>
+    subscribedDepts.value.filter((source) => !availableSourceNames.has(source)),
+  )
+
+  /** 实际参与接口查询的订阅来源，排除已失效来源。 */
+  const effectiveSubscribedDepts = computed(() =>
+    subscribedDepts.value.filter((source) => availableSourceNames.has(source)),
+  )
 
   /** 已拉取通知的内存缓存 */
   const noticeCache = ref<Map<string, NoticeItem>>(new Map())
@@ -1147,34 +1159,42 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       if (normalized) nextSources.add(normalized)
     }
 
+    // An empty snapshot means the catalog request failed or the backend has not
+    // published a catalog yet. Keep the last known names instead of turning
+    // every source into a new subscription and rewriting user preferences.
+    if (nextSources.size === 0) return
+
     availableSourceNames.clear()
     nextSources.forEach((sourceName) => availableSourceNames.add(sourceName))
 
     if (subscriptionMode.value !== 'custom') return
 
+    // Keep subscriptions that disappeared from the catalog. They are excluded
+    // from requests by effectiveSubscribedDepts and surfaced as unavailable so
+    // the user can remove them explicitly instead of losing the preference.
     if (subscribedDepts.value.length === 0) {
       subscriptionMode.value = 'all'
       persist()
-      return
     }
-
-    const filteredSubscriptions = subscribedDepts.value.filter((source) => nextSources.has(source))
-    if (filteredSubscriptions.length === subscribedDepts.value.length) return
-
-    // 空自定义列表与入门引导的“暂不选择来源”保持一致，解释为全部来源，
-    // 避免来源目录刷新后首页意外变成空白。
-    if (filteredSubscriptions.length === 0) {
-      subscriptionMode.value = 'all'
-      subscribedDepts.value = []
-    } else {
-      subscribedDepts.value = filteredSubscriptions
-    }
-    persist()
   }
 
   function toggleDepartment(dept: string): void {
     const normalizedDept = normalizeDepartmentName(dept)
-    if (!normalizedDept || !availableSourceNames.has(normalizedDept)) return
+    if (!normalizedDept) return
+
+    // Unavailable subscriptions are not toggleable from the catalog, but the
+    // subscription page must still let the user remove them.
+    if (
+      subscriptionMode.value === 'custom' &&
+      subscribedDepts.value.includes(normalizedDept)
+    ) {
+      subscribedDepts.value = subscribedDepts.value.filter((source) => source !== normalizedDept)
+      if (subscribedDepts.value.length === 0) subscriptionMode.value = 'all'
+      persist()
+      return
+    }
+
+    if (!availableSourceNames.has(normalizedDept)) return
     if (subscriptionMode.value === 'all') {
       subscriptionMode.value = 'custom'
       subscribedDepts.value = [...availableSourceNames].filter((name) => name !== normalizedDept)
@@ -1182,15 +1202,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       return
     }
 
-    const idx = subscribedDepts.value.indexOf(normalizedDept)
-    if (idx >= 0) {
-      subscribedDepts.value.splice(idx, 1)
-      if (subscribedDepts.value.length === 0) {
-        subscriptionMode.value = 'all'
-      }
-    } else {
-      subscribedDepts.value.push(normalizedDept)
-    }
+    subscribedDepts.value.push(normalizedDept)
     persist()
   }
 
@@ -1592,6 +1604,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     // 状态
     subscriptionMode,
     subscribedDepts,
+    effectiveSubscribedDepts,
+    unavailableSubscriptions,
     categoryMode,
     subscribedCategories,
     blacklistKeywords,

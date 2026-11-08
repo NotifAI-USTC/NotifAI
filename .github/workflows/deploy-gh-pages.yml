@@ -36,6 +36,9 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
+      - name: Type check
+        run: pnpm run type-check
+
       - name: Test
         env:
           VITE_API_BASE_URL: ${{ vars.API_BASE_URL }}

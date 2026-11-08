@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { useUserSettingsStore } from '../stores/userSettings'
 import type { SourceItem } from '../types/notice'
-import { SOURCE_CATALOG_FALLBACK } from '../types/notice'
+import { normalizeNoticeSource, SOURCE_CATALOG_FALLBACK } from '../types/notice'
 import { fetchSources } from '../utils/request'
 import {
   readSourceCatalogCache,
@@ -13,13 +13,27 @@ type SourceCatalogOrigin = 'fallback' | 'cache' | 'network'
 
 const SOURCE_REQUEST_COOLDOWN_MS = 5 * 60 * 1000
 
-function cloneSources(sources: readonly SourceItem[]): SourceItem[] {
-  return sources.map((source) => ({ ...source }))
+/**
+ * 旧来源名先归一化再合并，避免同一来源以别名重复出现；合并时保留
+ * 服务端通知数之和，保证目录排序/计数不因迁移而丢失。
+ */
+function normalizeSources(sources: readonly SourceItem[]): SourceItem[] {
+  const merged = new Map<string, SourceItem>()
+  for (const source of sources) {
+    const name = normalizeNoticeSource(source.name)
+    const existing = merged.get(name)
+    if (existing) {
+      existing.noticeCount += source.noticeCount
+      continue
+    }
+    merged.set(name, { ...source, name })
+  }
+  return [...merged.values()]
 }
 
 // These refs intentionally live at module scope. Advanced search, onboarding
 // and subscription settings must share one source snapshot and one request.
-const sourceItems = ref<SourceItem[]>(cloneSources(SOURCE_CATALOG_FALLBACK))
+const sourceItems = ref<SourceItem[]>(normalizeSources(SOURCE_CATALOG_FALLBACK))
 const loading = ref(false)
 const error = ref('')
 const origin = ref<SourceCatalogOrigin>('fallback')
@@ -78,7 +92,7 @@ async function loadCatalog(
       if (cached) {
         cacheFetchedAtIso = cached.fetchedAt
         cachedFetchedAt = Date.parse(cached.fetchedAt)
-        sourceItems.value = cloneSources(cached.items)
+        sourceItems.value = normalizeSources(cached.items)
         origin.value = 'cache'
         syncSourcesToStore(store)
       }
@@ -95,13 +109,13 @@ async function loadCatalog(
     const loadedSources = await fetchSources(controller.signal)
     if (controller.signal.aborted) return false
 
-    sourceItems.value = cloneSources(loadedSources)
+    sourceItems.value = normalizeSources(loadedSources)
     origin.value = 'network'
     lastNetworkSuccessAt = Date.now()
     cacheFetchedAtIso = new Date(lastNetworkSuccessAt).toISOString()
     cachedFetchedAt = lastNetworkSuccessAt
     syncSourcesToStore(store)
-    void writeSourceCatalogCache({ items: loadedSources, fetchedAt: cacheFetchedAtIso })
+    void writeSourceCatalogCache({ items: sourceItems.value, fetchedAt: cacheFetchedAtIso })
     return true
   } catch (requestError) {
     if (
@@ -167,7 +181,7 @@ export function resetSourceCatalogStateForTests(): void {
   cacheFetchedAtIso = ''
   lastNetworkSuccessAt = 0
   lastRequestAttemptAt = 0
-  sourceItems.value = cloneSources(SOURCE_CATALOG_FALLBACK)
+  sourceItems.value = normalizeSources(SOURCE_CATALOG_FALLBACK)
   loading.value = false
   error.value = ''
   origin.value = 'fallback'

@@ -48,6 +48,19 @@ describe('sanitizeNoticeContent', () => {
     expect(result.images).toEqual([])
   })
 
+  it('accepts images from the ustclug mirror host', () => {
+    const result = sanitizeNoticeContent({
+      originUrl: 'https://servers.ustclug.org/notices/1',
+      cleanContent: '<img id="mirror" src="https://mirrors.ustclug.org/assets/notice.png">',
+    })
+
+    const parsed = new DOMParser().parseFromString(result.html, 'text/html')
+    expect(parsed.querySelector('#mirror')?.getAttribute('src')).toBe(
+      'https://mirrors.ustclug.org/assets/notice.png',
+    )
+    expect(result.images).toEqual(['https://mirrors.ustclug.org/assets/notice.png'])
+  })
+
   it('does not let an arbitrary source URL authorize its own image host', () => {
     const result = sanitizeNoticeContent({
       originUrl: 'https://attacker.example/notices/1',

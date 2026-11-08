@@ -97,14 +97,32 @@ export function isUrgent(deadline: string | null, days = 3, now = new Date()): b
 /**
  * 格式化发布日期为可读字符串
  */
-export function formatPublishDate(dateStr: string): string {
+export function formatPublishDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '未知'
   const d = parseLocalDate(dateStr)
-  if (!d) return '未知日期'
+  if (!d) return '未知'
 
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}年${m}月${day}日`
+}
+
+/**
+ * 按发布日期比较；空日期始终排在有效日期之后。
+ *
+ * `order` 只影响有效日期之间的顺序，不会把空日期推到列表开头。
+ */
+export function comparePublishDate(
+  a: string | null,
+  b: string | null,
+  order: 'asc' | 'desc' = 'asc',
+): number {
+  if (a === b) return 0
+  if (a === null) return 1
+  if (b === null) return -1
+  const result = a.localeCompare(b)
+  return order === 'desc' ? -result : result
 }
 
 /** 计算本地日期所属的 ISO 周序号（1-53）。 */
@@ -142,4 +160,25 @@ export function getIsoWeek(dateStr: string): string | null {
   const week = getIsoWeekNumber(dateStr)
   if (year === null || week === null) return null
   return `${year}-W${String(week).padStart(2, '0')}`
+}
+
+/**
+ * 将后端 UTC 时间戳格式化为本地时间。
+ *
+ * 后端契约要求 `Z` 结尾；早期无时区后缀的缓存继续按浏览器的既有本地解析
+ * 行为展示，避免升级后历史时间整体偏移。
+ */
+export function formatLocalTimestamp(value: string | null | undefined): string {
+  if (!value) return ''
+  // 新后端统一返回带 Z 的 UTC 时间；旧缓存可能没有时区，继续沿用
+  // Date 的本地解析行为，避免升级后历史展示整体偏移。
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }

@@ -69,6 +69,7 @@ async function loadImportantNotices() {
     const result = await loadBatchNotices(store.importantIds, {
       maxIds: IMPORTANT_REQUEST_LIMIT,
       signal: controller.signal,
+      light: true,
       include: (notice) => Boolean(notice.deadline),
     })
     if (controller.signal.aborted || requestId !== importantRequestId) return

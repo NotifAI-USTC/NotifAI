@@ -243,31 +243,80 @@ function readFromDatabase(
   })
 }
 
-function pruneDatabaseStore(store: IDBObjectStore): void {
+function pruneDatabaseStore(store: IDBObjectStore, keep: number): void {
   const request = store.getAll()
   request.onsuccess = () => {
     const entries = request.result
       .filter((entry) => isRecord(entry) && typeof entry.fetchedAt === 'string')
       .sort((a, b) => String(b.fetchedAt).localeCompare(String(a.fetchedAt)))
 
-    for (const entry of entries.slice(MAX_CACHE_ENTRIES)) {
-      if (typeof entry.key === 'string') store.delete(entry.key)
+    for (const entry of entries.slice(keep)) {
+      const key = typeof entry.key === 'string' ? entry.key : entry.id
+      if (typeof key === 'string') store.delete(key)
     }
   }
 }
 
-function writeToDatabase(database: IDBDatabase, entry: StoredNoticeFeedCacheEntry): Promise<void> {
+function trimDatabaseStore(
+  database: IDBDatabase,
+  storeName: string,
+  keep: number,
+): Promise<void> {
   return new Promise((resolve) => {
     try {
-      const transaction = database.transaction(STORE_NAME, 'readwrite')
-      const store = transaction.objectStore(STORE_NAME)
-      store.put(entry)
-      pruneDatabaseStore(store)
+      const transaction = database.transaction(storeName, 'readwrite')
+      pruneDatabaseStore(transaction.objectStore(storeName), keep)
       transaction.oncomplete = () => resolve()
       transaction.onerror = () => resolve()
       transaction.onabort = () => resolve()
     } catch {
       resolve()
+    }
+  })
+}
+
+function clearDatabaseStore(database: IDBDatabase, storeName: string): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      const transaction = database.transaction(storeName, 'readwrite')
+      transaction.objectStore(storeName).clear()
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => resolve()
+      transaction.onabort = () => resolve()
+    } catch {
+      resolve()
+    }
+  })
+}
+
+/** 写入失败（常见于配额不足）时逐步清理旧缓存并重试。 */
+async function writeWithQuotaRecovery(
+  database: IDBDatabase,
+  storeName: string,
+  keep: number,
+  write: () => Promise<boolean>,
+): Promise<boolean> {
+  if (await write()) return true
+
+  await trimDatabaseStore(database, storeName, Math.max(1, Math.floor(keep / 2)))
+  if (await write()) return true
+
+  await clearDatabaseStore(database, storeName)
+  return false
+}
+
+function writeToDatabase(database: IDBDatabase, entry: StoredNoticeFeedCacheEntry): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const transaction = database.transaction(STORE_NAME, 'readwrite')
+      const store = transaction.objectStore(STORE_NAME)
+      store.put(entry)
+      pruneDatabaseStore(store, MAX_CACHE_ENTRIES)
+      transaction.oncomplete = () => resolve(true)
+      transaction.onerror = () => resolve(false)
+      transaction.onabort = () => resolve(false)
+    } catch {
+      resolve(false)
     }
   })
 }
@@ -308,18 +357,18 @@ function pruneDetailDatabaseStore(store: IDBObjectStore): void {
 function writeDetailToDatabase(
   database: IDBDatabase,
   entry: StoredNoticeDetailCacheEntry,
-): Promise<void> {
+): Promise<boolean> {
   return new Promise((resolve) => {
     try {
       const transaction = database.transaction(DETAIL_STORE_NAME, 'readwrite')
       const store = transaction.objectStore(DETAIL_STORE_NAME)
       store.put(entry)
       pruneDetailDatabaseStore(store)
-      transaction.oncomplete = () => resolve()
-      transaction.onerror = () => resolve()
-      transaction.onabort = () => resolve()
+      transaction.oncomplete = () => resolve(true)
+      transaction.onerror = () => resolve(false)
+      transaction.onabort = () => resolve(false)
     } catch {
-      resolve()
+      resolve(false)
     }
   })
 }
@@ -353,7 +402,11 @@ export async function writeNoticeFeedCache(entry: NoticeFeedCacheEntry): Promise
 
   remember(parsed)
   const database = await openDatabase()
-  if (database) await writeToDatabase(database, parsed)
+  if (database) {
+    await writeWithQuotaRecovery(database, STORE_NAME, MAX_CACHE_ENTRIES, () =>
+      writeToDatabase(database, parsed),
+    )
+  }
 }
 
 /**
@@ -399,7 +452,11 @@ export async function writeNoticeDetailCache(notice: NoticeItem): Promise<void> 
   }
 
   const database = await openDatabase()
-  if (database) await writeDetailToDatabase(database, parsed)
+  if (database) {
+    await writeWithQuotaRecovery(database, DETAIL_STORE_NAME, MAX_DETAIL_CACHE_ENTRIES, () =>
+      writeDetailToDatabase(database, parsed),
+    )
+  }
 }
 
 /** 清理详情缓存；首页 feed 缓存保持不变。 */

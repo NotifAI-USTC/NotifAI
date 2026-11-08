@@ -48,13 +48,21 @@ test('restores loaded pages and scroll position when returning from a notice', a
   await page.getByRole('button', { name: '返回上一页' }).click()
   await expect(page).toHaveURL(/\/#\/$/)
   await expect(page.locator('.notice-card')).toHaveCount(30)
-  await expect.poll(() => grid.evaluate((element) => element.scrollTop)).toBeCloseTo(position, 0)
+  // Playwright may scroll a few pixels for click actionability after the
+  // measured position, so allow a small tolerance while still rejecting a
+  // reset to the top of the feed.
+  await expect
+    .poll(() => grid.evaluate((element, target) => Math.abs(element.scrollTop - target), position))
+    .toBeLessThanOrEqual(16)
   await expect(page.getByRole('link', { name: label!, exact: true })).toBeInViewport()
   await page.getByRole('link', { name: label!, exact: true }).click()
   await expect(page).toHaveURL(/#\/detail\//)
   await page.goBack()
   await expect(page.locator('.notice-card')).toHaveCount(30)
-  await expect.poll(() => grid.evaluate((element) => element.scrollTop)).toBeCloseTo(position, 0)
+  await expect
+    .poll(() => grid.evaluate((element, target) => Math.abs(element.scrollTop - target), position))
+    .toBeLessThanOrEqual(16)
+  await expect(page.getByRole('link', { name: label!, exact: true })).toBeInViewport()
 })
 
 test('persists a favorite and supports calendar and theme workflows', async ({ page }) => {

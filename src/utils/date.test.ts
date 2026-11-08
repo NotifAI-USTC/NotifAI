@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   calculateRemainingDays,
   formatLocalDate,
+  formatLocalTimestamp,
   formatPublishDate,
+  comparePublishDate,
   formatRemaining,
   getIsoWeek,
   getLocalToday,
@@ -49,7 +51,7 @@ describe('local calendar date helpers', () => {
     expect(formatLocalDate(localDate)).toBe('2026-07-31')
     expect(getLocalToday(localDate)).toBe('2026-07-31')
     expect(formatPublishDate('2026-07-31')).toBe('2026年07月31日')
-    expect(formatPublishDate('invalid')).toBe('未知日期')
+    expect(formatPublishDate('invalid')).toBe('未知')
   })
 })
 
@@ -107,5 +109,53 @@ describe('getIsoWeek', () => {
   it('returns null for invalid dates', () => {
     expect(getIsoWeek('not-a-date')).toBeNull()
     expect(getIsoWeek('')).toBeNull()
+  })
+})
+
+
+describe('comparePublishDate', () => {
+  it('sorts missing dates after valid dates in both directions', () => {
+    const dates = ['2026-02-01', null, '2026-01-01']
+    expect([...dates].sort(comparePublishDate)).toEqual([
+      '2026-01-01',
+      '2026-02-01',
+      null,
+    ])
+    expect([...dates].sort((a, b) => comparePublishDate(a, b, 'desc'))).toEqual([
+      '2026-02-01',
+      '2026-01-01',
+      null,
+    ])
+  })
+})
+
+describe('formatLocalTimestamp', () => {
+  it('renders UTC timestamps in the browser timezone', () => {
+    const originalTz = process.env.TZ
+    process.env.TZ = 'Asia/Shanghai'
+    try {
+      expect(formatLocalTimestamp('2026-11-07T16:30:00Z')).toBe('2026/11/8 00:30')
+      expect(formatLocalTimestamp('2026-08-01T08:00:00')).toBe('2026/8/1 08:00')
+      expect(formatLocalTimestamp('2026-08-01 08:00:00')).toBe('2026/8/1 08:00')
+    } finally {
+      if (originalTz === undefined) delete process.env.TZ
+      else process.env.TZ = originalTz
+    }
+    expect(formatLocalTimestamp('')).toBe('')
+    expect(formatLocalTimestamp(null)).toBe('')
+  })
+
+  it('keeps date-only values on the same calendar day across timezones', () => {
+    const originalTz = process.env.TZ
+    try {
+      for (const timezone of ['Asia/Shanghai', 'America/New_York']) {
+        process.env.TZ = timezone
+        expect(formatPublishDate('2026-11-08')).toBe('2026年11月08日')
+        expect(parseLocalDate('2026-11-08')?.getDate()).toBe(8)
+      }
+    } finally {
+      if (originalTz === undefined) delete process.env.TZ
+      else process.env.TZ = originalTz
+    }
   })
 })

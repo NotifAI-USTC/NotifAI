@@ -182,7 +182,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
     id: 'edu-005',
     contentType: 'notice',
     title: '关于选派学生参加海外交换学习项目的报名通知',
-    source: '国际合作与交流部',
+    source: '国际合作交流',
     publishDate: getPastDate(4),
     aiSummary: '新一批海外交换项目开放申请，覆盖亚洲、欧洲和北美多所合作高校。',
     deadline: getDate(14),
@@ -833,7 +833,7 @@ const mockNoticeFixtures: Array<Omit<NoticeItem, 'categories'>> = [
     id: 'campus-007',
     contentType: 'notice',
     title: '国际组织与涉外机构专场招聘会',
-    source: '国际合作与交流部',
+    source: '国际合作交流',
     publishDate: getPastDate(6),
     aiSummary: '专场招聘会邀请国际组织、科研机构和跨国企业，提供全职、实习与志愿岗位。',
     deadline: getDate(11),
@@ -1082,7 +1082,7 @@ export const mockNotices: NoticeItem[] = mockNoticeFixtures.map((notice) => ({
 }))
 
 function encodeMockCursor(notice: NoticeItem): string {
-  const payload = JSON.stringify({ p: notice.publishDate, m: notice.id })
+  const payload = JSON.stringify({ p: notice.publishDate ?? '', m: notice.id })
   return globalThis.btoa(payload).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
 }
 
@@ -1143,7 +1143,9 @@ export function mockFetchNotices(params: {
   if (since) {
     // 模拟增量查询：仅返回发布日期 >= since 当天的新通知
     const sinceDate = since.slice(0, 10)
-    filtered = filtered.filter((notice) => notice.publishDate >= sinceDate)
+    filtered = filtered.filter(
+      (notice) => notice.publishDate !== null && notice.publishDate >= sinceDate,
+    )
   }
 
   if (keyword) {
@@ -1162,8 +1164,16 @@ export function mockFetchNotices(params: {
       notice.categories.some((category) => categories.includes(category)),
     )
   }
-  if (dateFrom) filtered = filtered.filter((notice) => notice.publishDate >= dateFrom)
-  if (dateTo) filtered = filtered.filter((notice) => notice.publishDate <= dateTo)
+  if (dateFrom) {
+    filtered = filtered.filter(
+      (notice) => notice.publishDate !== null && notice.publishDate >= dateFrom,
+    )
+  }
+  if (dateTo) {
+    filtered = filtered.filter(
+      (notice) => notice.publishDate !== null && notice.publishDate <= dateTo,
+    )
+  }
   if (rangeFrom || rangeTo) {
     filtered = filtered.filter((notice) => {
       const dates = [notice.publishDate, notice.deadline].filter(
@@ -1183,7 +1193,8 @@ export function mockFetchNotices(params: {
   }
 
   filtered = [...filtered].sort(
-    (a, b) => b.publishDate.localeCompare(a.publishDate) || a.id.localeCompare(b.id),
+    (a, b) =>
+      (b.publishDate ?? '').localeCompare(a.publishDate ?? '') || a.id.localeCompare(b.id),
   )
 
   const cursorMode = cursor !== undefined
@@ -1213,16 +1224,22 @@ export function mockFetchNoticeById(id: string): NoticeItem | undefined {
 }
 
 /** 模拟批量获取通知详情（POST /notices/batch） */
-export function mockFetchNoticesByIds(ids: string[]): {
+export function mockFetchNoticesByIds(
+  ids: string[],
+  light = false,
+): {
   items: NoticeItem[]
   missing: string[]
 } {
   const found = mockNotices.filter((notice) => ids.includes(notice.id))
   const foundIds = new Set(found.map((n) => n.id))
   const missing = ids.filter((id) => !foundIds.has(id))
-  const items = [...found].sort(
-    (a, b) => b.publishDate.localeCompare(a.publishDate) || a.id.localeCompare(b.id),
-  )
+  const items = found
+    .map((notice) => (light ? { ...notice, cleanContent: '' } : notice))
+    .sort(
+      (a, b) =>
+        (b.publishDate ?? '').localeCompare(a.publishDate ?? '') || a.id.localeCompare(b.id),
+    )
   return { items, missing }
 }
 
@@ -1248,21 +1265,21 @@ export function mockFetchCalendarNotices(params: { month?: string; week?: string
 
   if (params.month) {
     const match = /^(\d{4})-(\d{2})$/.exec(params.month)
-    if (!match) return { items: [] }
+    if (!match) return { items: [], total: 0, truncated: false }
     const year = Number(match[1])
     const month = Number(match[2])
     start = new Date(year, month - 1, 1)
     end = new Date(year, month, 0)
   } else if (params.week) {
     const match = /^(\d{4})-W(\d{2})$/.exec(params.week)
-    if (!match) return { items: [] }
+    if (!match) return { items: [], total: 0, truncated: false }
     const weekStart = isoWeekStart(Number(match[1]), Number(match[2]))
-    if (!weekStart) return { items: [] }
+    if (!weekStart) return { items: [], total: 0, truncated: false }
     start = weekStart
     end = new Date(start)
     end.setDate(start.getDate() + 6)
   } else {
-    return { items: [] }
+    return { items: [], total: 0, truncated: false }
   }
 
   const startStr = formatLocalDate(start)
@@ -1283,9 +1300,9 @@ export function mockFetchCalendarNotices(params: { month?: string; week?: string
       deadline: notice.deadline,
       contentType: notice.contentType,
     }))
-    .sort((a, b) => b.publishDate.localeCompare(a.publishDate) || a.id.localeCompare(b.id))
+    .sort((a, b) => (b.publishDate ?? '').localeCompare(a.publishDate ?? '') || a.id.localeCompare(b.id))
 
-  return { items }
+  return { items, total: items.length, truncated: false }
 }
 
 /** 模拟获取即将截止轻量列表（GET /notices/deadlines）。 */
@@ -1364,7 +1381,9 @@ export function mockFetchStats(): {
   const last7DaysDdl = mockNotices.filter(
     (n) => n.deadline && n.deadline >= today && n.deadline <= sevenDaysLater,
   ).length
-  const last24hNew = mockNotices.filter((n) => n.publishDate >= yesterday).length
+  const last24hNew = mockNotices.filter(
+    (n) => n.publishDate !== null && n.publishDate >= yesterday,
+  ).length
 
   return {
     total,
