@@ -209,7 +209,7 @@ function restartOnboarding(): void {
           <v-avatar size="80" color="primary" class="mb-4">
             <span class="text-headline-small text-white font-weight-bold">USTC</span>
           </v-avatar>
-          <v-card-title class="pa-0">{{ account.user?.username ?? '科大新同学' }}</v-card-title>
+          <v-card-title class="pa-0">{{ account.user?.displayName ?? '科大新同学' }}</v-card-title>
           <v-btn
             v-if="!account.user"
             class="mt-4"

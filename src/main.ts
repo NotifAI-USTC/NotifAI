@@ -1,9 +1,9 @@
-import { createApp } from 'vue'
+import { createApp, ref } from 'vue'
 import { createPinia } from 'pinia'
 import vuetify from './plugins/vuetify'
 import App from './App.vue'
 import router from './router'
-import { useAccountStore } from './stores/account'
+import { ACCOUNT_STARTUP_READY } from './stores/userSettings'
 import './style.css'
 
 const app = createApp(App)
@@ -11,11 +11,8 @@ const app = createApp(App)
 const pinia = createPinia()
 app.use(pinia)
 
-async function mount() {
-  await useAccountStore(pinia).bootstrap()
-  app.use(router)
-  app.use(vuetify)
-  app.mount('#app')
-}
-
-void mount()
+const accountStartupReady = ref(false)
+app.provide(ACCOUNT_STARTUP_READY, accountStartupReady)
+app.use(router)
+app.use(vuetify)
+app.mount('#app')

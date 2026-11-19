@@ -8,6 +8,7 @@ type SyncStatus = 'idle' | 'saving' | 'synced' | 'dirty' | 'conflict'
 
 const IMPORT_KEY = 'notifai-account-import'
 const SESSION_CHANGE_KEY = 'notifai-account-session-change'
+const SESSION_WRITE_LOCK = 'notifai-account-session-write'
 const PAGE_NOTICE_KEY = 'notifai-account-page-notice'
 type PageNotice = 'discarded' | 'import-unavailable'
 
@@ -44,9 +45,9 @@ export const useAccountStore = defineStore('account', () => {
   let timer: number | undefined
   let baseline = ''
   let bypassUnload = false
-  let checkingSession = false
+  let sessionCheck: Promise<void> | undefined
   let sessionCheckRequested = false
-  let signingIn = false
+  let sessionMutation: Promise<void> | undefined
 
   function dismissImport(): void {
     importCandidate.value = null
@@ -72,6 +73,14 @@ export const useAccountStore = defineStore('account', () => {
     dismissImport()
   }
 
+  function notifySessionChange(): void {
+    try {
+      window.localStorage.setItem(SESSION_CHANGE_KEY, crypto.randomUUID())
+    } catch {
+      // Other tabs recheck the account when they return to the foreground.
+    }
+  }
+
   function retire({ broadcast = false, notice }: { broadcast?: boolean; notice?: PageNotice } = {}) {
     if (lifetime.signal.aborted) return
     if (!broadcast && unsynced.value) notice = 'discarded'
@@ -86,13 +95,7 @@ export const useAccountStore = defineStore('account', () => {
         }
       }
     }
-    if (broadcast) {
-      try {
-        window.localStorage.setItem(SESSION_CHANGE_KEY, crypto.randomUUID())
-      } catch {
-        // Other tabs recheck the account when they return to the foreground.
-      }
-    }
+    if (broadcast) notifySessionChange()
     bypassUnload = true
     transitioning.value = true
     lifetime.abort()
@@ -139,49 +142,87 @@ export const useAccountStore = defineStore('account', () => {
         loadImportCandidate()
         syncStatus.value = 'synced'
       }
-    } catch (error) {
-      if (lifetime.signal.aborted || handleIdentityError(error)) return
+    } catch {
+      if (lifetime.signal.aborted) return
       startupUnavailable.value = true
     }
   }
 
-  async function checkSession(): Promise<void> {
-    if (signingIn || loggingOut.value || lifetime.signal.aborted) return
-    if (checkingSession) {
-      sessionCheckRequested = true
-      return
-    }
-    checkingSession = true
+  async function drainSessionChecks(): Promise<void> {
+    const signal = lifetime.signal
     try {
-      do {
+      while (sessionCheckRequested && !signal.aborted) {
+        if (sessionMutation) {
+          await sessionMutation.catch(() => undefined)
+          continue
+        }
         sessionCheckRequested = false
-        const current = await api.getSession(lifetime.signal)
-        if (lifetime.signal.aborted || signingIn || loggingOut.value) return
-        if (current?.id !== user.value?.id) {
+        // Connectivity failures do not change the account or discard a draft.
+        const current = await api.getSession(signal).catch(() => undefined)
+        if (signal.aborted) return
+        if (sessionMutation) {
+          sessionCheckRequested = true
+        } else if (current !== undefined && current?.id !== user.value?.id) {
           retire()
           return
         }
-      } while (sessionCheckRequested)
-    } catch {
-      // Do not discard a draft or switch to guest on a connectivity failure.
+      }
     } finally {
-      checkingSession = false
+      sessionCheck = undefined
     }
   }
 
-  async function signIn(username: string, password: string, candidate: CloudSettings): Promise<void> {
-    if (user.value || signingIn || lifetime.signal.aborted) {
-      throw new api.AccountApiError('ACCOUNT_CHANGED')
-    }
-    signingIn = true
+  async function checkSession(): Promise<void> {
+    if (lifetime.signal.aborted) return
+    sessionCheckRequested = true
+    sessionCheck ??= Promise.resolve().then(drainSessionChecks)
+    return sessionCheck
+  }
+
+  function changeSession(change: () => Promise<void>): Promise<void> {
+    sessionMutation = Promise.resolve().then(change).finally(() => { sessionMutation = undefined })
+    return sessionMutation
+  }
+
+  async function withSessionWriteLock(write: () => Promise<void>): Promise<void> {
+    const signal = lifetime.signal
+    let acquired = false
     try {
-      // A different tab (or a login with an ambiguous response) may have set a session.
-      if (await api.getSession(lifetime.signal)) {
+      const locks = typeof navigator === 'undefined' ? undefined : navigator.locks
+      if (typeof locks?.request === 'function') {
+        return await locks.request(SESSION_WRITE_LOCK, { signal }, () => {
+          acquired = true
+          return write()
+        })
+      }
+    } catch (error) {
+      if (acquired || signal.aborted || !(error instanceof DOMException) ||
+        (error.name !== 'SecurityError' && error.name !== 'NotSupportedError')) throw error
+    }
+    // Older or restricted contexts still recheck before writing, without cross-tab exclusion.
+    await write()
+  }
+
+  async function establishSession(write: (signal: AbortSignal) => Promise<void>): Promise<void> {
+    const signal = lifetime.signal
+    if (user.value || sessionMutation || signal.aborted) throw new api.AccountApiError('ACCOUNT_CHANGED')
+    await changeSession(() => withSessionWriteLock(async () => {
+      if (signal.aborted) return
+      // The preceding writer's Set-Cookie is now visible to this session check.
+      const current = await api.getSession(signal)
+      if (signal.aborted) return
+      if (current) {
         retire()
         return
       }
-      const loggedIn = await api.login(username, password, lifetime.signal)
-      if (lifetime.signal.aborted) return
+      await write(signal)
+    }))
+  }
+
+  async function signIn(username: string, password: string, candidate: CloudSettings): Promise<void> {
+    await establishSession(async (signal) => {
+      const loggedIn = await api.login(username, password, signal)
+      if (signal.aborted) return
       let notice: PageNotice | undefined
       try {
         if (JSON.stringify(candidate) !== JSON.stringify(defaultCloudSettings())) {
@@ -194,17 +235,38 @@ export const useAccountStore = defineStore('account', () => {
         notice = 'import-unavailable'
       }
       retire({ broadcast: true, notice })
-    } finally {
-      signingIn = false
-    }
+    })
+  }
+
+  async function registerWithOidc(formId: string, nickname: string): Promise<void> {
+    await establishSession(async (signal) => {
+      await api.completeOidcSignup(formId, nickname, signal)
+      if (signal.aborted) return
+      try {
+        const url = new URL(window.location.href)
+        const index = url.hash.indexOf('?')
+        if (index !== -1) {
+          const anchor = url.hash.indexOf('#', index + 1)
+          const end = anchor === -1 ? url.hash.length : anchor
+          const search = url.hash.slice(index + 1, end).split('&')
+            .filter((part) => part && !new URLSearchParams(part).has('sso')).join('&')
+          url.hash = url.hash.slice(0, index) + (search ? `?${search}` : '') + url.hash.slice(end)
+          window.history.replaceState(window.history.state, '', url)
+        }
+      } catch {
+        // The authenticated page clears the stale return marker after reload.
+      }
+      retire({ broadcast: true })
+    })
   }
 
   async function signOut(): Promise<void> {
-    if (!user.value || loggingOut.value || lifetime.signal.aborted) return
+    const current = user.value
+    if (!current || loggingOut.value || sessionMutation || lifetime.signal.aborted) return
     loggingOut.value = true
-    try {
+    await changeSession(async () => {
       try {
-        await api.logout(user.value.id, lifetime.signal)
+        await api.logout(current.id, lifetime.signal)
       } catch (error) {
         if (lifetime.signal.aborted) return
         if (error instanceof api.AccountApiError && error.code === 'ACCOUNT_CHANGED') {
@@ -216,10 +278,10 @@ export const useAccountStore = defineStore('account', () => {
       if (lifetime.signal.aborted) return
       dismissImport()
       retire({ broadcast: true })
-    } finally {
+    }).finally(() => {
       loggingOut.value = false
       if (syncStatus.value === 'saving') void flush()
-    }
+    })
   }
 
   function scheduleSave(settings: CloudSettings): void {
@@ -361,7 +423,9 @@ export const useAccountStore = defineStore('account', () => {
   return {
     user, cloudReady, initialSettings, revision, startupUnavailable, loginDialogOpen,
     syncStatus, unsynced, loadingCloud, loggingOut, conflictReadable, transitioning, pageNotice,
-    importCandidate, dismissImport, importLocal, signIn, signOut, checkSession, sessionChangeKey: SESSION_CHANGE_KEY,
+    importCandidate, dismissImport, importLocal, signIn, signOut, checkSession, notifySessionChange,
+    registerWithOidc,
+    sessionChangeKey: SESSION_CHANGE_KEY,
     bootstrap, scheduleSave, retrySave, useCloudVersion, fetchConflict, overwriteCloud,
   }
 })

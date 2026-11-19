@@ -1,9 +1,11 @@
 import { createPinia, setActivePinia } from 'pinia'
+import { createApp, nextTick, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NoticeItem } from '../types/notice'
 import { defaultCloudSettings } from '../utils/cloudSettings'
 import { useAccountStore } from './account'
 import {
+  ACCOUNT_STARTUP_READY,
   ONBOARDING_CATEGORIES_STORAGE_KEY,
   ONBOARDING_CHANNELS_STORAGE_KEY,
   ONBOARDING_FLAG_STORAGE_KEY,
@@ -14,6 +16,13 @@ import {
   USER_SETTINGS_STORAGE_KEY,
   useUserSettingsStore,
 } from './userSettings'
+
+function deferAccountStartup() {
+  const startup = ref(false)
+  const pinia = createPinia()
+  createApp({}).use(pinia).provide(ACCOUNT_STARTUP_READY, startup)
+  return startup
+}
 
 type ThemeListener = (event: MediaQueryListEvent) => void
 
@@ -112,6 +121,119 @@ describe('user settings store', () => {
     vi.unstubAllGlobals()
   })
 
+  it('keeps settings neutral and only recovers guest data after account startup settles', async () => {
+    const guest = JSON.stringify({ blacklistKeywords: ['guest-only'], darkMode: 'dark' })
+    window.localStorage.setItem(USER_SETTINGS_STORAGE_KEY, guest)
+    window.localStorage.setItem(ONBOARDING_FLAG_STORAGE_KEY, 'true')
+    const getItem = vi.spyOn(window.localStorage, 'getItem')
+    const setItem = vi.spyOn(window.localStorage, 'setItem')
+    const startup = deferAccountStartup()
+
+    store = useUserSettingsStore()
+    expect(store.scopeReady).toBe(false)
+    expect(store.hasOnboarded).toBe(false)
+    expect(store.blacklistKeywords).toEqual([])
+    expect(store.darkMode).toBe('auto')
+    expect(getItem).not.toHaveBeenCalledWith(USER_SETTINGS_STORAGE_KEY)
+    store.toggleStar('provisional-star')
+    store.setDarkMode('light')
+    store.markRead('visited-before-session')
+    store.completeOnboarding({ identity: 'custom', channels: [], categories: [], keywords: [] })
+    store.resetOnboarding()
+    expect(store.importSettings(guest).ok).toBe(false)
+    expect(store.persistImmediate()).toBe(false)
+    window.dispatchEvent(new Event('beforeunload'))
+    expect(setItem).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY)).toBe(guest)
+    expect(window.localStorage.getItem(ONBOARDING_FLAG_STORAGE_KEY)).toBe('true')
+
+    startup.value = true
+    await nextTick()
+    expect(store.scopeReady).toBe(true)
+    expect(store.hasOnboarded).toBe(true)
+    expect(store.blacklistKeywords).toEqual(['guest-only'])
+    expect(store.darkMode).toBe('dark')
+    expect(store.starredIds).toEqual([])
+    expect(store.readIds).toEqual(['visited-before-session'])
+    expect(store.persistImmediate()).toBe(true)
+    expect(JSON.parse(window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY) ?? '{}')).toMatchObject({
+      schemaVersion: USER_SETTINGS_SCHEMA_VERSION,
+      readIds: ['visited-before-session'],
+    })
+  })
+
+  it('applies delayed account cloud and device data without touching guest storage', async () => {
+    const guest = JSON.stringify({ starredIds: ['guest-star'], readIds: ['guest-read'] })
+    window.localStorage.setItem(USER_SETTINGS_STORAGE_KEY, guest)
+    const startup = deferAccountStartup()
+    const account = useAccountStore()
+    const user = { id: 'b'.repeat(32), username: null, displayName: '科大同学' }
+    const deviceKey = `notifai-account-device:${user.id}`
+    window.localStorage.setItem(deviceKey, JSON.stringify({ readIds: ['device-read'] }))
+    const getItem = vi.spyOn(window.localStorage, 'getItem')
+    const scheduleSave = vi.spyOn(account, 'scheduleSave')
+
+    store = useUserSettingsStore()
+    store.markRead('visited-before-session')
+    account.user = user
+    account.initialSettings = { ...defaultCloudSettings(), starredIds: ['cloud-star'] }
+    account.cloudReady = true
+    expect(store.scopeReady).toBe(false)
+    expect(store.starredIds).toEqual([])
+    expect(store.readIds).toEqual([])
+
+    startup.value = true
+    await nextTick()
+    expect(store.scopeReady).toBe(true)
+    expect(store.accountId).toBe(user.id)
+    expect(store.starredIds).toEqual(['cloud-star'])
+    expect(store.readIds).toEqual(['device-read', 'visited-before-session'])
+    expect(getItem).not.toHaveBeenCalledWith(USER_SETTINGS_STORAGE_KEY)
+    expect(window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY)).toBe(guest)
+    expect(JSON.parse(window.localStorage.getItem(deviceKey) ?? '{}').readIds).toEqual(store.readIds)
+    expect(scheduleSave).not.toHaveBeenCalled()
+  })
+
+  it('uses read-only account-device data when a known account cannot load cloud settings', async () => {
+    const guest = JSON.stringify({ starredIds: ['guest-star'], blacklistKeywords: ['guest-only'] })
+    const key = `notifai-account-device:${'c'.repeat(32)}`
+    const device = JSON.stringify({ readIds: ['account-read'], darkMode: 'dark', starredIds: ['stray-star'] })
+    window.localStorage.setItem(USER_SETTINGS_STORAGE_KEY, guest)
+    window.localStorage.setItem(key, device)
+    window.localStorage.setItem(ONBOARDING_IDENTITY_STORAGE_KEY, 'postgraduate')
+    const setItem = vi.spyOn(window.localStorage, 'setItem')
+    const startup = deferAccountStartup()
+    const account = useAccountStore()
+    const scheduleSave = vi.spyOn(account, 'scheduleSave')
+
+    store = useUserSettingsStore()
+    store.markRead('visited-before-session')
+    account.user = { id: 'c'.repeat(32), username: null, displayName: '科大同学' }
+    account.startupUnavailable = true
+    startup.value = true
+    await nextTick()
+
+    expect(store.scopeReady).toBe(true)
+    expect(store.hasOnboarded).toBe(true)
+    expect(store.userIdentity).toBe('custom')
+    expect(store.starredIds).toEqual([])
+    expect(store.blacklistKeywords).toEqual([])
+    expect(store.readIds).toEqual(['account-read'])
+    expect(store.darkMode).toBe('dark')
+    store.toggleStar('offline-star')
+    store.markRead('offline-read')
+    store.setDarkMode('light')
+    expect(store.importSettings(guest).ok).toBe(false)
+    expect(store.persistImmediate()).toBe(false)
+    expect(store.starredIds).toEqual([])
+    expect(store.readIds).toEqual(['account-read'])
+    expect(store.darkMode).toBe('dark')
+    expect(setItem).not.toHaveBeenCalled()
+    expect(scheduleSave).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY)).toBe(guest)
+    expect(window.localStorage.getItem(key)).toBe(device)
+  })
+
   it('isolates account settings and device fields from the guest snapshot and journal', () => {
     const guest = JSON.stringify({ schemaVersion: 3, blacklistKeywords: ['guest-only'] })
     const journalKey = `${USER_SETTINGS_JOURNAL_PREFIX}guest:1`
@@ -120,7 +242,7 @@ describe('user settings store', () => {
     window.localStorage.setItem(journalKey, journal)
     window.localStorage.setItem(ONBOARDING_IDENTITY_STORAGE_KEY, 'freshman')
     const account = useAccountStore()
-    const user = { id: 'a'.repeat(32), username: 'alice' }
+    const user = { id: 'a'.repeat(32), username: 'alice', displayName: 'alice' }
     account.user = user
     account.initialSettings = { ...defaultCloudSettings(), blacklistKeywords: ['cloud-only'] }
     account.cloudReady = true

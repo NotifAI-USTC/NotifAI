@@ -5,7 +5,8 @@ import { parseCloudSettings, type CloudSettings } from './cloudSettings'
 
 export interface AccountUser {
   id: string
-  username: string
+  username: string | null
+  displayName: string
 }
 
 export interface CloudSnapshot {
@@ -21,6 +22,9 @@ const ERRORS = {
   INVALID_CREDENTIALS: 401,
   LOGIN_RATE_LIMITED: 429,
   ACCOUNT_CHANGED: 409,
+  SSO_PROVIDER_UNAVAILABLE: 404,
+  SSO_SIGNUP_REQUIRED: 401,
+  SSO_ALREADY_REGISTERED: 409,
   REVISION_EXHAUSTED: 409,
   REVISION_CONFLICT: 412,
   BODY_TOO_LARGE: 413,
@@ -84,20 +88,39 @@ async function send(config: AxiosRequestConfig, status: number): Promise<AxiosRe
   throw new AccountApiError('INVALID_RESPONSE')
 }
 
+export function normalizeDisplayName(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  let length = 0
+  for (const character of trimmed) {
+    const point = character.codePointAt(0)!
+    if (
+      ++length > 32 || point <= 0x1f || (point >= 0x7f && point <= 0x9f) ||
+      point === 0x061c || (point >= 0x200e && point <= 0x200f) ||
+      (point >= 0x2028 && point <= 0x202e) || (point >= 0x2066 && point <= 0x2069) ||
+      (point >= 0xd800 && point <= 0xdfff)
+    ) return null
+  }
+  return trimmed
+}
+
 function parseUser(value: unknown): AccountUser {
   if (
     !isRecord(value) ||
-    Object.keys(value).length !== 2 ||
     typeof value.id !== 'string' ||
     value.id.length !== 32 ||
     !/^[a-f0-9]{32}$/.test(value.id) ||
-    typeof value.username !== 'string' ||
-    value.username.trim() !== value.username ||
-    !/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(value.username)
+    (value.username !== null && (
+      typeof value.username !== 'string' ||
+      value.username.trim() !== value.username ||
+      !/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(value.username)
+    )) ||
+    typeof value.displayName !== 'string' ||
+    normalizeDisplayName(value.displayName) !== value.displayName
   ) {
     throw new AccountApiError('INVALID_RESPONSE')
   }
-  return { id: value.id, username: value.username }
+  return { id: value.id, username: value.username, displayName: value.displayName }
 }
 
 function parseSnapshot(response: AxiosResponse<unknown>): CloudSnapshot {
@@ -129,11 +152,37 @@ export async function getCapabilities(signal?: AbortSignal): Promise<{ password:
   const { data } = await send({ url: '/auth/capabilities', signal }, 200)
   if (
     !isRecord(data) || Object.keys(data).length !== 2 || data.password !== true ||
-    !Array.isArray(data.ssoProviders) || data.ssoProviders.length !== 0
+    !Array.isArray(data.ssoProviders) ||
+    !data.ssoProviders.every((provider: unknown) => typeof provider === 'string')
   ) {
     throw new AccountApiError('INVALID_RESPONSE')
   }
-  return { password: true, ssoProviders: [] }
+  return { password: true, ssoProviders: data.ssoProviders }
+}
+
+export function getOidcStartUrl(): string {
+  return accountClient().getUri({ url: '/auth/sso/oidc/start' })
+}
+
+export async function getOidcSignup(signal?: AbortSignal): Promise<{ formId: string }> {
+  const { data } = await send({ url: '/auth/sso/oidc/signup', signal }, 200)
+  if (
+    !isRecord(data) || Object.keys(data).length !== 1 ||
+    typeof data.formId !== 'string' || data.formId.length !== 32 ||
+    !/^[a-f0-9]{32}$/.test(data.formId)
+  ) {
+    throw new AccountApiError('INVALID_RESPONSE')
+  }
+  return { formId: data.formId }
+}
+
+export async function completeOidcSignup(
+  formId: string, nickname: string, signal?: AbortSignal,
+): Promise<AccountUser> {
+  const { data } = await send({
+    method: 'POST', url: '/auth/sso/oidc/signup', data: { formId, nickname }, signal,
+  }, 201)
+  return parseUser(data)
 }
 
 export async function getSession(signal?: AbortSignal): Promise<AccountUser | null> {

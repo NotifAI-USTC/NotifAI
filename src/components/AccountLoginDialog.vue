@@ -3,9 +3,12 @@ import { ref, useTemplateRef, watch } from 'vue'
 import { useAccountStore } from '../stores/account'
 import { normalizeStoredSettings } from '../stores/settingsPersistence'
 import { useUserSettingsStore } from '../stores/userSettings'
-import { AccountApiError, getCapabilities } from '../utils/accountApi'
+import { AccountApiError, getCapabilities, getOidcStartUrl } from '../utils/accountApi'
 import { projectCloudSettings } from '../utils/cloudSettings'
 import AppBanner from './AppBanner.vue'
+
+const props = defineProps<{ ssoError: string }>()
+const emit = defineEmits<{ clearSsoError: [] }>()
 
 const account = useAccountStore()
 const settings = useUserSettingsStore()
@@ -14,6 +17,7 @@ const password = ref('')
 const visiblePassword = ref(false)
 const loadingCapabilities = ref(false)
 const canLogin = ref(false)
+const oidcUrl = ref('')
 const submitting = ref(false)
 const errorMessage = ref('')
 const usernameField = useTemplateRef('usernameField')
@@ -25,11 +29,15 @@ async function loadCapabilities() {
   const request = new AbortController()
   discovery = request
   canLogin.value = false
+  oidcUrl.value = ''
   errorMessage.value = ''
   loadingCapabilities.value = true
   try {
     const result = await getCapabilities(request.signal)
-    if (!request.signal.aborted) canLogin.value = result.password
+    if (!request.signal.aborted) {
+      canLogin.value = result.password
+      if (result.ssoProviders.includes('oidc')) oidcUrl.value = getOidcStartUrl()
+    }
   } catch {
     if (!request.signal.aborted) errorMessage.value = '账号登录暂不可用，请重试'
   } finally {
@@ -47,12 +55,14 @@ watch(() => account.loginDialogOpen, (open, _, onCleanup) => {
     password.value = ''
     errorMessage.value = ''
     visiblePassword.value = false
+    emit('clearSsoError')
   }
 })
 
 async function submit() {
   if (!canLogin.value || submitting.value || !username.value.trim() || !password.value) return
   submitting.value = true
+  emit('clearSsoError')
   errorMessage.value = ''
   try {
     settings.persistImmediate()
@@ -63,11 +73,19 @@ async function submit() {
     if (code === 'INVALID_CREDENTIALS') errorMessage.value = '用户名或密码不正确'
     else if (code === 'LOGIN_RATE_LIMITED') errorMessage.value = '尝试次数过多，请稍后再试'
     else if (code === 'INVALID_INPUT') errorMessage.value = '请检查用户名和密码格式'
-    else errorMessage.value = '登录失败，请重试'
+    else if (code === 'ACCOUNT_CHANGED') {
+      await account.checkSession()
+      if (!account.transitioning) errorMessage.value = '当前登录状态已改变，请重新登录'
+    } else errorMessage.value = '登录失败，请重试'
   } finally {
     password.value = ''
     submitting.value = false
   }
+}
+
+function startOidc(event: MouseEvent) {
+  if (submitting.value) event.preventDefault()
+  else settings.persistImmediate()
 }
 </script>
 
@@ -85,8 +103,8 @@ async function submit() {
         <v-card-title id="account-login-title">登录 NotifAI</v-card-title>
         <v-card-text>
           <p class="mb-4">使用维护者分配的 NotifAI 账号，不要输入校园账号密码。</p>
-          <AppBanner v-if="errorMessage" type="error" class="mb-4" aria-live="polite">
-            {{ errorMessage }}
+          <AppBanner v-if="errorMessage || props.ssoError" type="error" class="mb-4" aria-live="polite">
+            {{ errorMessage || props.ssoError }}
           </AppBanner>
           <v-text-field
             ref="usernameField"
@@ -123,6 +141,13 @@ async function submit() {
         </v-card-text>
         <v-card-actions class="justify-end flex-wrap">
           <v-btn :disabled="submitting" @click="account.loginDialogOpen = false">取消</v-btn>
+          <v-btn
+            v-if="oidcUrl"
+            :href="submitting ? undefined : oidcUrl"
+            :disabled="submitting"
+            variant="tonal"
+            @click="startOidc"
+          >统一身份认证</v-btn>
           <v-btn
             v-if="!canLogin"
             :loading="loadingCapabilities"

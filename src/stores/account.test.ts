@@ -7,18 +7,37 @@ import { useAccountStore } from './account'
 vi.mock('../utils/accountApi', async (importOriginal) => ({
   ...await importOriginal<typeof api>(),
   getSession: vi.fn(),
+  login: vi.fn(),
+  completeOidcSignup: vi.fn(),
   getCloudSettings: vi.fn(),
   putCloudSettings: vi.fn(),
   logout: vi.fn(),
 }))
 
-const USER = { id: 'a'.repeat(32), username: 'alice' }
+const USER = { id: 'a'.repeat(32), username: 'alice', displayName: 'alice' }
+const SSO_USER = { id: 'b'.repeat(32), username: null, displayName: '新同学' }
 const LEFT = { ...defaultCloudSettings(), blacklistKeywords: ['left'] }
 const RIGHT = { ...defaultCloudSettings(), blacklistKeywords: ['right'] }
 const IMPORT_KEY = 'notifai-account-import'
 
 function snapshot(revision: number, settings: CloudSettings | null): api.CloudSnapshot {
   return { schemaVersion: 1, revision, settings }
+}
+
+function stubAccountWindow() {
+  const browserWindow = window
+  const reload = vi.fn()
+  const replaceState = vi.fn()
+  const broadcast = vi.fn()
+  vi.stubGlobal('window', {
+    addEventListener: browserWindow.addEventListener.bind(browserWindow),
+    removeEventListener: browserWindow.removeEventListener.bind(browserWindow),
+    location: { reload, href: 'https://example.test/#/user?sso=signup&keep=1' },
+    history: { replaceState },
+    localStorage: { setItem: broadcast },
+    sessionStorage: browserWindow.sessionStorage,
+  })
+  return { reload, replaceState, broadcast }
 }
 
 let pinia: Pinia
@@ -123,4 +142,144 @@ it('leaves the account and import candidate intact when logout or an import fail
   await account.retrySave()
   expect(account.syncStatus).toBe('synced')
   expect(window.sessionStorage.getItem(IMPORT_KEY)).toBeNull()
+})
+
+it('keeps the verified account on a startup settings identity error without reloading', async () => {
+  const { reload } = stubAccountWindow()
+  const account = useAccountStore()
+  vi.mocked(api.getCloudSettings).mockReset()
+  vi.mocked(api.getCloudSettings).mockRejectedValue(new api.AccountApiError('ACCOUNT_CHANGED'))
+  await account.bootstrap()
+
+  expect(account.user).toEqual(USER)
+  expect(account.startupUnavailable).toBe(true)
+  expect(account.cloudReady).toBe(false)
+  expect(reload).not.toHaveBeenCalled()
+})
+
+it('awaits a queued session recheck even if the preceding request fails', async () => {
+  const { reload } = stubAccountWindow()
+  const account = useAccountStore()
+  let failFirst!: (error: Error) => void
+  let completeSecond!: (current: api.AccountUser) => void
+  vi.mocked(api.getSession)
+    .mockReturnValueOnce(new Promise((_, reject) => { failFirst = reject }))
+    .mockReturnValueOnce(new Promise((resolve) => { completeSecond = resolve }))
+
+  const first = account.checkSession()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(api.getSession).toHaveBeenCalledTimes(1)
+  const settled = vi.fn()
+  const second = account.checkSession().then(settled)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(settled).not.toHaveBeenCalled()
+  failFirst(new api.AccountApiError('NETWORK'))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(api.getSession).toHaveBeenCalledTimes(2)
+  expect(settled).not.toHaveBeenCalled()
+
+  completeSecond(USER)
+  await Promise.all([first, second])
+  expect(account.transitioning).toBe(true)
+  expect(reload).toHaveBeenCalledOnce()
+  expect(settled).toHaveBeenCalledOnce()
+})
+
+it.each(['password', 'oidc'])('serializes password and signup in two tabs when %s writes first', async (winner) => {
+  const { reload, replaceState, broadcast } = stubAccountWindow()
+  const peer = createPinia()
+  try {
+    const passwordTab = useAccountStore(pinia)
+    const signupTab = useAccountStore(peer)
+    let queue: Promise<void> = Promise.resolve()
+    const request = vi.fn((_name: string, { signal }: LockOptions, write: () => Promise<void>) => {
+      const acquired = queue.then(() => {
+        if (signal?.aborted) throw signal.reason
+        return write()
+      })
+      queue = acquired.catch(() => undefined)
+      return acquired
+    })
+    vi.stubGlobal('navigator', { locks: { request } })
+
+    let current: api.AccountUser | null = null
+    const winningUser = winner === 'password' ? USER : SSO_USER
+    const winningWrite = winner === 'password' ? api.login : api.completeOidcSignup
+    const blockedWrite = winner === 'password' ? api.completeOidcSignup : api.login
+    let finishWrite!: () => void
+    const response = new Promise<void>((resolve) => { finishWrite = resolve })
+    vi.mocked(api.getSession).mockImplementation(async () => current)
+    vi.mocked(winningWrite).mockImplementation(async () => {
+      await response
+      current = winningUser
+      return winningUser
+    })
+
+    const password = () => passwordTab.signIn('alice', 'password', LEFT)
+    const signup = () => signupTab.registerWithOidc('form-id', SSO_USER.displayName)
+    const first = (winner === 'password' ? password : signup)()
+    await vi.advanceTimersByTimeAsync(0)
+    const second = (winner === 'password' ? signup : password)()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(request.mock.calls[0]?.[0]).toBe(request.mock.calls[1]?.[0])
+    expect(api.getSession).toHaveBeenCalledTimes(1)
+    expect(winningWrite).toHaveBeenCalledOnce()
+    expect(blockedWrite).not.toHaveBeenCalled()
+    expect(vi.mocked(winningWrite).mock.calls[0]?.[2]).toBe(request.mock.calls[0]?.[1].signal)
+
+    finishWrite()
+    await Promise.all([first, second])
+
+    expect(api.getSession).toHaveBeenCalledTimes(2)
+    expect(blockedWrite).not.toHaveBeenCalled()
+    expect(request.mock.calls.every(([, { signal }]) => signal?.aborted)).toBe(true)
+    expect(reload).toHaveBeenCalledTimes(2)
+    expect(broadcast).toHaveBeenCalledWith(passwordTab.sessionChangeKey, expect.any(String))
+    expect(broadcast).toHaveBeenCalledOnce()
+    const candidate = window.sessionStorage.getItem(IMPORT_KEY)
+    if (winner === 'password') {
+      expect(candidate && JSON.parse(candidate)).toEqual({ userId: USER.id, settings: LEFT })
+      expect(replaceState).not.toHaveBeenCalled()
+    } else {
+      expect(candidate).toBeNull()
+      expect(replaceState).toHaveBeenCalledWith(undefined, '', expect.objectContaining({ hash: '#/user?keep=1' }))
+    }
+  } finally {
+    disposePinia(peer)
+  }
+})
+
+it.each([undefined, 'SecurityError'])('rechecks before a write when Web Locks are unavailable (%s)', async (blocked) => {
+  const { reload } = stubAccountWindow()
+  const account = useAccountStore()
+  const locks = blocked ? {
+    request: vi.fn().mockRejectedValue(new DOMException('unavailable', blocked)),
+  } : undefined
+  vi.stubGlobal('navigator', { locks })
+
+  await account.registerWithOidc('form-id', SSO_USER.displayName)
+
+  expect(api.getSession).toHaveBeenCalledWith(expect.any(AbortSignal))
+  expect(api.completeOidcSignup).not.toHaveBeenCalled()
+  expect(reload).toHaveBeenCalledOnce()
+})
+
+it('aborts a queued account write when its store is disposed', async () => {
+  const account = useAccountStore()
+  const request = vi.fn((_name: string, { signal }: LockOptions) => new Promise<never>((_, reject) => {
+    signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+  }))
+  vi.stubGlobal('navigator', { locks: { request } })
+
+  const attempt = account.signIn('alice', 'password', LEFT)
+  const aborted = expect(attempt).rejects.toHaveProperty('name', 'AbortError')
+  await vi.advanceTimersByTimeAsync(0)
+  expect(request).toHaveBeenCalledOnce()
+  disposePinia(pinia)
+  await aborted
+
+  expect(api.getSession).not.toHaveBeenCalled()
+  expect(api.login).not.toHaveBeenCalled()
 })
