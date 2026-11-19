@@ -4,6 +4,8 @@ import type { NoticeCategoryKey, NoticeItem } from '../types/notice'
 import { isNoticeCategoryKey, SOURCE_CATALOG_FALLBACK } from '../types/notice'
 import { isValidNoticeId } from '../utils/validation'
 import type { Folder } from '../types/folder'
+import { projectCloudSettings, type CloudSettings } from '../utils/cloudSettings'
+import { useAccountStore } from './account'
 import {
   FUTURE_SCHEMA_ERROR,
   MAX_JOURNAL_BYTES,
@@ -30,6 +32,7 @@ import {
   createSettingsJournal,
   createSyncClientId,
   getDirtyFields,
+  isRecord,
   isSettingsJournalEmpty,
   journalDependencyClock,
   loadSettings,
@@ -38,6 +41,7 @@ import {
   mergeSyncClocks,
   normalizeDepartmentName,
   normalizeFolderIcon,
+  normalizeStoredSettings,
   parseSettingsValue,
   pruneSettingsJournal,
   readStoredSettingsJournals,
@@ -129,8 +133,36 @@ function removeOnboardingItem(key: string): boolean {
   }
 }
 
+function loadDeviceSettings(storageKey: string): StoredSettings {
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    const value: unknown = raw ? JSON.parse(raw) : null
+    if (isRecord(value)) {
+      return normalizeStoredSettings({
+        readIds: value.readIds,
+        darkMode: value.darkMode,
+        notificationEnabled: value.notificationEnabled,
+      })
+    }
+  } catch {
+    // A missing or corrupt device snapshot does not affect cloud preferences.
+  }
+  return createDefaultSettings()
+}
+
 export const useUserSettingsStore = defineStore('userSettings', () => {
-  const loaded = loadSettings()
+  const account = useAccountStore()
+  const accountId = account.cloudReady ? account.user?.id ?? null : null
+  const deviceKey = accountId ? `notifai-account-device:${accountId}` : null
+  const awaitingCloud = account.user !== null && !account.cloudReady
+  const loaded = deviceKey
+    ? {
+        settings: cloneStoredSettings({ ...loadDeviceSettings(deviceKey), ...account.initialSettings }),
+        error: '',
+        readOnly: false,
+        needsMigration: false,
+      }
+    : loadSettings()
   const saved = loaded.settings
   const syncClientId = createSyncClientId()
   let lastSyncedSettings = cloneStoredSettings(saved)
@@ -175,8 +207,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   const notificationEnabled = ref<boolean>(saved.notificationEnabled)
   const persistenceError = ref(loaded.error)
   const systemPrefersDark = ref(false)
-  const hasOnboarded = ref(readOnboardingFlag())
-  const userIdentity = ref<OnboardingIdentity>(readOnboardingIdentity())
+  const hasOnboarded = ref(accountId !== null || readOnboardingFlag())
+  const userIdentity = ref<OnboardingIdentity>(accountId ? 'custom' : readOnboardingIdentity())
 
   // Onboarding uses the same canonical preference arrays as the rest of the
   // app. These aliases keep the onboarding contract descriptive without
@@ -243,8 +275,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   // ---- 内部：持久化（debounce 300ms）----
   let persistTimer: ReturnType<typeof setTimeout> | null = null
 
-  function createSnapshot(): StoredSettings {
-    return cloneStoredSettings({
+  function currentSettings(): StoredSettings {
+    return {
       schemaVersion: USER_SETTINGS_SCHEMA_VERSION,
       syncClock: currentSyncClock,
       syncWriter: currentSyncWriter,
@@ -262,7 +294,36 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       darkMode: darkMode.value,
       folders: folders.value,
       notificationEnabled: notificationEnabled.value,
+    }
+  }
+
+  function createSnapshot(): StoredSettings {
+    return cloneStoredSettings(currentSettings())
+  }
+
+  let deviceBaseline = deviceKey ? JSON.stringify({
+    readIds: saved.readIds,
+    darkMode: saved.darkMode,
+    notificationEnabled: saved.notificationEnabled,
+  }) : ''
+
+  function persistAccountSettings(deviceOnly = false): boolean {
+    if (!deviceKey) return false
+    if (!deviceOnly) account.scheduleSave(projectCloudSettings(currentSettings()))
+    const raw = JSON.stringify({
+      readIds: readIds.value,
+      darkMode: darkMode.value,
+      notificationEnabled: notificationEnabled.value,
     })
+    if (raw === deviceBaseline) return true
+    try {
+      window.localStorage.setItem(deviceKey, raw)
+      deviceBaseline = raw
+      return true
+    } catch {
+      persistenceError.value = '本机存储写入失败，本次设置变更可能无法保留'
+      return false
+    }
   }
 
   function stageUnflushedOperation(): void {
@@ -778,7 +839,15 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     }
   }
 
-  function persist(): void {
+  function persist(deviceOnly = false): void {
+    if (deviceKey) {
+      persistAccountSettings(deviceOnly)
+      return
+    }
+    if (awaitingCloud) {
+      applySettings(stableViewSettings)
+      return
+    }
     if (storageReadOnly) {
       applySettings(stableViewSettings)
       persistenceError.value = FUTURE_SCHEMA_ERROR
@@ -859,6 +928,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
 
   /** 立即持久化（页面卸载前调用） */
   function persistImmediate(): boolean {
+    if (deviceKey) return persistAccountSettings()
+    if (awaitingCloud) return false
     if (persistTimer) {
       clearTimeout(persistTimer)
       persistTimer = null
@@ -890,6 +961,13 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       settings.syncClock,
     )
     currentSyncWriter = settings.syncWriter
+    applyPreferenceFields(settings)
+    readIds.value = [...settings.readIds]
+    darkMode.value = settings.darkMode
+    notificationEnabled.value = settings.notificationEnabled
+  }
+
+  function applyPreferenceFields(settings: CloudSettings): void {
     subscriptionMode.value = settings.subscriptionMode
     subscribedDepts.value = [...settings.subscribedDepts]
     categoryMode.value = settings.categoryMode
@@ -897,13 +975,18 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     blacklistKeywords.value = [...settings.blacklistKeywords]
     starredIds.value = [...settings.starredIds]
     starredFolderMap.value = Object.assign(Object.create(null), settings.starredFolderMap)
-    readIds.value = [...settings.readIds]
     pinnedIds.value = [...settings.pinnedIds]
     importantIds.value = [...settings.importantIds]
-    customTags.value = Object.assign(Object.create(null), settings.customTags)
-    darkMode.value = settings.darkMode
+    const tags: Record<string, string[]> = Object.create(null)
+    for (const [id, list] of Object.entries(settings.customTags)) tags[id] = [...list]
+    customTags.value = tags
     folders.value = settings.folders.map((folder) => ({ ...folder }))
-    notificationEnabled.value = settings.notificationEnabled
+  }
+
+  function applyCloudSettings(settings: CloudSettings): void {
+    if (!accountId) return
+    registerSources(settings.subscribedDepts)
+    applyPreferenceFields(settings)
   }
 
   let mediaQuery: MediaQueryList | null = null
@@ -1027,6 +1110,9 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       systemPrefersDark.value = mediaQuery.matches
       mediaQuery.addEventListener('change', onSystemThemeChange)
     }
+  }
+
+  if (typeof window !== 'undefined' && !accountId && !awaitingCloud) {
     window.addEventListener('beforeunload', persistImmediate)
     window.addEventListener('storage', onStorage)
 
@@ -1056,7 +1142,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     storeDisposed = true
     if (persistTimer) clearTimeout(persistTimer)
     mediaQuery?.removeEventListener('change', onSystemThemeChange)
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !accountId && !awaitingCloud) {
       window.removeEventListener('beforeunload', persistImmediate)
       window.removeEventListener('storage', onStorage)
     }
@@ -1064,6 +1150,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
 
   // ---- 操作 ----
   function completeOnboarding(config: OnboardingConfig): void {
+    if (accountId || awaitingCloud) return
     const identity: OnboardingIdentity =
       config.identity === 'freshman' ||
       config.identity === 'undergraduate' ||
@@ -1118,6 +1205,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   }
 
   function resetOnboarding(): void {
+    if (accountId || awaitingCloud) return
     hasOnboarded.value = false
     userIdentity.value = 'freshman'
 
@@ -1410,7 +1498,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     if (isValidNoticeId(id) && !readIds.value.includes(id)) {
       readIds.value.push(id)
       if (readIds.value.length > MAX_STORED_ITEMS) readIds.value.shift()
-      persist()
+      persist(true)
     }
   }
 
@@ -1426,19 +1514,19 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     if (readIds.value.length > MAX_STORED_ITEMS) {
       readIds.value = readIds.value.slice(-MAX_STORED_ITEMS)
     }
-    if (changed) persist()
+    if (changed) persist(true)
   }
 
   function setDarkMode(mode: DarkMode): void {
     if (darkMode.value === mode) return
     darkMode.value = mode
-    persist()
+    persist(true)
   }
 
   function setNotificationEnabled(enabled: boolean): void {
     if (notificationEnabled.value === enabled) return
     notificationEnabled.value = enabled
-    persist()
+    persist(true)
   }
 
   /** 导出全部用户偏好为 JSON 字符串（含版本号，便于重新导入）。 */
@@ -1468,6 +1556,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
 
   /** 导入偏好 JSON：校验后作为新的本地基线快照写入并应用。 */
   function importSettings(json: string): { ok: boolean; message: string } {
+    if (accountId || awaitingCloud) return { ok: false, message: '请退出账号后再导入本机偏好备份' }
     try {
       const parsed = parseSettingsValue(json)
       if (parsed.readOnly) return { ok: false, message: FUTURE_SCHEMA_ERROR }
@@ -1570,7 +1659,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   function clearReadHistory(): void {
     if (readIds.value.length === 0) return
     readIds.value = []
-    persist()
+    persist(true)
   }
 
   /** 缓存通知数据供跨页面使用 */
@@ -1602,6 +1691,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
 
   return {
     // 状态
+    accountId,
     subscriptionMode,
     subscribedDepts,
     effectiveSubscribedDepts,
@@ -1634,6 +1724,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     isDark,
     allCustomTags,
     // 操作
+    applyCloudSettings,
     completeOnboarding,
     resetOnboarding,
     registerSources,

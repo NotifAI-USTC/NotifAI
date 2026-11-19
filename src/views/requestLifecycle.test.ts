@@ -1,4 +1,5 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import { getLocalToday, shiftLocalMonth } from '../utils/date'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -190,6 +191,7 @@ describe('view request lifecycle', () => {
   const wrappers: Array<{ unmount: () => void }> = []
 
   beforeEach(() => {
+    setActivePinia(createPinia())
     vi.clearAllMocks()
     mocks.readNoticeFeedCache.mockResolvedValue(null)
     mocks.fetchDeadlineNotices.mockResolvedValue({ items: [], total: 0 })

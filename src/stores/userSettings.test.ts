@@ -1,6 +1,8 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NoticeItem } from '../types/notice'
+import { defaultCloudSettings } from '../utils/cloudSettings'
+import { useAccountStore } from './account'
 import {
   ONBOARDING_CATEGORIES_STORAGE_KEY,
   ONBOARDING_CHANNELS_STORAGE_KEY,
@@ -108,6 +110,40 @@ describe('user settings store', () => {
     store = null
     vi.useRealTimers()
     vi.unstubAllGlobals()
+  })
+
+  it('isolates account settings and device fields from the guest snapshot and journal', () => {
+    const guest = JSON.stringify({ schemaVersion: 3, blacklistKeywords: ['guest-only'] })
+    const journalKey = `${USER_SETTINGS_JOURNAL_PREFIX}guest:1`
+    const journal = JSON.stringify(createStoredJournal('guest', 1, { darkMode: 'dark' }))
+    window.localStorage.setItem(USER_SETTINGS_STORAGE_KEY, guest)
+    window.localStorage.setItem(journalKey, journal)
+    window.localStorage.setItem(ONBOARDING_IDENTITY_STORAGE_KEY, 'freshman')
+    const account = useAccountStore()
+    const user = { id: 'a'.repeat(32), username: 'alice' }
+    account.user = user
+    account.initialSettings = { ...defaultCloudSettings(), blacklistKeywords: ['cloud-only'] }
+    account.cloudReady = true
+    const scheduleSave = vi.spyOn(account, 'scheduleSave')
+
+    store = useUserSettingsStore()
+    expect(store.blacklistKeywords).toEqual(['cloud-only'])
+    expect(store.hasOnboarded).toBe(true)
+    expect(store.darkMode).toBe('auto')
+    store.markRead('device-notice')
+    store.applyCloudSettings({ ...defaultCloudSettings(), blacklistKeywords: ['other-device'] })
+    expect(store.blacklistKeywords).toEqual(['other-device'])
+    expect(store.readIds).toEqual(['device-notice'])
+    expect(scheduleSave).not.toHaveBeenCalled()
+    expect(store.importSettings(guest).ok).toBe(false)
+    store.resetOnboarding()
+    expect(window.localStorage.getItem(ONBOARDING_IDENTITY_STORAGE_KEY)).toBe('freshman')
+    expect(window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY)).toBe(guest)
+    expect(window.localStorage.getItem(journalKey)).toBe(journal)
+    const device = window.localStorage.getItem(`notifai-account-device:${user.id}`)
+    expect(device && JSON.parse(device)).toEqual({
+      readIds: ['device-notice'], darkMode: 'auto', notificationEnabled: false,
+    })
   })
 
   it('migrates unversioned settings and rebuilds untrusted records safely', () => {

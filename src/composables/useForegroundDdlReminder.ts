@@ -5,6 +5,7 @@
  */
 
 import { onBeforeUnmount, onMounted } from 'vue'
+import { useAccountStore } from '../stores/account'
 import { useUserSettingsStore } from '../stores/userSettings'
 import { normalizeNoticeSource } from '../types/notice'
 import { calculateRemainingDays } from '../utils/date'
@@ -17,10 +18,10 @@ const MAX_DEADLINES_TO_SCAN = 50
 const TRACKING_STORAGE_KEY = 'notifai-ddl-reminders'
 const TRACKING_LIMIT = 200
 
-function loadTrackedReminders(): Set<string> {
+function loadTrackedReminders(storageKey: string): Set<string> {
   if (typeof window === 'undefined') return new Set()
   try {
-    const raw = window.localStorage.getItem(TRACKING_STORAGE_KEY)
+    const raw = window.localStorage.getItem(storageKey)
     if (!raw) return new Set()
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return new Set()
@@ -32,13 +33,13 @@ function loadTrackedReminders(): Set<string> {
   }
 }
 
-function trackReminder(key: string): void {
+function trackReminder(storageKey: string, key: string): void {
   if (typeof window === 'undefined') return
   try {
-    const tracked = loadTrackedReminders()
+    const tracked = loadTrackedReminders(storageKey)
     tracked.add(key)
     const next = Array.from(tracked).slice(-TRACKING_LIMIT)
-    window.localStorage.setItem(TRACKING_STORAGE_KEY, JSON.stringify(next))
+    window.localStorage.setItem(storageKey, JSON.stringify(next))
   } catch {
     // 跟踪失败不阻塞提醒主流程
   }
@@ -47,11 +48,14 @@ function trackReminder(key: string): void {
 /** 应用打开期间启动前台 DDL 检查；需授权通知且 store.notificationEnabled 开启。 */
 export function useForegroundDdlReminder(): void {
   const store = useUserSettingsStore()
+  const account = useAccountStore()
+  const storageKey = store.accountId ? `${TRACKING_STORAGE_KEY}:${store.accountId}` : TRACKING_STORAGE_KEY
   let timer: ReturnType<typeof setInterval> | null = null
   let controller: AbortController | null = null
   let checking = false
 
   async function check(): Promise<void> {
+    if (account.transitioning || (account.user && !account.cloudReady)) return
     if (!store.notificationEnabled || !isNotificationSupported()) return
     if (Notification.permission !== 'granted') return
 
@@ -66,7 +70,7 @@ export function useForegroundDdlReminder(): void {
     controller?.abort()
     const requestController = new AbortController()
     controller = requestController
-    const tracked = loadTrackedReminders()
+    const tracked = loadTrackedReminders(storageKey)
     try {
       const result = await fetchDeadlineNotices(
         {
@@ -79,7 +83,7 @@ export function useForegroundDdlReminder(): void {
       )
 
       for (const notice of result.items) {
-        if (requestController.signal.aborted) return
+        if (requestController.signal.aborted || account.transitioning) return
 
         const days = calculateRemainingDays(notice.deadline)
         if (days === null || days < 0 || days > REMINDER_WINDOW_DAYS) continue
@@ -98,7 +102,7 @@ export function useForegroundDdlReminder(): void {
         sendNotification('NotifAI · DDL 提醒', {
           body: `${notice.title}\n截止日期：${notice.deadline}`,
         })
-        trackReminder(key)
+        trackReminder(storageKey, key)
         tracked.add(key)
       }
     } catch (error) {
