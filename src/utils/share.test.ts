@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NoticeItem } from '../types/notice'
-import { copyText, shareNotice } from './share'
+import { copyNoticeContent, copyText, shareNotice } from './share'
 
 const notice: NoticeItem = {
   id: 'notice-1',
@@ -49,6 +49,18 @@ describe('copyText', () => {
     await expect(copyText('notice')).resolves.toBe(true)
     expect(execCommand).toHaveBeenCalledWith('copy')
     expect(document.querySelector('textarea')).toBeNull()
+  })
+
+  it('prints an unknown publication date instead of null when copying', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+
+    await expect(copyNoticeContent({ ...notice, publishDate: null })).resolves.toBe(true)
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('发布时间: 未知'))
+    expect(writeText).not.toHaveBeenCalledWith(expect.stringContaining('null'))
   })
 })
 

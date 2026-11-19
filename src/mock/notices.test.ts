@@ -54,7 +54,10 @@ describe('mock notice API', () => {
     expect(new Set(items.map((notice) => notice.id)).size).toBe(mockNotices.length)
     expect(items.map((notice) => notice.id)).toEqual(
       [...items]
-        .sort((a, b) => b.publishDate.localeCompare(a.publishDate) || a.id.localeCompare(b.id))
+        .sort(
+          (a, b) =>
+            (b.publishDate ?? '').localeCompare(a.publishDate ?? '') || a.id.localeCompare(b.id),
+        )
         .map((notice) => notice.id),
     )
   })
@@ -103,8 +106,8 @@ describe('mock notice API', () => {
     const target = mockNotices[0]
     const response = mockFetchNotices({
       sources: [target.source],
-      dateFrom: target.publishDate,
-      dateTo: target.publishDate,
+      dateFrom: target.publishDate ?? '',
+      dateTo: target.publishDate ?? '',
       pageSize: 1_000,
     })
 
@@ -150,7 +153,7 @@ describe('mock new endpoints', () => {
         (a, b) =>
           mockNotices
             .find((n) => n.id === b)!
-            .publishDate.localeCompare(mockNotices.find((n) => n.id === a)!.publishDate) ||
+            .publishDate?.localeCompare(mockNotices.find((n) => n.id === a)!.publishDate ?? '') ||
           a.localeCompare(b),
       ),
     )
@@ -165,7 +168,8 @@ describe('mock new endpoints', () => {
     const result = mockFetchCalendarNotices({ month })
 
     for (const item of result.items) {
-      const touches = item.publishDate.slice(0, 7) === month || item.deadline?.slice(0, 7) === month
+      const touches =
+        item.publishDate?.slice(0, 7) === month || item.deadline?.slice(0, 7) === month
       expect(touches).toBe(true)
     }
     // 与范围查询结果一致
@@ -185,7 +189,7 @@ describe('mock new endpoints', () => {
     expect(result.items.length).toBeGreaterThan(0)
     for (const item of result.items) {
       expect(
-        getIsoWeek(item.publishDate) === week || getIsoWeek(item.deadline ?? '') === week,
+        getIsoWeek(item.publishDate ?? '') === week || getIsoWeek(item.deadline ?? '') === week,
       ).toBe(true)
     }
   })

@@ -1,5 +1,6 @@
 import type {
   CalendarItem,
+  CalendarListResponse,
   DeadlineItem,
   DeadlineListResponse,
   NoticeCategoryItem,
@@ -10,7 +11,12 @@ import type {
   SourceItem,
   StatsResponse,
 } from '../types/notice'
-import { isNoticeCategoryKey, isNoticeContentType, NOTICE_CATEGORY_DEFINITIONS } from '../types/notice'
+import {
+  isNoticeCategoryKey,
+  isNoticeContentType,
+  normalizeNoticeSource,
+  NOTICE_CATEGORY_DEFINITIONS,
+} from '../types/notice'
 
 const LIMITS = {
   id: 128,
@@ -168,6 +174,12 @@ export function assertDateOnly(value: unknown, path = '日期'): string {
   return expectDate(value, path)
 }
 
+/** 解析可为空的日期字段；null/undefined/空字符串归一化为 null。 */
+export function optionalDate(value: unknown, path: string): string | null {
+  if (value === undefined || value === null || value === '') return null
+  return expectDate(value, path)
+}
+
 export function normalizeHttpUrl(value: unknown, baseUrl?: string): string | null {
   if (typeof value !== 'string' || value.length === 0 || value.length > LIMITS.url) {
     return null
@@ -184,16 +196,23 @@ export function normalizeHttpUrl(value: unknown, baseUrl?: string): string | nul
   }
 }
 
+/** 允许作为通知来源和正文图片来源的机构域名及其子域。 */
+export function isTrustedNoticeHost(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+  return (
+    host === 'ustc.edu.cn' ||
+    host.endsWith('.ustc.edu.cn') ||
+    host === 'ustclug.org' ||
+    host.endsWith('.ustclug.org')
+  )
+}
+
 export function normalizeTrustedNoticeUrl(value: unknown): string | null {
   const href = normalizeHttpUrl(value)
   if (!href) return null
 
   const url = new URL(href)
-  const hostname = url.hostname.toLowerCase()
-  if (
-    url.protocol !== 'https:' ||
-    (hostname !== 'ustc.edu.cn' && !hostname.endsWith('.ustc.edu.cn'))
-  ) {
+  if (url.protocol !== 'https:' || !isTrustedNoticeHost(url.hostname)) {
     return null
   }
   return href
@@ -207,12 +226,10 @@ function expectHttpUrl(value: unknown, path: string): string {
   return url
 }
 
-function expectTrustedNoticeUrl(value: unknown, path: string): string {
-  const url = normalizeTrustedNoticeUrl(value)
-  if (!url) {
-    throw new DataValidationError(`${path} 必须是中国科大 HTTPS 地址`)
-  }
-  return url
+/** 非空但不受信任的来源地址清空，避免一条坏字段丢弃整条通知。 */
+function optionalTrustedNoticeUrl(value: unknown): string {
+  if (value === undefined || value === null || value === '') return ''
+  return normalizeTrustedNoticeUrl(value) ?? ''
 }
 
 export function assertNoticeId(value: unknown, path = '通知 ID'): string {
@@ -230,15 +247,15 @@ function parseNoticeFields(record: Record<string, unknown>, path: string): Notic
   return {
     id: assertNoticeId(record.id, `${path}.id`),
     title: expectString(record.title, `${path}.title`, LIMITS.title),
-    source: expectString(record.source, `${path}.source`, LIMITS.source),
+    source: normalizeNoticeSource(expectString(record.source, `${path}.source`, LIMITS.source)),
     categories: parseNoticeCategories(record.categories, `${path}.categories`),
     contentType: parseNoticeContentType(record.contentType, `${path}.contentType`),
-    publishDate: expectDate(record.publishDate, `${path}.publishDate`),
+    publishDate: optionalDate(record.publishDate, `${path}.publishDate`),
     aiSummary: optionalString(record.aiSummary, LIMITS.summary),
     deadline: record.deadline == null ? null : expectDate(record.deadline, `${path}.deadline`),
     targetAudience: optionalString(record.targetAudience, LIMITS.detail),
     coreAction: optionalString(record.coreAction, LIMITS.detail),
-    originUrl: expectTrustedNoticeUrl(record.originUrl, `${path}.originUrl`),
+    originUrl: optionalTrustedNoticeUrl(record.originUrl),
     cleanContent: optionalString(record.cleanContent, LIMITS.html),
     attachments: [],
     firstSeen: optionalIsoTimestamp(record.firstSeen, `${path}.firstSeen`),
@@ -377,15 +394,15 @@ export function parseCalendarItem(value: unknown, path = 'calendarItem'): Calend
   return {
     id: assertNoticeId(record.id, `${path}.id`),
     title: expectString(record.title, `${path}.title`, LIMITS.title),
-    source: expectString(record.source, `${path}.source`, LIMITS.source),
+    source: normalizeNoticeSource(expectString(record.source, `${path}.source`, LIMITS.source)),
     contentType: parseNoticeContentType(record.contentType, `${path}.contentType`),
-    publishDate: expectDate(record.publishDate, `${path}.publishDate`),
+    publishDate: optionalDate(record.publishDate, `${path}.publishDate`),
     deadline: record.deadline == null ? null : expectDate(record.deadline, `${path}.deadline`),
   }
 }
 
 /** 解析日历轻量列表响应，单条非法记录跳过并告警。 */
-export function parseCalendarListResponse(value: unknown): CalendarItem[] {
+export function parseCalendarListResponse(value: unknown): CalendarListResponse {
   const record = expectRecord(value, 'response')
   if (!Array.isArray(record.items)) {
     throw new DataValidationError('response.items 必须是数组')
@@ -413,7 +430,24 @@ export function parseCalendarListResponse(value: unknown): CalendarItem[] {
     seenIds.add(parsed.id)
     items.push(parsed)
   })
-  return items
+
+  const total =
+    record.total === undefined || record.total === null
+      ? items.length
+      : typeof record.total === 'number' &&
+          Number.isSafeInteger(record.total) &&
+          record.total >= items.length &&
+          record.total <= LIMITS.total
+        ? record.total
+        : null
+  if (total === null) {
+    throw new DataValidationError('response.total 无效')
+  }
+  if (record.truncated !== undefined && typeof record.truncated !== 'boolean') {
+    throw new DataValidationError('response.truncated 必须是布尔值')
+  }
+
+  return { items, total, truncated: record.truncated === true }
 }
 
 /** 解析即将截止轻量条目（GET /notices/deadlines）。 */
@@ -422,9 +456,9 @@ export function parseDeadlineItem(value: unknown, path = 'deadlineItem'): Deadli
   return {
     id: assertNoticeId(record.id, `${path}.id`),
     title: expectString(record.title, `${path}.title`, LIMITS.title),
-    source: expectString(record.source, `${path}.source`, LIMITS.source),
+    source: normalizeNoticeSource(expectString(record.source, `${path}.source`, LIMITS.source)),
     contentType: parseNoticeContentType(record.contentType, `${path}.contentType`),
-    publishDate: expectDate(record.publishDate, `${path}.publishDate`),
+    publishDate: optionalDate(record.publishDate, `${path}.publishDate`),
     deadline: expectDate(record.deadline, `${path}.deadline`),
     aiSummary: optionalString(record.aiSummary, LIMITS.summary),
     targetAudience: optionalString(record.targetAudience, LIMITS.detail),

@@ -24,7 +24,7 @@ Lint is read-only by default. Use `pnpm run lint:fix` and `pnpm run format` only
 
 - Vue 3 Composition API with `<script setup>`
 - TypeScript strict mode
-- Vuetify 3 with Vite auto-import
+- Vuetify 4 with Vite auto-import
 - Vue Router using `createWebHashHistory`
 - Pinia with validated, versioned LocalStorage persistence
 - Axios with runtime validation at the API boundary
@@ -59,6 +59,10 @@ The server owns notices, source classification, summaries, and extracted fields.
 8. Cancel or supersede stale list/detail requests before committing their results.
 9. Do not claim push delivery, feedback submission, or all-record operations unless the full backend/browser path exists.
 10. All core actions must work with keyboard and screen readers; icon-only buttons need accessible names.
+11. `publishDate` is nullable and `""` means unknown; render it as “未知” instead of dropping the notice. `deadline` remains a required date when non-null.
+12. `originUrl` may be empty and is trusted only for `ustc.edu.cn` / `ustclug.org` hosts over credential-free HTTPS. Never accept other hosts or insert untrusted URLs.
+13. Batch list lookups use `light: true`; never overwrite a cached full `cleanContent` with a light response.
+14. The Home feed virtualizes long lists. Keep keyboard order, pagination, filters, pull-to-refresh, and scroll restoration working when changing it.
 
 ## Environment
 

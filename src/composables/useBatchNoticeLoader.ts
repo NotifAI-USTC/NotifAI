@@ -14,6 +14,8 @@ export interface BatchNoticeLoaderOptions {
   signal?: AbortSignal
   /** 详情已成功加载/从缓存恢复后，是否展示该条通知。 */
   include?: (notice: NoticeItem) => boolean
+  /** 只取列表字段，避免正文覆盖详情缓存；默认 true。 */
+  light?: boolean
 }
 
 export interface BatchNoticeLoaderResult {
@@ -42,6 +44,7 @@ export async function loadBatchNotices(
   options: BatchNoticeLoaderOptions = {},
 ): Promise<BatchNoticeLoaderResult> {
   const store = useUserSettingsStore()
+  const light = options.light ?? true
   const maxIds = Math.max(1, Math.floor(options.maxIds ?? MAX_BATCH_SIZE))
   const batchSize = Math.min(
     MAX_BATCH_SIZE,
@@ -79,7 +82,7 @@ export async function loadBatchNotices(
     const chunkIds = new Set(chunk)
 
     try {
-      const response = await fetchNoticesByIds(chunk, options.signal)
+      const response = await fetchNoticesByIds(chunk, options.signal, { light })
       throwIfAborted(options.signal)
 
       const receivedIds = new Set<string>()
@@ -87,9 +90,20 @@ export async function loadBatchNotices(
         // 即使后端误返回了请求外的条目，也不能将其混入当前用户列表。
         if (!chunkIds.has(notice.id) || receivedIds.has(notice.id)) continue
         receivedIds.add(notice.id)
-        store.cacheNotice(notice)
-        void writeNoticeDetailCache(notice)
-        appendIfIncluded(notice)
+        // 轻量响应不含正文；合并已有完整缓存，避免内存缓存被空正文覆盖。
+        const cached = light ? store.getCachedNotice(notice.id) : undefined
+        const displayNotice =
+          cached && !notice.cleanContent
+            ? {
+                ...notice,
+                cleanContent: cached.cleanContent,
+                attachments:
+                  notice.attachments.length > 0 ? notice.attachments : cached.attachments,
+              }
+            : notice
+        store.cacheNotice(displayNotice)
+        if (!light) void writeNoticeDetailCache(notice)
+        appendIfIncluded(displayNotice)
       }
 
       // 以请求 ID 与响应 ID 的差集为准，而不只依赖 missing 字段；这样

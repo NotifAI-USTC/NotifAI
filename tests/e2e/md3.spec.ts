@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Locator, type Page, type Route } from '@playwright/test'
+import { devices, expect, test, type Locator, type Page, type Route } from '@playwright/test'
 import { NOTICE_CATEGORY_DEFINITIONS } from '../../src/types/notice'
 import type { NoticeItem } from '../../src/types/notice'
 
@@ -11,14 +11,23 @@ declare global {
 
 function deferred() {
   let resolve!: () => void
-  const promise = new Promise<void>((done) => { resolve = done })
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
   return { promise, resolve }
 }
 
 // The same API fixtures exercise real Axios/validation in both dev and preview.
 // Production never enables the application mock module.
 const contentTypes: NoticeItem['contentType'][] = [
-  'public_notice', 'news', 'notice', 'other', null, 'public_notice', 'notice', null,
+  'public_notice',
+  'news',
+  'notice',
+  'other',
+  null,
+  'public_notice',
+  'notice',
+  null,
 ]
 const notices: NoticeItem[] = Array.from({ length: 8 }, (_, index) => ({
   id: `migration-${index + 1}`,
@@ -28,13 +37,25 @@ const notices: NoticeItem[] = Array.from({ length: 8 }, (_, index) => ({
       : `校园通知 ${index + 1}`,
   source: index % 2 === 0 ? '教务处' : '计算机学院',
   contentType: contentTypes[index],
-  categories: index === 0 ? ['exam', 'course_info', 'scholarship'] : index === 2 ? [] : index === 3 ? ['other'] : ['exam'],
-  publishDate: '2026-10-12',
+  categories:
+    index === 0
+      ? ['exam', 'course_info', 'scholarship']
+      : index === 2
+        ? []
+        : index === 3
+          ? ['other']
+          : ['exam'],
+  publishDate: index === 7 ? null : '2026-10-12',
   aiSummary: '请核对课程安排与报名时间，按通知要求完成办理。',
   deadline: index < 2 ? `2026-10-${13 + index}` : null,
   targetAudience: '全体本科生',
   coreAction: '登录教务系统办理',
-  originUrl: `https://www.teach.ustc.edu.cn/notice/${index + 1}.html`,
+  originUrl:
+    index === 4
+      ? ''
+      : index === 5
+        ? 'https://servers.ustclug.org/notices/6'
+        : `https://www.teach.ustc.edu.cn/notice/${index + 1}.html`,
   cleanContent:
     '# 通知正文\n\n请在截止日期前完成申请。\n\n| 办理事项 | 地点 |\n| --- | --- |\n| 课程报名 | 教务系统 |' +
     (index === 2 ? '\n\n量子芯片实验室安排。' : ''),
@@ -43,6 +64,7 @@ const notices: NoticeItem[] = Array.from({ length: 8 }, (_, index) => ({
 
 interface ApiState {
   failList: boolean
+  failCalendar: boolean
   pauseList: Promise<void> | null
   resumeList: () => void
   pauseDetail: Promise<void> | null
@@ -54,6 +76,7 @@ interface ApiState {
 async function installApi(page: Page): Promise<ApiState> {
   const state: ApiState = {
     failList: false,
+    failCalendar: false,
     pauseList: null,
     resumeList: () => undefined,
     pauseDetail: null,
@@ -94,7 +117,11 @@ async function installApi(page: Page): Promise<ApiState> {
     } else if (path === 'notices/deadlines') {
       response = { items: notices.filter((notice) => notice.deadline), total: 2 }
     } else if (path === 'notices/calendar') {
-      response = { items: notices }
+      if (state.failCalendar) {
+        await route.fulfill({ status: 503, json: { message: '暂时不可用' } })
+        return
+      }
+      response = { items: notices, total: notices.length, truncated: false }
     } else if (path === 'notices/batch') {
       const body: { ids: string[] } = route.request().postDataJSON()
       response = { items: notices.filter((notice) => body.ids.includes(notice.id)), missing: [] }
@@ -111,10 +138,15 @@ async function installApi(page: Page): Promise<ApiState> {
       const contentType = url.searchParams.get('contentType')
       const categories = url.searchParams.getAll('categories[]')
       const keyword = url.searchParams.get('keyword')?.toLocaleLowerCase()
-      const filtered = notices.filter((notice) =>
-        (contentType === null || notice.contentType === contentType) &&
-        (categories.length === 0 || notice.categories.some((category) => categories.includes(category))) &&
-        (!keyword || `${notice.title} ${notice.source} ${notice.aiSummary} ${notice.cleanContent}`.toLocaleLowerCase().includes(keyword)),
+      const filtered = notices.filter(
+        (notice) =>
+          (contentType === null || notice.contentType === contentType) &&
+          (categories.length === 0 ||
+            notice.categories.some((category) => categories.includes(category))) &&
+          (!keyword ||
+            `${notice.title} ${notice.source} ${notice.aiSummary} ${notice.cleanContent}`
+              .toLocaleLowerCase()
+              .includes(keyword)),
       )
       response = {
         items: filtered.map((notice) => ({ ...notice, cleanContent: '' })),
@@ -183,10 +215,12 @@ async function expectAlignedCardRows(page: Page): Promise<void> {
   await cards.evaluateAll(async (elements) => {
     await Promise.all(
       elements.flatMap((element) =>
-        element.parentElement!.getAnimations({ subtree: true })
-          .filter((animation) =>
-            Number.isFinite(Number(animation.effect?.getComputedTiming().endTime)) &&
-            animation.playState !== 'paused',
+        element
+          .parentElement!.getAnimations({ subtree: true })
+          .filter(
+            (animation) =>
+              Number.isFinite(Number(animation.effect?.getComputedTiming().endTime)) &&
+              animation.playState !== 'paused',
           )
           .map((animation) => animation.finished.catch(() => undefined)),
       ),
@@ -219,7 +253,9 @@ async function expectAlignedCardRows(page: Page): Promise<void> {
     for (const row of rows) {
       for (const field of ['height', 'bottom', 'actionsBottom'] as const) {
         const values = row.map((card) => card[field])
-        expect(Math.max(...values) - Math.min(...values), `same-row ${field}`).toBeLessThanOrEqual(1)
+        expect(Math.max(...values) - Math.min(...values), `same-row ${field}`).toBeLessThanOrEqual(
+          1,
+        )
       }
     }
   }
@@ -227,7 +263,9 @@ async function expectAlignedCardRows(page: Page): Promise<void> {
 
 for (const width of [320, 390, 768, 960, 1280, 1440]) {
   for (const theme of ['light', 'dark'] as const) {
-    test(`MD3 layout and DDL stay compact at ${width}px in ${theme} theme`, async ({ page }, testInfo) => {
+    test(`MD3 layout and DDL stay compact at ${width}px in ${theme} theme`, async ({
+      page,
+    }, testInfo) => {
       const problems: string[] = []
       page.on('pageerror', (error) => problems.push(error.message))
       page.on('console', (message) => {
@@ -251,7 +289,10 @@ for (const width of [320, 390, 768, 960, 1280, 1440]) {
         await expect(banner.locator('.ddl-notice-bar__pager-count')).toHaveText('2/2')
         await expect(banner.getByRole('button', { name: '下一条紧急 DDL' })).toBeDisabled()
       } else {
-        const deadline = await banner.locator('.ddl-notice-bar__chip-deadline').first().boundingBox()
+        const deadline = await banner
+          .locator('.ddl-notice-bar__chip-deadline')
+          .first()
+          .boundingBox()
         const slider = await banner.locator('.v-slide-group__container').boundingBox()
         expect(deadline!.x + deadline!.width).toBeLessThanOrEqual(slider!.x + slider!.width)
       }
@@ -276,11 +317,17 @@ for (const width of [320, 390, 768, 960, 1280, 1440]) {
         const share = card.getByRole('button', { name: '分享通知', exact: true })
         await share.focus()
         await expect(share).toBeFocused()
-        await expect.poll(() => card.locator('.card-actions').evaluate((element) =>
-          Number(getComputedStyle(element).opacity),
-        )).toBe(1)
+        await expect
+          .poll(() =>
+            card
+              .locator('.card-actions')
+              .evaluate((element) => Number(getComputedStyle(element).opacity)),
+          )
+          .toBe(1)
         await expectAlignedCardRows(page)
-        await page.screenshot({ path: testInfo.outputPath(`aligned-actions-${width}-${theme}.png`) })
+        await page.screenshot({
+          path: testInfo.outputPath(`aligned-actions-${width}-${theme}.png`),
+        })
       }
       await page
         .getByRole('link', { name: /^打开通知：/ })
@@ -499,7 +546,9 @@ for (const theme of ['light', 'dark'] as const) {
 }
 
 function cardFor(page: Page, index: number) {
-  return page.locator('.notice-card').filter({ has: page.getByRole('link', { name: `打开通知：${notices[index - 1].title}` }) })
+  return page
+    .locator('.notice-card')
+    .filter({ has: page.getByRole('link', { name: `打开通知：${notices[index - 1].title}` }) })
 }
 
 async function expectCards(page: Page, indices: number[]) {
@@ -517,13 +566,17 @@ async function selectContentType(page: Page, name: string) {
 }
 
 async function clearSelect(page: Page, name: string) {
-  const input = page.locator('.v-input').filter({ has: page.getByRole('combobox', { name, exact: true }) })
+  const input = page
+    .locator('.v-input')
+    .filter({ has: page.getByRole('combobox', { name, exact: true }) })
   await input.locator('.v-field__clearable').click()
 }
 
 for (const width of [320, 1280]) {
   for (const theme of ['light', 'dark'] as const) {
-    test(`temporary content type filters at ${width}px in ${theme} theme`, async ({ page }, testInfo) => {
+    test(`temporary content type filters at ${width}px in ${theme} theme`, async ({
+      page,
+    }, testInfo) => {
       test.setTimeout(90_000)
       const errors: string[] = []
       page.on('pageerror', (error) => errors.push(error.message))
@@ -531,10 +584,16 @@ for (const width of [320, 1280]) {
       await openApp(page, width, theme)
       await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
       expect(new URL(state.listUrls.at(-1)!).searchParams.has('contentType')).toBe(false)
-      for (const [index, label] of [[1, '公示'], [2, '新闻'], [3, '通知/公告'], [4, '其他']] as const) {
+      for (const [index, label] of [
+        [1, '公示'],
+        [2, '新闻'],
+        [3, '通知/公告'],
+        [4, '其他'],
+      ] as const) {
         await expect(cardFor(page, index).getByLabel(`内容类型：${label}`)).toBeVisible()
       }
-      for (const index of [5, 8]) await expect(cardFor(page, index).locator('[aria-label^="内容类型："]')).toHaveCount(0)
+      for (const index of [5, 8])
+        await expect(cardFor(page, index).locator('[aria-label^="内容类型："]')).toHaveCount(0)
 
       await page.getByRole('button', { name: '打开高级搜索' }).click()
       await page.getByRole('combobox', { name: '内容类型', exact: true }).focus()
@@ -545,7 +604,9 @@ for (const width of [320, 1280]) {
       await expectCards(page, [1, 6])
       let params = new URL(state.listUrls.at(-1)!).searchParams
       expect(params.getAll('contentType')).toEqual(['public_notice'])
-      await expect(page.locator('.app-banner').filter({ hasText: '高级搜索已启用' })).toContainText('类型: 公示')
+      await expect(page.locator('.app-banner').filter({ hasText: '高级搜索已启用' })).toContainText(
+        '类型: 公示',
+      )
       await expectNoOverflow(page)
       await page.screenshot({ path: testInfo.outputPath(`type-results-${width}-${theme}.png`) })
 
@@ -565,7 +626,10 @@ for (const width of [320, 1280]) {
       await selectContentType(page, '新闻')
       await page.getByRole('button', { name: '搜索', exact: true }).click()
       await expectCards(page, [2])
-      for (const [label, indices] of [['通知/公告', [3, 7]], ['其他', [4]]] as const) {
+      for (const [label, indices] of [
+        ['通知/公告', [3, 7]],
+        ['其他', [4]],
+      ] as const) {
         await page.getByRole('button', { name: '打开高级搜索' }).click()
         await selectContentType(page, label)
         await page.getByRole('button', { name: '搜索', exact: true }).click()
@@ -592,7 +656,11 @@ for (const width of [320, 1280]) {
       await selectContentType(page, '新闻')
       await page.getByRole('button', { name: '搜索', exact: true }).click()
       await expectCards(page, [2])
-      await page.locator('.app-banner').filter({ hasText: '高级搜索已启用' }).locator('.v-alert__close button').click()
+      await page
+        .locator('.app-banner')
+        .filter({ hasText: '高级搜索已启用' })
+        .locator('.v-alert__close button')
+        .click()
       await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
       await page.getByRole('button', { name: '打开高级搜索' }).click()
       await selectContentType(page, '新闻')
@@ -600,7 +668,9 @@ for (const width of [320, 1280]) {
       await expectCards(page, [2])
       await page.reload()
       await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
-      await expect.poll(() => new URL(state.listUrls.at(-1)!).searchParams.has('contentType')).toBe(false)
+      await expect
+        .poll(() => new URL(state.listUrls.at(-1)!).searchParams.has('contentType'))
+        .toBe(false)
 
       await cardFor(page, 3).getByRole('link').click()
       await expect(page.locator('.clean-content')).toContainText('通知正文')
@@ -622,12 +692,14 @@ for (const width of [320, 1280]) {
   }
 }
 
-test('ordinary and advanced search keep body-only matches from light API results', async ({ page }) => {
+test('ordinary and advanced search keep body-only matches from light API results', async ({
+  page,
+}) => {
   const state = await installApi(page)
   await openApp(page, 390, 'light')
   await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
-  const response = page.waitForResponse((response) =>
-    new URL(response.url()).searchParams.get('keyword') === '量子芯片',
+  const response = page.waitForResponse(
+    (response) => new URL(response.url()).searchParams.get('keyword') === '量子芯片',
   )
   await page.getByPlaceholder('搜索通知...').fill('量子芯片')
   const result = await (await response).json()
@@ -638,14 +710,151 @@ test('ordinary and advanced search keep body-only matches from light API results
   await page.getByRole('button', { name: '打开高级搜索' }).click()
   await page.getByRole('textbox', { name: '关键词', exact: true }).fill('实验室安排')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
-  await expect.poll(() => new URL(state.listUrls.at(-1)!).searchParams.get('keyword')).toBe('实验室安排')
+  await expect
+    .poll(() => new URL(state.listUrls.at(-1)!).searchParams.get('keyword'))
+    .toBe('实验室安排')
   await expectCards(page, [3])
   await cardFor(page, 3).getByRole('link').click()
   await expect(page.locator('.clean-content')).toContainText('量子芯片实验室安排')
   expect(state.nativeErrors).toEqual([])
 })
 
-test('detail return retains feed filters but switching sections resets the visit', async ({ page }) => {
+test('opens empty and mirror origin notices without an unsafe official link', async ({ page }) => {
+  const state = await installApi(page)
+  await openApp(page, 390, 'light')
+  await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+
+  await cardFor(page, 5).getByRole('link').click()
+  await expect(page).toHaveURL(/#\/detail\/migration-5$/)
+  await expect(page.locator('.clean-content')).toContainText('通知正文')
+  await expect(page.getByRole('link', { name: '查看来源页面' })).toHaveCount(0)
+
+  await page.goto('/#/')
+  await cardFor(page, 6).getByRole('link').click()
+  await expect(page).toHaveURL(/#\/detail\/migration-6$/)
+  await expect(page.getByRole('link', { name: '查看来源页面' })).toHaveAttribute(
+    'href',
+    'https://servers.ustclug.org/notices/6',
+  )
+  expect(state.nativeErrors).toEqual([])
+})
+
+test('virtual feed loads the next page when the visible rows reach the end', async ({ page }) => {
+  const state = await installApi(page)
+  const total = 75
+  const pageSize = 15
+  const listPages: number[] = []
+  const base = notices[0]
+  await page.route('**/api/notices**', async (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname !== '/api/notices') {
+      await route.fallback()
+      return
+    }
+    const pageNumber = Number(url.searchParams.get('page') ?? '1')
+    listPages.push(pageNumber)
+    const start = (pageNumber - 1) * pageSize
+    const items = Array.from({ length: Math.min(pageSize, total - start) }, (_, index) => ({
+      ...base,
+      id: `virtual-${start + index + 1}`,
+      title: `虚拟通知 ${start + index + 1}`,
+      publishDate: '2026-10-12',
+      deadline: null,
+      cleanContent: '',
+      originUrl: 'https://www.teach.ustc.edu.cn/notice/virtual.html',
+    }))
+    await route.fulfill({
+      json: { items, total, nextCursor: null, paginationMode: 'offset' },
+    })
+  })
+
+  await openApp(page, 1280, 'light')
+  const grid = page.locator('.notice-grid')
+  await expect.poll(() => listPages).toEqual([1])
+  for (const expectedPage of [2, 3, 4]) {
+    await grid.evaluate((element) => {
+      element.scrollTop = element.scrollHeight
+    })
+    await expect.poll(() => listPages.at(-1)).toBe(expectedPage)
+  }
+
+  await expect(page.locator('.virtual-notice-list')).toBeVisible()
+  await grid.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+  })
+  await expect.poll(() => listPages.at(-1)).toBe(5)
+  expect(await page.locator('.notice-card').count()).toBeLessThanOrEqual(40)
+
+  const link = page.getByRole('link', { name: /^打开通知：/ }).first()
+  await expect
+    .poll(async () => {
+      const before = await grid.evaluate((element) => element.scrollTop)
+      await page.waitForTimeout(50)
+      const after = await grid.evaluate((element) => element.scrollTop)
+      return Math.abs(before - after)
+    })
+    .toBe(0)
+  const position = await grid.evaluate((element) => element.scrollTop)
+  // 直接触发导航，避免 Playwright 为点击可见性而调整滚动位置。
+  await link.evaluate((element) => (element as HTMLElement).click())
+  await expect(page).toHaveURL(/#\/detail\/virtual-/)
+  await page.getByRole('button', { name: '返回上一页' }).click()
+  await expect(page).toHaveURL(/\/#\/$/)
+  await expect
+    .poll(() => grid.evaluate((element, target) => Math.abs(element.scrollTop - target), position))
+    .toBeLessThanOrEqual(16)
+  expect(state.nativeErrors).toEqual([])
+})
+
+test('keeps notices with an empty publication date and marks the date unknown', async ({
+  page,
+}) => {
+  const state = await installApi(page)
+  await openApp(page, 390, 'light')
+  await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+  await expect(page.getByText(/通知数据格式异常/)).toHaveCount(0)
+
+  await cardFor(page, 8).getByRole('link').click()
+  await expect(page).toHaveURL(/#\/detail\/migration-8$/)
+  await expect(page.locator('.v-card-subtitle').filter({ hasText: '计算机学院' })).toContainText(
+    '未知',
+  )
+  await expect(page.locator('.clean-content')).toContainText('通知正文')
+  await expect(page.getByText(/通知数据格式异常/)).toHaveCount(0)
+  expect(state.nativeErrors).toEqual([])
+})
+
+test('calendar failure keeps the previous range visible and retries the target', async ({
+  page,
+}) => {
+  const state = await installApi(page)
+  await openApp(page, 1280, 'light')
+  await page.goto('/#/calendar')
+  await expect(page.locator('.month-grid')).toBeVisible()
+  const oldEvents = page.locator('.event-chip')
+  await expect(oldEvents.first()).toBeVisible()
+  const oldCount = await oldEvents.count()
+  expect(oldCount).toBeGreaterThan(0)
+
+  state.failCalendar = true
+  await page.getByRole('button', { name: '下一个月' }).click()
+  const warning = page.locator('.app-banner').filter({ hasText: '旧数据' })
+  const errorBanner = page.locator('.app-banner').filter({ hasText: '无法加载当前范围通知' })
+  await expect(warning).toBeVisible()
+  await expect(errorBanner).toBeVisible()
+  await expect(oldEvents).toHaveCount(oldCount)
+
+  state.failCalendar = false
+  await errorBanner.getByRole('button', { name: '重试' }).click()
+  await expect(warning).toHaveCount(0)
+  await expect(errorBanner).toHaveCount(0)
+  await expect(oldEvents).toHaveCount(0)
+  expect(state.nativeErrors).toEqual([])
+})
+
+test('detail return retains feed filters but switching sections resets the visit', async ({
+  page,
+}) => {
   const state = await installApi(page)
   await openApp(page, 390, 'light')
   await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
@@ -658,7 +867,9 @@ test('detail return retains feed filters but switching sections resets the visit
   await expect(page.locator('.clean-content')).toContainText('通知正文')
   await page.getByRole('button', { name: '返回上一页' }).click()
   await expectCards(page, [3, 7])
-  await expect(page.locator('.app-banner').filter({ hasText: '高级搜索已启用' })).toContainText('类型: 通知/公告')
+  await expect(page.locator('.app-banner').filter({ hasText: '高级搜索已启用' })).toContainText(
+    '类型: 通知/公告',
+  )
   expect(state.listUrls).toHaveLength(requestsBefore)
   await page.getByRole('link', { name: '日历', exact: true }).click()
   await expect(page).toHaveURL(/#\/calendar$/)
@@ -668,50 +879,69 @@ test('detail return retains feed filters but switching sections resets the visit
   expect(state.nativeErrors).toEqual([])
 })
 
-test('legacy IndexedDB feed and detail without content type update from the network', async ({ page }) => {
+test('legacy IndexedDB feed and detail without content type update from the network', async ({
+  page,
+}) => {
   const state = await installApi(page)
   await openApp(page, 1280, 'light')
   await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
-  const key = '{"keyword":"","source":"","categories":[],"dateFrom":"","dateTo":"","isRead":"any","isStarred":"any","tags":[],"blacklistKeywords":[]}'
-  await expect.poll(() => page.evaluate(async (cacheKey) => {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('notifai-cache')
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
-    })
-    try {
-      return await new Promise<boolean>((resolve, reject) => {
-        const request = db.transaction('notice-feeds').objectStore('notice-feeds').get(cacheKey)
-        request.onsuccess = () => resolve(request.result?.schemaVersion === 2)
+  const key =
+    '{"keyword":"","source":"","categories":[],"dateFrom":"","dateTo":"","isRead":"any","isStarred":"any","tags":[],"blacklistKeywords":[]}'
+  await expect
+    .poll(() =>
+      page.evaluate(async (cacheKey) => {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open('notifai-cache')
+          request.onsuccess = () => resolve(request.result)
+          request.onerror = () => reject(request.error)
+        })
+        try {
+          return await new Promise<boolean>((resolve, reject) => {
+            const request = db.transaction('notice-feeds').objectStore('notice-feeds').get(cacheKey)
+            request.onsuccess = () => resolve(request.result?.schemaVersion === 2)
+            request.onerror = () => reject(request.error)
+          })
+        } finally {
+          db.close()
+        }
+      }, key),
+    )
+    .toBe(true)
+  await page.evaluate(
+    async ({ cacheKey, notice }) => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open('notifai-cache')
+        request.onsuccess = () => resolve(request.result)
         request.onerror = () => reject(request.error)
       })
-    } finally { db.close() }
-  }, key)).toBe(true)
-  await page.evaluate(async ({ cacheKey, notice }) => {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('notifai-cache')
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
-    })
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction(['notice-feeds', 'notice-details'], 'readwrite')
-        const feeds = transaction.objectStore('notice-feeds')
-        const request = feeds.get(cacheKey)
-        request.onsuccess = () => {
-          const entry = request.result
-          for (const item of entry.items) delete item.contentType
-          feeds.put(entry)
-          const oldNotice: Partial<typeof notice> = { ...notice }
-          delete oldNotice.contentType
-          transaction.objectStore('notice-details').put({ schemaVersion: 1, id: notice.id, notice: oldNotice, fetchedAt: new Date().toISOString() })
-        }
-        transaction.oncomplete = () => resolve()
-        transaction.onerror = () => reject(transaction.error)
-        transaction.onabort = () => reject(transaction.error)
-      })
-    } finally { db.close() }
-  }, { cacheKey: key, notice: notices[2] })
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const transaction = db.transaction(['notice-feeds', 'notice-details'], 'readwrite')
+          const feeds = transaction.objectStore('notice-feeds')
+          const request = feeds.get(cacheKey)
+          request.onsuccess = () => {
+            const entry = request.result
+            for (const item of entry.items) delete item.contentType
+            feeds.put(entry)
+            const oldNotice: Partial<typeof notice> = { ...notice }
+            delete oldNotice.contentType
+            transaction.objectStore('notice-details').put({
+              schemaVersion: 1,
+              id: notice.id,
+              notice: oldNotice,
+              fetchedAt: new Date().toISOString(),
+            })
+          }
+          transaction.oncomplete = () => resolve()
+          transaction.onerror = () => reject(transaction.error)
+          transaction.onabort = () => reject(transaction.error)
+        })
+      } finally {
+        db.close()
+      }
+    },
+    { cacheKey: key, notice: notices[2] },
+  )
   const listGate = deferred()
   const detailGate = deferred()
   state.pauseList = listGate.promise
@@ -737,4 +967,68 @@ test('legacy IndexedDB feed and detail without content type update from the netw
     state.resumeList()
     state.resumeDetail()
   }
+})
+
+test.describe('mobile feed gestures', () => {
+  test.use({
+    viewport: devices['Pixel 7'].viewport,
+    userAgent: devices['Pixel 7'].userAgent,
+    deviceScaleFactor: devices['Pixel 7'].deviceScaleFactor,
+    hasTouch: true,
+    isMobile: true,
+  })
+
+  test('pull to refresh reloads the first page', async ({ page }) => {
+    const state = await installApi(page)
+    await openApp(page, 390, 'light')
+    await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+    const requestsBefore = state.listUrls.length
+
+    await page.locator('.notice-grid').evaluate((element) => {
+      const createTouch = (clientY: number) =>
+        new Touch({
+          identifier: 1,
+          target: element,
+          clientX: 20,
+          clientY,
+          pageX: 20,
+          pageY: clientY,
+          screenX: 20,
+          screenY: clientY,
+        })
+      const start = createTouch(100)
+      const move = createTouch(240)
+      element.dispatchEvent(
+        new TouchEvent('touchstart', {
+          bubbles: true,
+          cancelable: true,
+          touches: [start],
+          targetTouches: [start],
+          changedTouches: [start],
+        }),
+      )
+      element.dispatchEvent(
+        new TouchEvent('touchmove', {
+          bubbles: true,
+          cancelable: true,
+          touches: [move],
+          targetTouches: [move],
+          changedTouches: [move],
+        }),
+      )
+      element.dispatchEvent(
+        new TouchEvent('touchend', {
+          bubbles: true,
+          cancelable: true,
+          touches: [],
+          targetTouches: [],
+          changedTouches: [move],
+        }),
+      )
+    })
+
+    await expect.poll(() => state.listUrls.length).toBeGreaterThan(requestsBefore)
+    await expectCards(page, [1, 2, 3, 4, 5, 6, 7, 8])
+    expect(state.nativeErrors).toEqual([])
+  })
 })

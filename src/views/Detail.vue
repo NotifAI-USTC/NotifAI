@@ -13,6 +13,7 @@ import { copyText } from '../utils/share'
 import { DataValidationError, normalizeHttpUrl } from '../utils/validation'
 import { sanitizeNoticeContent } from '../utils/sanitizeNoticeContent'
 import { getAttachmentIcon } from '../utils/attachmentIcon'
+import { formatLocalTimestamp } from '../utils/date'
 import { readNoticeDetailCache, writeNoticeDetailCache } from '../utils/noticeFeedCache'
 import AppBanner from '../components/AppBanner.vue'
 
@@ -41,16 +42,7 @@ function getLoadErrorMessage(error: unknown): string {
 }
 
 function formatCrawlTime(value: string | null | undefined): string {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return formatLocalTimestamp(value)
 }
 
 async function loadNotice(): Promise<void> {
@@ -252,7 +244,7 @@ function handleContentKeydown(event: KeyboardEvent): void {
               notice.title
             }}</v-card-title>
             <v-card-subtitle class="pb-2">
-              {{ notice.source }} · {{ notice.publishDate }}
+              {{ notice.source }} · {{ notice.publishDate ?? '未知' }}
               <span v-if="formatCrawlTime(notice.lastCrawl)" class="text-medium-emphasis">
                 · 最近抓取于 {{ formatCrawlTime(notice.lastCrawl) }}
               </span>
@@ -323,6 +315,7 @@ function handleContentKeydown(event: KeyboardEvent): void {
               通知原文
               <v-spacer />
               <v-btn
+                v-if="notice.originUrl"
                 :href="notice.originUrl"
                 target="_blank"
                 rel="noopener noreferrer"

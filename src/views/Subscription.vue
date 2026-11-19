@@ -137,6 +137,35 @@ onBeforeUnmount(() => {
         </template>
       </AppBanner>
 
+      <!-- 已失效但保留的订阅 -->
+      <v-card v-if="store.unavailableSubscriptions.length > 0" class="mb-4">
+        <v-card-title class="text-body-large font-weight-bold">失效订阅</v-card-title>
+        <v-card-subtitle class="pb-3">
+          以下来源已不在服务端目录中，暂不参与通知筛选；可移除或等待来源恢复。
+        </v-card-subtitle>
+        <v-divider />
+        <v-list>
+          <v-list-item
+            v-for="source in store.unavailableSubscriptions"
+            :key="source"
+            :title="source"
+            subtitle="来源当前不可用"
+          >
+            <template #append>
+              <v-chip class="mr-2" size="small" color="warning" variant="tonal">不可用</v-chip>
+              <v-btn
+                variant="text"
+                size="small"
+                :aria-label="`移除失效订阅${source}`"
+                @click="store.toggleDepartment(source)"
+              >
+                移除
+              </v-btn>
+            </template>
+          </v-list-item>
+        </v-list>
+      </v-card>
+
       <!-- 部门分组列表 -->
       <v-card v-for="group in groupedSources" :key="group.group" class="mb-4">
         <v-card-title class="text-body-large font-weight-bold">

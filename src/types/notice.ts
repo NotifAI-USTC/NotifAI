@@ -5,12 +5,12 @@ export interface NoticeItem {
   source: string // 发布来源,如 "教务处", "计算机学院"
   categories: NoticeCategoryKey[] // AI 分类，最多 3 项
   contentType: NoticeContentType | null // AI 文体；null 表示尚无有效分析
-  publishDate: string // 发布日期 YYYY-MM-DD
+  publishDate: string | null // 发布日期 YYYY-MM-DD；未知时为 null
   aiSummary: string // AI 提炼的 40 字以内一句话摘要
   deadline: string | null // 格式化截止时间,无则为 null
   targetAudience: string // 面向对象,如 "全体本科生"
   coreAction: string // 核心行动/地点
-  originUrl: string // 官网原始链接
+  originUrl: string // 官网原始链接；可为空字符串
   cleanContent: string // 通知原文：Markdown/轻量HTML/纯文本，详情页按 Markdown 渲染
   attachments: Array<{ name: string; url: string }> // 附件列表
   /** 首次抓取时间；旧缓存或旧服务端响应可能没有该字段。 */
@@ -103,6 +103,8 @@ export interface Department {
 
 const SOURCE_ALIASES: Readonly<Record<string, string>> = {
   计算机科学与技术学院: '计算机学院',
+  招生办公室: '本科招生网',
+  国际合作与交流部: '国际合作交流',
 }
 
 export function normalizeNoticeSource(source: string): string {
@@ -116,7 +118,7 @@ export const DEPARTMENTS: Department[] = [
   { id: 'xgb', name: '学工部', group: '校级部门' },
   { id: 'tw', name: '校团委', group: '校级部门' },
   { id: 'kyb', name: '科研部', group: '校级部门' },
-  { id: 'gjjl', name: '国际合作与交流部', group: '校级部门' },
+  { id: 'gjjl', name: '国际合作交流', group: '校级部门' },
   { id: 'lib', name: '图书馆', group: '校级部门' },
   { id: 'hqbzc', name: '后勤保障处', group: '校级部门' },
   { id: 'bwc', name: '保卫处', group: '校级部门' },
@@ -139,7 +141,7 @@ export const SOURCE_COLORS: Readonly<Record<string, string>> = {
   学工部: '#8b5cf6',
   校团委: '#ec4899',
   科研部: '#06b6d4',
-  国际合作与交流部: '#14b8a6',
+  国际合作交流: '#14b8a6',
   图书馆: '#f59e0b',
   后勤保障处: '#f97316',
   保卫处: '#64748b',
@@ -168,13 +170,16 @@ export interface CalendarItem {
   title: string
   source: string
   contentType: NoticeContentType | null
-  publishDate: string
+  publishDate: string | null
   deadline: string | null
 }
 
 /** 日历轻量视图 API 响应 */
 export interface CalendarListResponse {
   items: CalendarItem[]
+  total: number
+  /** 服务端是否因单次上限而截断了结果。 */
+  truncated: boolean
 }
 
 /** 即将截止轻量视图条目（GET /notices/deadlines） */
@@ -183,7 +188,7 @@ export interface DeadlineItem {
   title: string
   source: string
   contentType: NoticeContentType | null
-  publishDate: string
+  publishDate: string | null
   deadline: string
   aiSummary: string
   targetAudience: string
@@ -215,30 +220,48 @@ export interface SourceItem {
  * 不可用时的 UI 兜底。更新来源时应先同步线上 /sources，再更新这里。
  */
 export const SOURCE_CATALOG_FALLBACK: readonly SourceItem[] = [
-  { name: '校友总会', group: '其他', noticeCount: 8 },
-  { name: '生医部', group: '二级学院', noticeCount: 31 },
-  { name: '管理学院', group: '二级学院', noticeCount: 29 },
-  { name: '瀚海教学网', group: '校级部门', noticeCount: 11 },
-  { name: '计算机学院', group: '二级学院', noticeCount: 25 },
-  { name: '地空学院', group: '二级学院', noticeCount: 16 },
-  { name: '研究生院', group: '校级部门', noticeCount: 303 },
-  { name: '国际学院', group: '二级学院', noticeCount: 22 },
-  { name: '就业指导中心', group: '校级部门', noticeCount: 596 },
-  { name: '图书馆', group: '校级部门', noticeCount: 2 },
+  { name: '校主页', group: '校级部门', noticeCount: 20 },
+  { name: '教务处', group: '校级部门', noticeCount: 39 },
+  { name: '瀚海教学网', group: '校级部门', noticeCount: 12 },
+  { name: '研究生院', group: '校级部门', noticeCount: 28 },
+  { name: '图书馆', group: '校级部门', noticeCount: 42 },
+  { name: '就业指导中心', group: '校级部门', noticeCount: 27 },
+  { name: '国际合作交流', group: '校级部门', noticeCount: 33 },
+  { name: '本科招生网', group: '校级部门', noticeCount: 32 },
+  { name: '体育教学中心', group: '校级部门', noticeCount: 26 },
+  { name: '网络信息中心', group: '校级部门', noticeCount: 39 },
+  { name: '现代教育技术中心', group: '校级部门', noticeCount: 1 },
+  { name: '虚拟仿真实验平台', group: '校级部门', noticeCount: 6 },
+  { name: '在线视频点播平台', group: '校级部门', noticeCount: 0 },
+  { name: '学习空间预约', group: '校级部门', noticeCount: 3 },
+  { name: '未来学习中心', group: '校级部门', noticeCount: 1 },
+  { name: '学位论文提交平台', group: '校级部门', noticeCount: 4 },
+  { name: '夏令营招生', group: '校级部门', noticeCount: 19 },
+  { name: '档案文博院', group: '校级部门', noticeCount: 20 },
+  { name: '博物馆', group: '校级部门', noticeCount: 20 },
+  { name: '计算机学院', group: '二级学院', noticeCount: 37 },
+  { name: '软件学院', group: '二级学院', noticeCount: 24 },
+  { name: '物理学院', group: '二级学院', noticeCount: 10 },
+  { name: '信息学院', group: '二级学院', noticeCount: 14 },
+  { name: '地空学院', group: '二级学院', noticeCount: 31 },
+  { name: '化学院', group: '二级学院', noticeCount: 33 },
+  { name: '工院', group: '二级学院', noticeCount: 36 },
+  { name: '管理学院', group: '二级学院', noticeCount: 35 },
+  { name: '生医部', group: '二级学院', noticeCount: 34 },
+  { name: '国际学院', group: '二级学院', noticeCount: 20 },
+  { name: '苏州高研院', group: '二级学院', noticeCount: 35 },
+  { name: '少年班学院', group: '二级学院', noticeCount: 20 },
+  { name: '镜像站', group: '其他', noticeCount: 0 },
   { name: 'Linux用户组', group: '其他', noticeCount: 5 },
-  { name: '镜像站', group: '其他', noticeCount: 3 },
-  { name: '国际合作交流', group: '校级部门', noticeCount: 15 },
-  { name: '物理学院', group: '二级学院', noticeCount: 8 },
   { name: '质量工程', group: '其他', noticeCount: 10 },
-  { name: '化学院', group: '二级学院', noticeCount: 29 },
-  { name: '工院', group: '二级学院', noticeCount: 21 },
-  { name: '信息学院', group: '二级学院', noticeCount: 12 },
-  { name: '软件学院', group: '二级学院', noticeCount: 28 },
-  { name: '苏州高研院', group: '二级学院', noticeCount: 31 },
-  { name: '教务处', group: '校级部门', noticeCount: 20 },
-  { name: '体育教学中心', group: '校级部门', noticeCount: 11 },
-  { name: '网络信息中心', group: '校级部门', noticeCount: 28 },
-  { name: '本科招生网', group: '校级部门', noticeCount: 12 },
+  { name: '校友总会', group: '其他', noticeCount: 8 },
+  { name: '软院信息化', group: '其他', noticeCount: 0 },
+  { name: 'ACM在线评测', group: '其他', noticeCount: 20 },
+  { name: 'Verilog OJ', group: '其他', noticeCount: 3 },
+  { name: 'Vlab实验中心', group: '其他', noticeCount: 20 },
+  { name: '机器人实验室', group: '其他', noticeCount: 18 },
+  { name: '国家同步辐射实验室', group: '其他', noticeCount: 20 },
+  { name: '二十大专题新闻', group: '其他', noticeCount: 20 },
 ]
 
 /** 通知分类条目（GET /categories） */

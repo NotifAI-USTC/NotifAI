@@ -41,6 +41,23 @@ describe('useSourceCatalog', () => {
     ])
   })
 
+  it('normalizes legacy source names and merges their notice counts', async () => {
+    mocks.fetchSources.mockResolvedValue([
+      { name: '招生办公室', group: '校级部门', noticeCount: 5 },
+      { name: '本科招生网', group: '校级部门', noticeCount: 7 },
+      { name: '国际合作与交流部', group: '校级部门', noticeCount: 3 },
+    ])
+    setActivePinia(createPinia())
+
+    const catalog = useSourceCatalog()
+    await catalog.loadSources()
+
+    expect(catalog.sourceItems.value).toEqual([
+      { name: '本科招生网', group: '校级部门', noticeCount: 12 },
+      { name: '国际合作交流', group: '校级部门', noticeCount: 3 },
+    ])
+  })
+
   it('uses the checked-in /sources snapshot when the API is unavailable', async () => {
     mocks.fetchSources.mockRejectedValue(new Error('network unavailable'))
     setActivePinia(createPinia())

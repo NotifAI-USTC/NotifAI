@@ -1,6 +1,6 @@
 import axios from 'axios'
 import type {
-  CalendarItem,
+  CalendarListResponse,
   DeadlineListResponse,
   NoticeCategoryItem,
   NoticeCategoryKey,
@@ -328,20 +328,22 @@ const MAX_BATCH_IDS = 500
 export async function fetchNoticesByIds(
   ids: string[],
   signal?: AbortSignal,
+  options: { light?: boolean } = {},
 ): Promise<NoticeBatchResponse> {
   const useMock = shouldUseMock()
   if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_BATCH_IDS) {
     throw new DataValidationError(`ids 必须是 1 到 ${MAX_BATCH_IDS} 项的数组`)
   }
   const uniqueIds = [...new Set(ids.map((id) => assertNoticeId(id, 'ids 元素')))]
+  const light = options.light === true
   if (import.meta.env.DEV && useMock) {
     const { mockFetchNoticesByIds } = await import('../mock/notices')
     await waitForMockDelay(200 + Math.random() * 300, signal)
-    return parseNoticeBatchResponse(mockFetchNoticesByIds(uniqueIds))
+    return parseNoticeBatchResponse(mockFetchNoticesByIds(uniqueIds, light))
   }
   const res = await request.post<unknown>(
     '/notices/batch',
-    { ids: uniqueIds },
+    light ? { ids: uniqueIds, light: true } : { ids: uniqueIds },
     {
       maxContentLength: MAX_NOTICE_LIST_RESPONSE_BYTES,
       signal,
@@ -355,7 +357,7 @@ export async function fetchNoticesByIds(
 export async function fetchCalendarNotices(
   params: FetchCalendarParams = {},
   signal?: AbortSignal,
-): Promise<CalendarItem[]> {
+): Promise<CalendarListResponse> {
   const useMock = shouldUseMock()
   const month = validateOptionalText(params.month, 'month', 20)
   const week = validateOptionalText(params.week, 'week', 20)

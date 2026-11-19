@@ -31,11 +31,11 @@ export default defineConfig({
       ],
   webServer: {
     command: preview
-      ? 'pnpm run preview --host 127.0.0.1 --port 4173'
+      ? 'pnpm run preview --host 127.0.0.1 --port 4173 --outDir dist-e2e'
       : 'pnpm run dev --host 127.0.0.1 --port 4173 --force',
     env: {
       VITE_USE_MOCK: migration ? 'false' : 'true',
-      ...(migration ? { VITE_API_BASE_URL: '/api' } : {}),
+      VITE_API_BASE_URL: '/api',
     },
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: !process.env.CI && !migration,

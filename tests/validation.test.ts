@@ -69,7 +69,7 @@ it('accepts only HTTP(S) URLs without embedded credentials', () => {
 
   const untrustedSource = validNotice()
   untrustedSource.originUrl = 'https://attacker.example/notices/1'
-  assert.throws(() => parseNoticeItem(untrustedSource), DataValidationError)
+  assert.equal(parseNoticeItem(untrustedSource).originUrl, '')
 })
 
 it('rejects impossible dates and oversized strings or arrays', () => {
@@ -190,7 +190,7 @@ it('validates content types in calendar and deadline responses', () => {
     { ...item, id: 'invalid', contentType: 'NEWS' },
     { ...item, id: 'legacy' },
   ]
-  assert.deepEqual(parseCalendarListResponse({ items }).map(({ id, contentType }) => [id, contentType]), [
+  assert.deepEqual(parseCalendarListResponse({ items }).items.map(({ id, contentType }) => [id, contentType]), [
     ['known', 'notice'],
     ['legacy', null],
   ])
@@ -198,6 +198,68 @@ it('validates content types in calendar and deadline responses', () => {
     ['known', 'notice'],
     ['legacy', null],
   ])
+})
+
+it('tolerates legacy notices without a publication date or origin URL', () => {
+  for (const publishDate of [null, '']) {
+    assert.equal(parseNoticeItem({ ...validNotice(), publishDate }).publishDate, null)
+  }
+  assert.equal(parseNoticeItem({ ...validNotice(), originUrl: '' }).originUrl, '')
+  assert.equal(
+    parseNoticeItem({ ...validNotice(), originUrl: 'https://mirrors.ustclug.org/notice' }).originUrl,
+    'https://mirrors.ustclug.org/notice',
+  )
+  for (const originUrl of [
+    'https://evil.example/notice',
+    'http://www.ustc.edu.cn/notice',
+    'https://user:pass@www.ustc.edu.cn/notice',
+    'javascript:alert(1)',
+  ]) {
+    assert.equal(parseNoticeItem({ ...validNotice(), originUrl }).originUrl, '')
+  }
+  assert.equal(
+    parseNoticeItem({ ...validNotice(), originUrl: 'https://www.ustc.edu.cn/notice' }).originUrl,
+    'https://www.ustc.edu.cn/notice',
+  )
+  const nullableOrigin = parseNoticeItem({ ...validNotice(), originUrl: null })
+  assert.equal(nullableOrigin.originUrl, '')
+})
+
+it('normalizes migrated source names at the API boundary', () => {
+  assert.equal(
+    parseNoticeItem({ ...validNotice(), source: '招生办公室' }).source,
+    '本科招生网',
+  )
+  assert.equal(
+    parseNoticeItem({ ...validNotice(), source: '国际合作与交流部' }).source,
+    '国际合作交流',
+  )
+  assert.equal(
+    parseNoticeItem({ ...validNotice(), source: '计算机科学与技术学院' }).source,
+    '计算机学院',
+  )
+})
+
+it('parses calendar pagination metadata and tolerates older responses', () => {
+  const item = {
+    id: 'notice-1',
+    title: '标题',
+    source: '教务处',
+    publishDate: null,
+    deadline: null,
+  }
+  assert.deepEqual(
+    (({ total, truncated }) => ({ total, truncated }))(parseCalendarListResponse({
+      items: [item],
+      total: 1,
+      truncated: true,
+    })),
+    { total: 1, truncated: true },
+  )
+  const legacy = parseCalendarListResponse({ items: [item] })
+  assert.equal(legacy.total, 1)
+  assert.equal(legacy.truncated, false)
+  assert.equal(legacy.items[0].publishDate, null)
 })
 
 it('rejects malformed list metadata, oversized result sets, and duplicate IDs', () => {
@@ -227,7 +289,7 @@ it('rejects malformed list metadata, oversized result sets, and duplicate IDs', 
 
 it('skips a single malformed item without failing the whole page', () => {
   const bad = validNotice()
-  bad.originUrl = 'https://attacker.example/notices/1'
+  bad.title = ''
   const good = validNotice()
   good.id = 'notice-002'
 
@@ -235,6 +297,15 @@ it('skips a single malformed item without failing the whole page', () => {
   assert.equal(parsed.items.length, 1)
   assert.equal(parsed.items[0].id, 'notice-002')
   assert.equal(parsed.invalidItemCount, 1)
+})
+
+it('keeps notices with an untrusted origin URL instead of dropping them', () => {
+  const untrusted = validNotice()
+  untrusted.originUrl = 'https://attacker.example/notices/1'
+  const parsed = parseNoticeListResponse({ items: [untrusted], total: 1 })
+  assert.equal(parsed.items.length, 1)
+  assert.equal(parsed.items[0]?.originUrl, '')
+  assert.equal(parsed.invalidItemCount, 0)
 })
 
 it('rejects duplicate source names at the API boundary', () => {

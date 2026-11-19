@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useAccountStore } from '../stores/account'
 import { useUserSettingsStore } from '../stores/userSettings'
 import type { OnboardingIdentity } from '../stores/userSettings'
 import { useWindowSize } from '../composables/useWindowSize'
@@ -72,6 +73,7 @@ const POSTGRADUATE_CATEGORIES: NoticeCategoryKey[] = [
 ]
 
 const store = useUserSettingsStore()
+const account = useAccountStore()
 const { isMobile } = useWindowSize()
 
 const identityPresets: readonly IdentityPreset[] = [
@@ -242,7 +244,7 @@ function complete(): void {
 
 <template>
   <v-dialog
-    :model-value="true"
+    :model-value="!account.loginDialogOpen"
     persistent
     scrollable
     :fullscreen="isMobile"
@@ -281,6 +283,17 @@ function complete(): void {
             <p class="text-body-medium text-medium-emphasis">
               NotifAI-USTC 帮你从分散的校园通知中快速找到真正重要的信息。
             </p>
+          </div>
+          <div class="text-center mb-4">
+            <p v-if="account.startupUnavailable" class="mb-2" role="status">
+              账号服务暂不可用，仍可继续设置游客偏好。
+            </p>
+            <p v-if="account.pageNotice === 'discarded'" class="mb-2" role="status">
+              账号已切换，未同步修改未保存。
+            </p>
+            <v-btn variant="tonal" color="primary" @click="account.loginDialogOpen = true">
+              登录已有账号
+            </v-btn>
           </div>
 
           <div class="feature-grid">

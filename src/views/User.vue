@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAccountStore } from '../stores/account'
 import { useUserSettingsStore } from '../stores/userSettings'
-import { calculateRemainingDays, getLocalToday } from '../utils/date'
+import { calculateRemainingDays } from '../utils/date'
 import type { DarkMode } from '../stores/userSettings'
 import type { NoticeItem } from '../types/notice'
 import {
@@ -15,9 +16,11 @@ import { hapticMedium } from '../utils/haptics'
 import { useSnackbar } from '../composables/useSnackbar'
 import { loadBatchNotices } from '../composables/useBatchNoticeLoader'
 import AppBanner from '../components/AppBanner.vue'
+import AccountSettingsPanel from '../components/AccountSettingsPanel.vue'
 
 const router = useRouter()
 const store = useUserSettingsStore()
+const account = useAccountStore()
 const snackbar = useSnackbar()
 
 const IMPORTANT_REQUEST_LIMIT = 500
@@ -28,7 +31,6 @@ const importantLoading = ref(true)
 const importantLoadError = ref('')
 const showFeedbackPopup = ref(false)
 const showFolderDialog = ref(false)
-const showClearReadConfirm = ref(false)
 const importInput = ref<HTMLInputElement | null>(null)
 const notificationPermission = ref<NotificationPermission | null>(null)
 let importantRequestId = 0
@@ -69,6 +71,7 @@ async function loadImportantNotices() {
     const result = await loadBatchNotices(store.importantIds, {
       maxIds: IMPORTANT_REQUEST_LIMIT,
       signal: controller.signal,
+      light: true,
       include: (notice) => Boolean(notice.deadline),
     })
     if (controller.signal.aborted || requestId !== importantRequestId) return
@@ -94,20 +97,6 @@ async function loadImportantNotices() {
   }
 }
 
-function handleExportSettings() {
-  const json = store.exportSettings()
-  const blob = new Blob([json], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = `notifai-preferences-${getLocalToday()}.json`
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
-  snackbar.showSuccess('偏好设置已导出')
-}
-
 function handleImportFile(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -125,12 +114,6 @@ function handleImportFile(event: Event) {
   }
   reader.onerror = () => snackbar.showError('读取文件失败')
   reader.readAsText(file)
-}
-
-function handleClearReadHistory() {
-  store.clearReadHistory()
-  showClearReadConfirm.value = false
-  snackbar.showSuccess('已清空已读记录')
 }
 
 onMounted(() => {
@@ -206,11 +189,6 @@ async function copyFeedbackEmail(): Promise<void> {
   }
 }
 
-function markCachedNoticesRead() {
-  hapticMedium()
-  store.markCachedNoticesRead()
-}
-
 function restartOnboarding(): void {
   store.resetOnboarding()
   snackbar.showSuccess('已重新打开入门引导')
@@ -231,8 +209,14 @@ function restartOnboarding(): void {
           <v-avatar size="80" color="primary" class="mb-4">
             <span class="text-headline-small text-white font-weight-bold">USTC</span>
           </v-avatar>
-          <v-card-title class="pa-0">科大新同学</v-card-title>
-          <v-card-subtitle class="pa-0"> 已读 {{ store.readIds.length }} 条通知 </v-card-subtitle>
+          <v-card-title class="pa-0">{{ account.user?.displayName ?? '科大新同学' }}</v-card-title>
+          <v-btn
+            v-if="!account.user"
+            class="mt-4"
+            color="primary"
+            variant="tonal"
+            @click="account.loginDialogOpen = true"
+          >登录</v-btn>
         </v-card-text>
       </v-card>
 
@@ -298,21 +282,7 @@ function restartOnboarding(): void {
       <v-card class="mb-4">
         <v-list>
           <v-list-item
-            title="将已加载通知标为已读"
-            prepend-icon="$checkAll"
-            @click="markCachedNoticesRead"
-          />
-          <v-list-item
-            title="清空已读记录"
-            prepend-icon="$delete"
-            @click="showClearReadConfirm = true"
-          />
-          <v-list-item
-            title="导出偏好设置"
-            prepend-icon="$contentSaveOutline"
-            @click="handleExportSettings"
-          />
-          <v-list-item
+            v-if="!account.user"
             title="导入偏好设置"
             prepend-icon="$trayArrowUp"
             @click="importInput?.click()"
@@ -324,6 +294,7 @@ function restartOnboarding(): void {
             @click="showFolderDialog = true"
           />
           <v-list-item
+            v-if="!account.user"
             title="重新进行入门引导"
             subtitle="重新设置身份、订阅来源和屏蔽关键词"
             prepend-icon="$robot"
@@ -335,6 +306,7 @@ function restartOnboarding(): void {
 
       <!-- 隐藏的文件选择器（导入偏好） -->
       <input
+        v-if="!account.user"
         ref="importInput"
         type="file"
         accept="application/json,.json"
@@ -435,27 +407,8 @@ function restartOnboarding(): void {
           </v-row>
         </v-card-text>
       </v-card>
+      <AccountSettingsPanel v-if="account.user && account.cloudReady" />
     </v-container>
-
-    <!-- 清空已读确认 -->
-    <v-dialog v-model="showClearReadConfirm" max-width="400">
-      <v-card>
-        <v-card-title class="text-center">
-          <v-icon class="mr-1">$delete</v-icon>
-          清空已读记录
-        </v-card-title>
-        <v-divider />
-        <v-card-text class="text-center pa-6">
-          <div class="text-body-medium text-medium-emphasis">
-            将清除全部已读标记，此操作不可撤销。确定继续吗？
-          </div>
-        </v-card-text>
-        <v-card-actions class="justify-center pa-4">
-          <v-btn variant="tonal" @click="showClearReadConfirm = false">取消</v-btn>
-          <v-btn color="error" prepend-icon="$delete" @click="handleClearReadHistory"> 清空 </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
 
     <!-- 反馈弹窗 -->
     <v-dialog v-model="showFeedbackPopup" max-width="400">

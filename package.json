@@ -17,11 +17,12 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:md3": "PLAYWRIGHT_MIGRATION=true playwright test",
-    "test:e2e:preview": "VITE_API_BASE_URL=/api VITE_USE_MOCK=false pnpm run build && PLAYWRIGHT_PREVIEW=true playwright test",
+    "test:e2e:preview": "VITE_API_BASE_URL=/api VITE_USE_MOCK=false pnpm exec vite build --outDir dist-e2e && PLAYWRIGHT_PREVIEW=true playwright test",
     "check": "pnpm run lint && pnpm run type-check && pnpm run test && pnpm run build"
   },
   "dependencies": {
     "@mdi/js": "^7.4.47",
+    "@tanstack/vue-virtual": "^3.13.52",
     "axios": "^1.18.0",
     "dompurify": "^3.4.12",
     "markdown-it": "^15.0.0",

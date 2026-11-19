@@ -1,19 +1,160 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import {
+  computed,
+  defineComponent,
+  inject,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
 import { useTheme } from 'vuetify'
 import { useRouter } from 'vue-router'
-import { useUserSettingsStore } from './stores/userSettings'
+import { ACCOUNT_STARTUP_READY, useUserSettingsStore } from './stores/userSettings'
+import { useAccountStore } from './stores/account'
 import { useWindowSize } from './composables/useWindowSize'
 import { useSnackbar } from './composables/useSnackbar'
 import { useForegroundDdlReminder } from './composables/useForegroundDdlReminder'
 import OnboardingModal from './components/OnboardingModal.vue'
+import AccountLoginDialog from './components/AccountLoginDialog.vue'
+import SsoSignupDialog from './components/SsoSignupDialog.vue'
+import AppBanner from './components/AppBanner.vue'
 
 const router = useRouter()
 const store = useUserSettingsStore()
+const account = useAccountStore()
+const accountStartupReady = inject(ACCOUNT_STARTUP_READY, () => ref(false), true)
 const theme = useTheme()
 const { isMobile } = useWindowSize()
 const snackbar = useSnackbar()
-useForegroundDdlReminder()
+const ForegroundDdlReminder = defineComponent({
+  setup() {
+    useForegroundDdlReminder()
+    return () => null
+  },
+})
+
+const startupLogoutFailed = ref(false)
+const ssoError = ref('')
+const accountOverlaysReady = ref(false)
+const showGuestOverlays = computed(() =>
+  accountOverlaysReady.value && !account.user && !account.transitioning,
+)
+const showRoute = computed(() =>
+  !account.transitioning &&
+  (store.scopeReady || ['Home', 'Calendar', 'Detail'].includes(String(router.currentRoute.value.name))),
+)
+let sessionCheckPending = false
+const showSsoSignup = computed(() => {
+  const { name, query } = router.currentRoute.value
+  return showGuestOverlays.value && name === 'User' && query.sso === 'signup'
+})
+
+async function logoutUnavailableAccount() {
+  startupLogoutFailed.value = false
+  try {
+    await account.signOut()
+  } catch {
+    startupLogoutFailed.value = true
+  }
+}
+
+function checkCurrentSession() {
+  if (accountStartupReady.value) void account.checkSession()
+  else sessionCheckPending = true
+}
+
+async function startAccount() {
+  // The app shell and public routes do not wait for the account network.
+  await nextTick()
+  await account.bootstrap()
+  // Reconcile changes received during bootstrap before activating any scope.
+  while (sessionCheckPending && !account.transitioning) {
+    sessionCheckPending = false
+    await account.checkSession()
+  }
+  accountStartupReady.value = true
+}
+
+function onStorage(event: StorageEvent) {
+  if (event.key === account.sessionChangeKey) checkCurrentSession()
+}
+
+function onVisibility() {
+  if (document.visibilityState === 'visible') checkCurrentSession()
+}
+
+function onPageShow(event: PageTransitionEvent) {
+  if (event.persisted) checkCurrentSession()
+}
+
+function retryAccountStartup() {
+  window.location.reload()
+}
+
+async function clearSsoReturn() {
+  const route = router.currentRoute.value
+  const query = { ...route.query }
+  delete query.sso
+  await router.replace({ name: 'User', query, hash: route.hash })
+}
+
+async function dismissSsoSignup(message?: string) {
+  if (!showSsoSignup.value) return
+  if (message && !account.user && !account.transitioning) {
+    ssoError.value = message
+    account.loginDialogOpen = true
+  }
+  await clearSsoReturn()
+}
+
+async function handleSsoReturn() {
+  await router.isReady()
+  const route = router.currentRoute.value
+  const result = route.query.sso
+  if (route.name !== 'User') return
+  if (result === 'signup') {
+    if (account.user) await clearSsoReturn()
+    else account.loginDialogOpen = false
+    return
+  }
+  if (result !== 'ok' && result !== 'failed') return
+  await clearSsoReturn()
+  if (result === 'ok' && account.user) {
+    account.notifySessionChange()
+    return
+  }
+  const message = '单点登录未完成，请重试。'
+  if (account.user) {
+    snackbar.showError(message)
+  } else {
+    ssoError.value = message
+    account.loginDialogOpen = true
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('storage', onStorage)
+  window.addEventListener('pageshow', onPageShow)
+  document.addEventListener('visibilitychange', onVisibility)
+  void startAccount()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('storage', onStorage)
+  window.removeEventListener('pageshow', onPageShow)
+  document.removeEventListener('visibilitychange', onVisibility)
+})
+
+watch(
+  () => store.scopeReady,
+  async (ready) => {
+    if (!ready) return
+    await handleSsoReturn()
+    accountOverlaysReady.value = true
+  },
+  { immediate: true },
+)
 
 // Retain the feed only while browsing a notice; other sections start a new feed visit.
 const retainedPages = computed(() =>
@@ -93,15 +234,47 @@ watch(
 
     <!-- 主内容区 -->
     <v-main class="app-main">
-      <router-view v-slot="{ Component }">
+      <v-container v-if="store.scopeReady && !account.transitioning && (account.pageNotice || (account.startupUnavailable && (store.hasOnboarded || account.user)))">
+        <AppBanner v-if="account.pageNotice" type="warning" class="mb-2" role="status">
+          {{ account.pageNotice === 'discarded'
+            ? '账号已切换，未同步修改未保存'
+            : '本机偏好仍保留，但无法在此标签页提供导入。' }}
+          <template #append>
+            <v-btn variant="text" @click="account.pageNotice = null">关闭</v-btn>
+          </template>
+        </AppBanner>
+        <AppBanner v-if="account.startupUnavailable" type="warning" role="status">
+          <p v-if="startupLogoutFailed">退出登录失败，请重试。</p>
+          <p v-else-if="account.user">无法加载 {{ account.user.displayName }} 的云端设置。可继续浏览通知，偏好暂不可编辑。</p>
+          <p v-else>账号服务暂不可用。仍可使用本机游客设置。</p>
+          <div class="d-flex flex-wrap ga-2 mt-2">
+            <v-btn variant="tonal" :disabled="account.loggingOut" @click="retryAccountStartup">重试连接</v-btn>
+            <v-btn
+              v-if="account.user"
+              variant="text"
+              :disabled="account.loggingOut"
+              :loading="account.loggingOut"
+              @click="logoutUnavailableAccount"
+            >退出登录</v-btn>
+          </div>
+        </AppBanner>
+      </v-container>
+      <router-view v-if="showRoute" v-slot="{ Component }">
         <keep-alive :include="retainedPages">
           <component :is="Component" />
         </keep-alive>
       </router-view>
     </v-main>
 
+    <ForegroundDdlReminder v-if="store.scopeReady && !account.transitioning" />
     <!-- 首次使用引导：持久化完成前不允许误触关闭。 -->
-    <OnboardingModal v-if="!store.hasOnboarded" />
+    <SsoSignupDialog v-if="showSsoSignup" @dismiss="dismissSsoSignup" />
+    <OnboardingModal v-if="showGuestOverlays && !showSsoSignup && !store.hasOnboarded" />
+    <AccountLoginDialog
+      v-if="showGuestOverlays && !showSsoSignup"
+      :sso-error="ssoError"
+      @clear-sso-error="ssoError = ''"
+    />
 
     <!-- 移动端：底部导航栏 -->
     <v-bottom-navigation v-if="isMobile" v-model="activeTab" grow>

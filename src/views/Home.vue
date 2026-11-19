@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onActivated,
+  onBeforeUnmount,
+  onDeactivated,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { useUserSettingsStore } from '../stores/userSettings'
 import {
@@ -17,14 +26,19 @@ import type {
   NoticePaginationMode,
   StatsResponse,
 } from '../types/notice'
-import { getNoticeCategoryName, getNoticeContentTypeName, normalizeNoticeSource } from '../types/notice'
+import {
+  getNoticeCategoryName,
+  getNoticeContentTypeName,
+  normalizeNoticeSource,
+} from '../types/notice'
 import NoticeCard from '../components/NoticeCard.vue'
 import DdlNoticeBar from '../components/DdlNoticeBar.vue'
 import SkeletonLoader from '../components/SkeletonLoader.vue'
 import AdvancedSearch from '../components/AdvancedSearch.vue'
 import type { SearchFilters, TriStateFilter } from '../components/AdvancedSearch.vue'
 import { useWindowSize } from '../composables/useWindowSize'
-import { calculateRemainingDays } from '../utils/date'
+import { useVirtualGrid, VIRTUAL_GRID_MIN_ITEMS } from '../composables/useVirtualGrid'
+import { calculateRemainingDays, formatLocalTimestamp } from '../utils/date'
 import { readNoticeFeedCache, writeNoticeFeedCache } from '../utils/noticeFeedCache'
 import AppBanner from '../components/AppBanner.vue'
 
@@ -34,6 +48,12 @@ const PULL_THRESHOLD = 72
 const URGENT_DDL_DAYS = 3
 const URGENT_DDL_LIMIT = 10
 const MAX_SERVER_EXCLUDE_IDS = 500
+const VIRTUAL_FEED_ENABLED = import.meta.env.VITE_VIRTUAL_FEED !== 'false'
+const configuredVirtualMin = Number(import.meta.env.VITE_VIRTUAL_FEED_MIN_ITEMS)
+const VIRTUAL_FEED_MIN_ITEMS =
+  Number.isFinite(configuredVirtualMin) && configuredVirtualMin > 0
+    ? configuredVirtualMin
+    : VIRTUAL_GRID_MIN_ITEMS
 
 interface QueryContext {
   keyword: string
@@ -77,7 +97,7 @@ type RetryAction = 'refresh' | 'load'
 
 const router = useRouter()
 const store = useUserSettingsStore()
-const { isMobile } = useWindowSize()
+const { width, isMobile } = useWindowSize()
 
 const notices = ref<NoticeItem[]>([])
 const searchQuery = ref('')
@@ -98,6 +118,7 @@ const cacheStatusMessage = ref('')
 const showAdvancedSearch = ref(false)
 const advancedFilters = ref<SearchFilters | null>(null)
 const noticeGrid = ref<HTMLElement | null>(null)
+const virtualContainer = ref<HTMLElement | null>(null)
 const pullDistance = ref(0)
 
 let loadedQueryKey = ''
@@ -125,7 +146,7 @@ function buildQueryContext(): QueryContext {
   const filters = advancedFilters.value
   const subscribedSources =
     store.subscriptionMode === 'custom' && store.subscribedDepts.length > 0
-      ? Array.from(new Set(store.subscribedDepts.map(normalizeNoticeSource)))
+      ? Array.from(new Set(store.effectiveSubscribedDepts.map(normalizeNoticeSource)))
       : undefined
   const preferredCategories = store.categoryMode === 'custom' ? [...store.subscribedCategories] : []
   // 打开高级搜索后，其分类选择（包括空数组=全部分类）临时覆盖长期偏好。
@@ -189,14 +210,19 @@ function matchesLocalFilters(notice: NoticeItem, context: QueryContext): boolean
   const source = normalizeNoticeSource(notice.source)
   if (context.source && source !== context.source) return false
   if (context.contentType !== undefined && notice.contentType !== context.contentType) return false
+  // 多选分类必须同时满足（AND）；后端分页参数仍是 OR，这里做防御性收敛。
   if (
     context.categories.length > 0 &&
-    !notice.categories.some((category) => context.categories.includes(category))
+    !context.categories.every((category) => notice.categories.includes(category))
   ) {
     return false
   }
-  if (context.dateFrom && notice.publishDate < context.dateFrom) return false
-  if (context.dateTo && notice.publishDate > context.dateTo) return false
+  if (context.dateFrom) {
+    if (!notice.publishDate || notice.publishDate < context.dateFrom) return false
+  }
+  if (context.dateTo) {
+    if (!notice.publishDate || notice.publishDate > context.dateTo) return false
+  }
   if (context.hasDeadline !== undefined && Boolean(notice.deadline) !== context.hasDeadline) {
     return false
   }
@@ -377,6 +403,20 @@ async function fetchBatch(
   startMode: NoticePaginationMode,
   signal: AbortSignal,
 ): Promise<FetchBatchResult> {
+  if (context.subscribedSources && context.subscribedSources.length === 0) {
+    return {
+      items: [],
+      nextPage: 1,
+      nextCursor: null,
+      paginationMode: startMode,
+      finished: true,
+      scanPaused: false,
+      stale: false,
+      total: 0,
+      invalidItemCount: 0,
+    }
+  }
+
   const shouldScan = hasLocalFilters(context)
   const maxPages = shouldScan ? MAX_PAGES_PER_BATCH : 1
   let cursor = startCursor
@@ -434,15 +474,7 @@ interface LoadInitialOptions {
 }
 
 function formatCacheTimestamp(timestamp: string): string {
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return '未知时间'
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return formatLocalTimestamp(timestamp) || '未知时间'
 }
 
 async function loadInitial(options: LoadInitialOptions = {}): Promise<void> {
@@ -699,6 +731,8 @@ function onScroll(): void {
   if (!pageActive) return
   const el = noticeGrid.value
   if (!el || loading.value || finished.value || requestError.value) return
+  // 虚拟列表用 virtualRows.endIndex 触发加载，避免虚拟总高度误差。
+  if (virtualEnabled.value) return
   // 滚动到距底部 240px 内时加载下一页
   if (el.scrollHeight - el.scrollTop - el.clientHeight < 240) {
     loadMore()
@@ -771,6 +805,46 @@ const displayStats = computed(() => {
   return localStats.value
 })
 
+const virtualColumns = computed(() => {
+  if (width.value >= 1280) return 4
+  if (width.value >= 960) return 3
+  if (width.value >= 600) return 2
+  return 1
+})
+const virtualEnabled = computed(
+  () => VIRTUAL_FEED_ENABLED && filteredNotices.value.length >= VIRTUAL_FEED_MIN_ITEMS,
+)
+const virtualGrid = useVirtualGrid({
+  items: filteredNotices,
+  columns: virtualColumns,
+  scrollElement: noticeGrid,
+  container: virtualContainer,
+  estimateRowHeight: 320,
+})
+
+/** 虚拟列表只剩最后两行时继续加载;加载结束后再次检查,避免与分页请求竞争。 */
+function maybeLoadMoreVirtual(): void {
+  const lastRowIndex = virtualGrid.virtualRows.value.at(-1)?.index
+  if (
+    lastRowIndex === undefined ||
+    !virtualEnabled.value ||
+    !pageActive ||
+    loading.value ||
+    finished.value ||
+    requestError.value ||
+    scanPaused.value
+  ) {
+    return
+  }
+  if (lastRowIndex < virtualGrid.rows.value.length - 2) return
+  void loadMore()
+}
+
+watch(
+  () => [virtualGrid.virtualRows.value.at(-1)?.index, loading.value] as const,
+  () => maybeLoadMoreVirtual(),
+)
+
 /** 拉取全局统计，失败时静默保留本地兜底。 */
 async function loadServerStats(): Promise<void> {
   statsController?.abort()
@@ -792,7 +866,7 @@ async function loadUrgentDeadlines(): Promise<void> {
 
   const sources =
     store.subscriptionMode === 'custom' && store.subscribedDepts.length > 0
-      ? Array.from(new Set(store.subscribedDepts.map(normalizeNoticeSource)))
+      ? Array.from(new Set(store.effectiveSubscribedDepts.map(normalizeNoticeSource)))
       : undefined
   if (sources?.length === 0) {
     deadlinesController = null
@@ -877,7 +951,8 @@ onDeactivated(() => {
 onActivated(async () => {
   pageActive = true
   await nextTick()
-  if (pageActive && noticeGrid.value) noticeGrid.value.scrollTop = savedScrollTop
+  if (!pageActive || !noticeGrid.value) return
+  noticeGrid.value.scrollTop = savedScrollTop
 })
 
 onMounted(() => {
@@ -1061,7 +1136,46 @@ onBeforeUnmount(() => {
         当前筛选在本批 {{ PAGE_SIZE * MAX_PAGES_PER_BATCH }} 条通知中暂无匹配，可继续查找后续页面。
       </AppBanner>
 
-      <v-row>
+      <div
+        v-if="virtualEnabled"
+        ref="virtualContainer"
+        class="virtual-notice-list"
+        :style="{ height: `${virtualGrid.totalSize.value}px` }"
+        role="list"
+        aria-label="通知列表"
+      >
+        <div
+          v-for="virtualRow in virtualGrid.virtualRows.value"
+          :key="String(virtualRow.key)"
+          :data-index="virtualRow.index"
+          :ref="virtualGrid.measureElement"
+          class="virtual-notice-row"
+          :style="{
+            transform: `translateY(${virtualRow.start - virtualGrid.scrollMargin.value}px)`,
+          }"
+        >
+          <div
+            class="virtual-notice-row__grid"
+            :style="{ gridTemplateColumns: `repeat(${virtualColumns}, minmax(0, 1fr))` }"
+          >
+            <div
+              v-for="notice in virtualGrid.rows.value[virtualRow.index]"
+              :key="notice.id"
+              class="virtual-notice-cell d-flex"
+              role="listitem"
+            >
+              <NoticeCard
+                :notice="notice"
+                :is-read="store.isRead(notice.id)"
+                @click="goToDetail"
+                @read="handleRead"
+                @star="handleStar"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+      <v-row v-else>
         <v-col
           v-for="(notice, index) in filteredNotices"
           :key="notice.id"
@@ -1138,6 +1252,33 @@ onBeforeUnmount(() => {
     display: flex;
     flex-direction: column;
     background: rgb(var(--v-theme-background));
+  }
+
+  .virtual-notice-list {
+    position: relative;
+    width: 100%;
+  }
+
+  .virtual-notice-row {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding-bottom: 16px;
+  }
+
+  .virtual-notice-row__grid {
+    display: grid;
+    gap: 16px;
+    align-items: stretch;
+  }
+
+  .virtual-notice-cell {
+    min-width: 0;
+  }
+
+  .virtual-notice-cell > * {
+    width: 100%;
   }
 
   .notice-grid {

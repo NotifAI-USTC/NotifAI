@@ -5,6 +5,11 @@ const mocks = vi.hoisted(() => ({
   fetchNoticesByIds: vi.fn(),
   cacheNotice: vi.fn(),
   getCachedNotice: vi.fn(),
+  writeNoticeDetailCache: vi.fn(),
+}))
+
+vi.mock('../utils/noticeFeedCache', () => ({
+  writeNoticeDetailCache: mocks.writeNoticeDetailCache,
 }))
 
 vi.mock('../utils/request', () => ({
@@ -67,6 +72,45 @@ describe('loadBatchNotices', () => {
     expect(result.staleFallbackCount).toBe(1)
     expect(result.failedCount).toBe(0)
     expect(mocks.cacheNotice).toHaveBeenCalledWith(expect.objectContaining({ id: 'notice-3' }))
+  })
+
+  it('requests light fields and keeps a cached body out of the response', async () => {
+    const cached = makeNotice('notice-1')
+    cached.cleanContent = '# 完整正文'
+    cached.attachments = [{ name: '附件.pdf', url: 'https://www.ustc.edu.cn/a.pdf' }]
+    mocks.getCachedNotice.mockReturnValue(cached)
+    mocks.fetchNoticesByIds.mockResolvedValue({
+      items: [makeNotice('notice-1')],
+      missing: [],
+    })
+
+    const result = await loadBatchNotices(['notice-1'])
+
+    expect(mocks.fetchNoticesByIds).toHaveBeenCalledWith(['notice-1'], undefined, {
+      light: true,
+    })
+    expect(result.items[0]?.cleanContent).toBe('# 完整正文')
+    expect(result.items[0]?.attachments).toEqual(cached.attachments)
+    expect(mocks.cacheNotice).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'notice-1', cleanContent: '# 完整正文' }),
+    )
+    expect(mocks.writeNoticeDetailCache).not.toHaveBeenCalled()
+  })
+
+  it('persists full responses for offline detail fallback', async () => {
+    mocks.fetchNoticesByIds.mockResolvedValue({
+      items: [makeNotice('notice-1')],
+      missing: [],
+    })
+
+    await loadBatchNotices(['notice-1'], { light: false })
+
+    expect(mocks.fetchNoticesByIds).toHaveBeenCalledWith(['notice-1'], undefined, {
+      light: false,
+    })
+    expect(mocks.writeNoticeDetailCache).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'notice-1' }),
+    )
   })
 
   it('keeps cached details when a whole batch request fails', async () => {

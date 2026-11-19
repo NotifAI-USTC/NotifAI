@@ -168,6 +168,20 @@ describe('new API endpoints', () => {
     expect(result.missing).toEqual(['missing-1'])
   })
 
+  it('requests catalog-only fields for list-returning batch lookups', async () => {
+    const post = vi.spyOn(request, 'post').mockResolvedValueOnce({
+      data: { items: [], missing: [] },
+    } as AxiosResponse<unknown>)
+
+    await fetchNoticesByIds(['notice-1'], undefined, { light: true })
+
+    expect(post).toHaveBeenCalledWith(
+      '/notices/batch',
+      { ids: ['notice-1'], light: true },
+      expect.objectContaining({ suppressGlobalError: true }),
+    )
+  })
+
   it('deduplicates and validates batch ids', async () => {
     const post = vi.spyOn(request, 'post').mockResolvedValueOnce({
       data: { items: [], missing: [] },
@@ -182,9 +196,21 @@ describe('new API endpoints', () => {
     ).rejects.toThrow(/ids/)
   })
 
+  it('rejects invalid date-only filters before issuing a request', async () => {
+    const get = vi.spyOn(request, 'get')
+
+    await expect(fetchNotices({ dateFrom: '2026-02-30' })).rejects.toThrow(/dateFrom/)
+    await expect(
+      fetchNotices({ rangeFrom: '2026-09-01', rangeTo: '2026-08-01' }),
+    ).rejects.toThrow(/rangeFrom/)
+    expect(get).not.toHaveBeenCalled()
+  })
+
   it('fetches calendar items by month and week', async () => {
     const get = vi.spyOn(request, 'get').mockResolvedValue({
       data: {
+        total: 1,
+        truncated: true,
         items: [
           {
             id: 'notice-1',
@@ -197,13 +223,16 @@ describe('new API endpoints', () => {
       },
     } as AxiosResponse<unknown>)
 
-    const items = await fetchCalendarNotices({ month: '2026-08' })
+    const response = await fetchCalendarNotices({ month: '2026-08' })
+    const items = response.items
     expect(get).toHaveBeenCalledWith(
       '/notices/calendar',
       expect.objectContaining({ params: { month: '2026-08' } }),
     )
     expect(items).toHaveLength(1)
     expect(items[0].id).toBe('notice-1')
+    expect(response.total).toBe(1)
+    expect(response.truncated).toBe(true)
 
     await fetchCalendarNotices({ week: '2026-W32' })
     expect(get).toHaveBeenLastCalledWith(

@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DeadlineItem } from '../types/notice'
@@ -52,6 +53,7 @@ function deadline(overrides: Partial<DeadlineItem> = {}): DeadlineItem {
 
 describe('useForegroundDdlReminder', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     vi.clearAllMocks()
     mocks.fetchDeadlineNotices.mockReset()
     mocks.sendNotification.mockReset()

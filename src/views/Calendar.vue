@@ -65,10 +65,21 @@ const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
 const notices = ref<CalendarItem[]>([])
 const loading = ref(true)
 const loadError = ref('')
+const truncated = ref(false)
+interface LoadedRange {
+  key: string
+  label: string
+  date: string
+  mode: 'month' | 'week'
+}
+
+const lastLoadedRange = ref<LoadedRange | null>(null)
+const failedTarget = ref<{ date: string; mode: 'month' | 'week'; label: string } | null>(null)
 const calendarDate = ref(getLocalToday())
 const selectedDate = ref<string | null>(null)
 let loadRequestId = 0
 let loadController: AbortController | null = null
+let suppressNextLoad = false
 
 const viewMode = ref<'month' | 'week'>('month')
 
@@ -120,7 +131,9 @@ const visibleLabel = computed(() => {
 })
 
 function noticeTouchesRange(notice: CalendarItem, start: string, end: string): boolean {
-  const publishInRange = notice.publishDate >= start && notice.publishDate <= end
+  const publishInRange = Boolean(
+    notice.publishDate && notice.publishDate >= start && notice.publishDate <= end,
+  )
   const deadlineInRange = Boolean(
     notice.deadline && notice.deadline >= start && notice.deadline <= end,
   )
@@ -148,8 +161,8 @@ const calendarEvents = computed<CalendarEvent[]>(() => {
   if (!range) return events
 
   for (const notice of notices.value) {
-    // 发布日期事件
-    if (notice.publishDate >= range.start && notice.publishDate <= range.end) {
+    // 发布日期事件；发布日期未知时仍可生成截止日期事件。
+    if (notice.publishDate && notice.publishDate >= range.start && notice.publishDate <= range.end) {
       events.push({
         name: notice.title,
         start: notice.publishDate,
@@ -367,20 +380,44 @@ async function loadVisibleRange() {
       params = { month: range.start.slice(0, 7) }
     }
 
-    const items = await fetchCalendarNotices(params, controller.signal)
-    if (requestId !== loadRequestId) return
+    const response = await fetchCalendarNotices(params, controller.signal)
+    if (controller.signal.aborted || requestId !== loadRequestId) return
 
-    if (items.length > MAX_CALENDAR_ITEMS) {
+    if (response.items.length > MAX_CALENDAR_ITEMS) {
       throw new Error('通知数量超过日历加载上限')
     }
     // 后端按发布日/截止日命中范围返回，这里再做一次防御性过滤
-    const rangeNotices = items.filter((notice) =>
+    const rangeNotices = response.items.filter((notice) =>
       noticeTouchesRange(notice, range.start, range.end),
     )
     notices.value = rangeNotices
+    truncated.value = response.truncated
+    loadError.value = ''
+    failedTarget.value = null
+    lastLoadedRange.value = {
+      key: `${viewMode.value}:${range.start}`,
+      label:
+        viewMode.value === 'month'
+          ? formatPublishDate(range.start).slice(0, -3)
+          : visibleLabel.value,
+      date: calendarDate.value,
+      mode: viewMode.value,
+    }
   } catch (error) {
     if (controller.signal.aborted || requestId !== loadRequestId) return
-    notices.value = []
+    failedTarget.value = {
+      date: calendarDate.value,
+      mode: viewMode.value,
+      label: visibleLabel.value,
+    }
+    // 网络失败时恢复上一次成功加载的范围，确保旧事件仍可见；导航和重试
+    // 仍使用 failedTarget，避免用户被困在旧范围。
+    const previous = lastLoadedRange.value
+    if (previous && previous.key !== visibleRangeKey.value && notices.value.length > 0) {
+      suppressNextLoad = true
+      calendarDate.value = previous.date
+      viewMode.value = previous.mode
+    }
     loadError.value =
       error instanceof ApiConfigurationError
         ? error.message
@@ -394,11 +431,31 @@ async function loadVisibleRange() {
 watch(
   visibleRangeKey,
   () => {
+    if (suppressNextLoad) {
+      suppressNextLoad = false
+      return
+    }
     selectedDate.value = null
     void loadVisibleRange()
   },
   { immediate: true },
 )
+
+/** 失败后显示的旧范围不能作为下一次导航起点；重试则回到失败的目标范围。 */
+function retryVisibleRange(): void {
+  const target = failedTarget.value
+  failedTarget.value = null
+  if (!target) {
+    void loadVisibleRange()
+    return
+  }
+  if (target.date === calendarDate.value && target.mode === viewMode.value) {
+    void loadVisibleRange()
+    return
+  }
+  calendarDate.value = target.date
+  viewMode.value = target.mode
+}
 
 onBeforeUnmount(() => {
   loadRequestId += 1
@@ -429,18 +486,19 @@ onBeforeUnmount(() => {
       </v-btn>
     </v-app-bar>
 
-    <!-- 加载状态 -->
+    <!-- 首次加载遮罩；已有数据时只显示轻量进度条，不遮挡旧日历。 -->
     <v-card
-      v-if="loading"
+      v-if="loading && notices.length === 0"
       flat
       class="d-flex justify-center pa-8 bg-transparent"
       aria-live="polite"
     >
       <v-progress-circular indeterminate color="primary" />
     </v-card>
+    <v-progress-linear v-else-if="loading" indeterminate color="primary" />
 
     <AppBanner
-      v-else-if="loadError"
+      v-if="loadError"
       type="error"
       variant="tonal"
       density="compact"
@@ -449,11 +507,42 @@ onBeforeUnmount(() => {
     >
       {{ loadError }}
       <template #append>
-        <v-btn prepend-icon="$refresh" variant="text" @click="loadVisibleRange"> 重试 </v-btn>
+        <v-btn prepend-icon="$refresh" variant="text" @click="retryVisibleRange"> 重试 </v-btn>
       </template>
     </AppBanner>
 
-    <template v-else>
+    <AppBanner
+      v-if="loadError && lastLoadedRange && failedTarget"
+      type="warning"
+      variant="tonal"
+      density="compact"
+      class="ma-3"
+      role="status"
+    >
+      当前显示的是 {{ lastLoadedRange.label }} 的旧数据，加载 {{ failedTarget.label }} 失败。
+    </AppBanner>
+
+    <AppBanner
+      v-if="truncated && !loadError"
+      type="warning"
+      variant="tonal"
+      density="compact"
+      class="ma-3"
+      role="status"
+    >
+      当前范围通知超过服务端单次上限，日历仅展示最近 {{ MAX_CALENDAR_ITEMS }} 条。
+    </AppBanner>
+
+    <v-card
+      v-if="loadError && notices.length === 0 && !loading"
+      flat
+      class="text-center pa-8 bg-transparent"
+    >
+      <v-icon size="48" color="grey">$calendarRemoveOutline</v-icon>
+      <v-card-title class="text-medium-emphasis">当前范围暂无可用日历数据</v-card-title>
+    </v-card>
+
+    <template v-if="!loadError || notices.length > 0">
       <!-- VCalendar 月视图 -->
       <div class="calendar-wrapper">
         <!-- 月份导航 -->

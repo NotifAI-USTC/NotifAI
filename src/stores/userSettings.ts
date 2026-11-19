@@ -1,9 +1,12 @@
 import { defineStore } from 'pinia'
-import { computed, onScopeDispose, ref } from 'vue'
+import { computed, hasInjectionContext, inject, onScopeDispose, reactive, ref, watch } from 'vue'
+import type { InjectionKey, Ref } from 'vue'
 import type { NoticeCategoryKey, NoticeItem } from '../types/notice'
 import { isNoticeCategoryKey, SOURCE_CATALOG_FALLBACK } from '../types/notice'
 import { isValidNoticeId } from '../utils/validation'
 import type { Folder } from '../types/folder'
+import { projectCloudSettings, type CloudSettings } from '../utils/cloudSettings'
+import { useAccountStore } from './account'
 import {
   FUTURE_SCHEMA_ERROR,
   MAX_JOURNAL_BYTES,
@@ -30,6 +33,7 @@ import {
   createSettingsJournal,
   createSyncClientId,
   getDirtyFields,
+  isRecord,
   isSettingsJournalEmpty,
   journalDependencyClock,
   loadSettings,
@@ -38,6 +42,7 @@ import {
   mergeSyncClocks,
   normalizeDepartmentName,
   normalizeFolderIcon,
+  normalizeStoredSettings,
   parseSettingsValue,
   pruneSettingsJournal,
   readStoredSettingsJournals,
@@ -75,6 +80,8 @@ export interface OnboardingConfig {
   categories: NoticeCategoryKey[]
   keywords: string[]
 }
+
+export const ACCOUNT_STARTUP_READY: InjectionKey<Ref<boolean>> = Symbol('accountStartupReady')
 
 export const ONBOARDING_FLAG_STORAGE_KEY = 'notifai_has_onboarded'
 export const ONBOARDING_IDENTITY_STORAGE_KEY = 'notifai_user_identity'
@@ -129,26 +136,48 @@ function removeOnboardingItem(key: string): boolean {
   }
 }
 
+function loadDeviceSettings(storageKey: string): StoredSettings {
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    const value: unknown = raw ? JSON.parse(raw) : null
+    if (isRecord(value)) {
+      return normalizeStoredSettings({
+        readIds: value.readIds,
+        darkMode: value.darkMode,
+        notificationEnabled: value.notificationEnabled,
+      })
+    }
+  } catch {
+    // A missing or corrupt device snapshot does not affect cloud preferences.
+  }
+  return createDefaultSettings()
+}
+
 export const useUserSettingsStore = defineStore('userSettings', () => {
-  const loaded = loadSettings()
-  const saved = loaded.settings
+  const account = useAccountStore()
+  const startup = hasInjectionContext()
+    ? inject<Ref<boolean> | null>(ACCOUNT_STARTUP_READY, null)
+    : null
+  const scopeReady = ref(false)
+  const accountId = ref<string | null>(null)
+  let deviceKey: string | null = null
+  let awaitingCloud = false
+  const pendingReadIds = new Set<string>()
+  const saved = createDefaultSettings()
   const syncClientId = createSyncClientId()
   let lastSyncedSettings = cloneStoredSettings(saved)
   let stableViewSettings = cloneStoredSettings(saved)
-  let currentSyncClock = Object.assign(
-    Object.create(null) as Record<string, number>,
-    saved.syncClock,
-  )
-  let currentSyncWriter = saved.syncWriter
-  let localSequence = syncSequence(saved.syncClock, syncClientId)
+  let currentSyncClock = saved.syncClock
+  let currentSyncWriter = ''
+  let localSequence = 0
   let localJournal = createSettingsJournal(syncClientId)
   let localJournalNeedsWrite = false
   let persistedLocalJournalKey: string | null = null
   let persistedLocalJournalRaw: string | null = null
   const supersededLocalJournalKeys = new Map<string, string>()
   let unflushedBaseline: StoredSettings | null = null
-  let storageReadOnly = loaded.readOnly
-  let needsMigration = loaded.needsMigration
+  let storageReadOnly = false
+  let needsMigration = false
   let folderIdSequence = 0
   let holdsSettingsWriteLock = false
   let checkpointRequested = false
@@ -173,10 +202,10 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   const darkMode = ref<DarkMode>(saved.darkMode)
   const folders = ref<Folder[]>(saved.folders)
   const notificationEnabled = ref<boolean>(saved.notificationEnabled)
-  const persistenceError = ref(loaded.error)
+  const persistenceError = ref('')
   const systemPrefersDark = ref(false)
-  const hasOnboarded = ref(readOnboardingFlag())
-  const userIdentity = ref<OnboardingIdentity>(readOnboardingIdentity())
+  const hasOnboarded = ref(false)
+  const userIdentity = ref<OnboardingIdentity>('freshman')
 
   // Onboarding uses the same canonical preference arrays as the rest of the
   // app. These aliases keep the onboarding contract descriptive without
@@ -187,10 +216,20 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   // The checked-in /sources snapshot is the fallback. Keep runtime sources
   // discovered from GET /sources so switching one of them can build a complete
   // custom list before the next settings checkpoint.
-  const availableSourceNames = new Set([
-    ...SOURCE_CATALOG_FALLBACK.map((source) => source.name),
-    ...saved.subscribedDepts,
-  ])
+  const availableSourceNames = reactive(
+    new Set(SOURCE_CATALOG_FALLBACK.map((source) => source.name)),
+  )
+  let hasLiveSourceCatalog = false
+
+  /** 已订阅但当前来源目录中不存在的来源；保留以便用户显式移除。 */
+  const unavailableSubscriptions = computed(() =>
+    subscribedDepts.value.filter((source) => !availableSourceNames.has(source)),
+  )
+
+  /** 实际参与接口查询的订阅来源，排除已失效来源。 */
+  const effectiveSubscribedDepts = computed(() =>
+    subscribedDepts.value.filter((source) => availableSourceNames.has(source)),
+  )
 
   /** 已拉取通知的内存缓存 */
   const noticeCache = ref<Map<string, NoticeItem>>(new Map())
@@ -231,8 +270,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   // ---- 内部：持久化（debounce 300ms）----
   let persistTimer: ReturnType<typeof setTimeout> | null = null
 
-  function createSnapshot(): StoredSettings {
-    return cloneStoredSettings({
+  function currentSettings(): StoredSettings {
+    return {
       schemaVersion: USER_SETTINGS_SCHEMA_VERSION,
       syncClock: currentSyncClock,
       syncWriter: currentSyncWriter,
@@ -250,7 +289,36 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       darkMode: darkMode.value,
       folders: folders.value,
       notificationEnabled: notificationEnabled.value,
+    }
+  }
+
+  function createSnapshot(): StoredSettings {
+    return cloneStoredSettings(currentSettings())
+  }
+
+  let deviceBaseline = ''
+
+  function serializeDeviceSettings(): string {
+    return JSON.stringify({
+      readIds: readIds.value,
+      darkMode: darkMode.value,
+      notificationEnabled: notificationEnabled.value,
     })
+  }
+
+  function persistAccountSettings(deviceOnly = false): boolean {
+    if (!deviceKey) return false
+    if (!deviceOnly) account.scheduleSave(projectCloudSettings(currentSettings()))
+    const raw = serializeDeviceSettings()
+    if (raw === deviceBaseline) return true
+    try {
+      window.localStorage.setItem(deviceKey, raw)
+      deviceBaseline = raw
+      return true
+    } catch {
+      persistenceError.value = '本机存储写入失败，本次设置变更可能无法保留'
+      return false
+    }
   }
 
   function stageUnflushedOperation(): void {
@@ -766,7 +834,15 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     }
   }
 
-  function persist(): void {
+  function persist(deviceOnly = false): void {
+    if (!scopeReady.value || awaitingCloud) {
+      applySettings(stableViewSettings)
+      return
+    }
+    if (deviceKey) {
+      persistAccountSettings(deviceOnly)
+      return
+    }
     if (storageReadOnly) {
       applySettings(stableViewSettings)
       persistenceError.value = FUTURE_SCHEMA_ERROR
@@ -847,6 +923,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
 
   /** 立即持久化（页面卸载前调用） */
   function persistImmediate(): boolean {
+    if (!scopeReady.value || awaitingCloud) return false
+    if (deviceKey) return persistAccountSettings()
     if (persistTimer) {
       clearTimeout(persistTimer)
       persistTimer = null
@@ -878,6 +956,13 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       settings.syncClock,
     )
     currentSyncWriter = settings.syncWriter
+    applyPreferenceFields(settings)
+    readIds.value = [...settings.readIds]
+    darkMode.value = settings.darkMode
+    notificationEnabled.value = settings.notificationEnabled
+  }
+
+  function applyPreferenceFields(settings: CloudSettings): void {
     subscriptionMode.value = settings.subscriptionMode
     subscribedDepts.value = [...settings.subscribedDepts]
     categoryMode.value = settings.categoryMode
@@ -885,13 +970,18 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     blacklistKeywords.value = [...settings.blacklistKeywords]
     starredIds.value = [...settings.starredIds]
     starredFolderMap.value = Object.assign(Object.create(null), settings.starredFolderMap)
-    readIds.value = [...settings.readIds]
     pinnedIds.value = [...settings.pinnedIds]
     importantIds.value = [...settings.importantIds]
-    customTags.value = Object.assign(Object.create(null), settings.customTags)
-    darkMode.value = settings.darkMode
+    const tags: Record<string, string[]> = Object.create(null)
+    for (const [id, list] of Object.entries(settings.customTags)) tags[id] = [...list]
+    customTags.value = tags
     folders.value = settings.folders.map((folder) => ({ ...folder }))
-    notificationEnabled.value = settings.notificationEnabled
+  }
+
+  function applyCloudSettings(settings: CloudSettings): void {
+    if (!deviceKey || awaitingCloud) return
+    registerSources(settings.subscribedDepts)
+    applyPreferenceFields(settings)
   }
 
   let mediaQuery: MediaQueryList | null = null
@@ -1015,6 +1105,10 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       systemPrefersDark.value = mediaQuery.matches
       mediaQuery.addEventListener('change', onSystemThemeChange)
     }
+  }
+
+  function startGuestPersistence(saved: StoredSettings): void {
+    if (typeof window === 'undefined') return
     window.addEventListener('beforeunload', persistImmediate)
     window.addEventListener('storage', onStorage)
 
@@ -1044,7 +1138,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     storeDisposed = true
     if (persistTimer) clearTimeout(persistTimer)
     mediaQuery?.removeEventListener('change', onSystemThemeChange)
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && scopeReady.value && !deviceKey) {
       window.removeEventListener('beforeunload', persistImmediate)
       window.removeEventListener('storage', onStorage)
     }
@@ -1052,6 +1146,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
 
   // ---- 操作 ----
   function completeOnboarding(config: OnboardingConfig): void {
+    if (!scopeReady.value || deviceKey) return
     const identity: OnboardingIdentity =
       config.identity === 'freshman' ||
       config.identity === 'undergraduate' ||
@@ -1106,6 +1201,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   }
 
   function resetOnboarding(): void {
+    if (!scopeReady.value || deviceKey) return
     hasOnboarded.value = false
     userIdentity.value = 'freshman'
 
@@ -1147,34 +1243,43 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       if (normalized) nextSources.add(normalized)
     }
 
+    // An empty snapshot means the catalog request failed or the backend has not
+    // published a catalog yet. Keep the last known names instead of turning
+    // every source into a new subscription and rewriting user preferences.
+    if (nextSources.size === 0) return
+    hasLiveSourceCatalog = true
+
     availableSourceNames.clear()
     nextSources.forEach((sourceName) => availableSourceNames.add(sourceName))
 
     if (subscriptionMode.value !== 'custom') return
 
+    // Keep subscriptions that disappeared from the catalog. They are excluded
+    // from requests by effectiveSubscribedDepts and surfaced as unavailable so
+    // the user can remove them explicitly instead of losing the preference.
     if (subscribedDepts.value.length === 0) {
       subscriptionMode.value = 'all'
       persist()
-      return
     }
-
-    const filteredSubscriptions = subscribedDepts.value.filter((source) => nextSources.has(source))
-    if (filteredSubscriptions.length === subscribedDepts.value.length) return
-
-    // 空自定义列表与入门引导的“暂不选择来源”保持一致，解释为全部来源，
-    // 避免来源目录刷新后首页意外变成空白。
-    if (filteredSubscriptions.length === 0) {
-      subscriptionMode.value = 'all'
-      subscribedDepts.value = []
-    } else {
-      subscribedDepts.value = filteredSubscriptions
-    }
-    persist()
   }
 
   function toggleDepartment(dept: string): void {
     const normalizedDept = normalizeDepartmentName(dept)
-    if (!normalizedDept || !availableSourceNames.has(normalizedDept)) return
+    if (!normalizedDept) return
+
+    // Unavailable subscriptions are not toggleable from the catalog, but the
+    // subscription page must still let the user remove them.
+    if (
+      subscriptionMode.value === 'custom' &&
+      subscribedDepts.value.includes(normalizedDept)
+    ) {
+      subscribedDepts.value = subscribedDepts.value.filter((source) => source !== normalizedDept)
+      if (subscribedDepts.value.length === 0) subscriptionMode.value = 'all'
+      persist()
+      return
+    }
+
+    if (!availableSourceNames.has(normalizedDept)) return
     if (subscriptionMode.value === 'all') {
       subscriptionMode.value = 'custom'
       subscribedDepts.value = [...availableSourceNames].filter((name) => name !== normalizedDept)
@@ -1182,15 +1287,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
       return
     }
 
-    const idx = subscribedDepts.value.indexOf(normalizedDept)
-    if (idx >= 0) {
-      subscribedDepts.value.splice(idx, 1)
-      if (subscribedDepts.value.length === 0) {
-        subscriptionMode.value = 'all'
-      }
-    } else {
-      subscribedDepts.value.push(normalizedDept)
-    }
+    subscribedDepts.value.push(normalizedDept)
     persist()
   }
 
@@ -1348,6 +1445,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   }
 
   function addFolder(name: string, icon: string): Folder | null {
+    if (!scopeReady.value || awaitingCloud) return null
     if (storageReadOnly) {
       persistenceError.value = FUTURE_SCHEMA_ERROR
       return null
@@ -1395,10 +1493,19 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   }
 
   function markRead(id: string): void {
-    if (isValidNoticeId(id) && !readIds.value.includes(id)) {
+    if (!isValidNoticeId(id)) return
+    if (!scopeReady.value) {
+      if (pendingReadIds.size >= MAX_STORED_ITEMS) {
+        const oldest = pendingReadIds.values().next().value
+        if (oldest !== undefined) pendingReadIds.delete(oldest)
+      }
+      pendingReadIds.add(id)
+      return
+    }
+    if (!readIds.value.includes(id)) {
       readIds.value.push(id)
       if (readIds.value.length > MAX_STORED_ITEMS) readIds.value.shift()
-      persist()
+      persist(true)
     }
   }
 
@@ -1414,19 +1521,19 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     if (readIds.value.length > MAX_STORED_ITEMS) {
       readIds.value = readIds.value.slice(-MAX_STORED_ITEMS)
     }
-    if (changed) persist()
+    if (changed) persist(true)
   }
 
   function setDarkMode(mode: DarkMode): void {
     if (darkMode.value === mode) return
     darkMode.value = mode
-    persist()
+    persist(true)
   }
 
   function setNotificationEnabled(enabled: boolean): void {
     if (notificationEnabled.value === enabled) return
     notificationEnabled.value = enabled
-    persist()
+    persist(true)
   }
 
   /** 导出全部用户偏好为 JSON 字符串（含版本号，便于重新导入）。 */
@@ -1456,6 +1563,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
 
   /** 导入偏好 JSON：校验后作为新的本地基线快照写入并应用。 */
   function importSettings(json: string): { ok: boolean; message: string } {
+    if (!scopeReady.value) return { ok: false, message: '请等待账号状态确认后再导入本机偏好备份' }
+    if (deviceKey) return { ok: false, message: '请退出账号后再导入本机偏好备份' }
     try {
       const parsed = parseSettingsValue(json)
       if (parsed.readOnly) return { ok: false, message: FUTURE_SCHEMA_ERROR }
@@ -1558,7 +1667,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   function clearReadHistory(): void {
     if (readIds.value.length === 0) return
     readIds.value = []
-    persist()
+    persist(true)
   }
 
   /** 缓存通知数据供跨页面使用 */
@@ -1588,10 +1697,57 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     persistenceError.value = storageReadOnly ? FUTURE_SCHEMA_ERROR : ''
   }
 
+  function initializeScope(): void {
+    if (account.transitioning) return
+    // Only a completed startup may activate persistent settings. Later account
+    // changes retire this page; they must not repurpose its existing store.
+    accountId.value = account.user?.id ?? null
+    deviceKey = accountId.value ? `notifai-account-device:${accountId.value}` : null
+    awaitingCloud = deviceKey !== null && !account.cloudReady
+    const loaded = deviceKey
+      ? {
+          settings: {
+            ...loadDeviceSettings(deviceKey),
+            ...(account.cloudReady ? account.initialSettings : null),
+          },
+          error: '',
+          readOnly: false,
+          needsMigration: false,
+        }
+      : loadSettings()
+
+    const settings = loaded.settings
+    lastSyncedSettings = cloneStoredSettings(settings)
+    stableViewSettings = cloneStoredSettings(settings)
+    localSequence = syncSequence(settings.syncClock, syncClientId)
+    storageReadOnly = loaded.readOnly
+    needsMigration = loaded.needsMigration
+    persistenceError.value = loaded.error
+    applySettings(settings)
+    if (!hasLiveSourceCatalog) registerSources(settings.subscribedDepts)
+    hasOnboarded.value = deviceKey !== null || readOnboardingFlag()
+    userIdentity.value = deviceKey ? 'custom' : readOnboardingIdentity()
+    if (deviceKey) deviceBaseline = serializeDeviceSettings()
+    else startGuestPersistence(settings)
+
+    scopeReady.value = true
+    if (!awaitingCloud) {
+      for (const id of pendingReadIds) markRead(id)
+    }
+    pendingReadIds.clear()
+  }
+
+  if (startup && !startup.value) watch(startup, initializeScope, { once: true })
+  else initializeScope()
+
   return {
     // 状态
+    accountId,
+    scopeReady,
     subscriptionMode,
     subscribedDepts,
+    effectiveSubscribedDepts,
+    unavailableSubscriptions,
     categoryMode,
     subscribedCategories,
     blacklistKeywords,
@@ -1620,6 +1776,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     isDark,
     allCustomTags,
     // 操作
+    applyCloudSettings,
     completeOnboarding,
     resetOnboarding,
     registerSources,
