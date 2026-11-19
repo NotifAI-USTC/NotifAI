@@ -52,6 +52,15 @@ class ReminderService extends ChangeNotifier {
   String? _lastError;
   bool? _observedEnabled;
   List<String> _observedImportant = const [];
+  int? _observedProfileVersion;
+  String? _loadedKey;
+  bool _profileLoaded = false;
+
+  String? get _requestedKey {
+    if (!_settings.profileReady) return null;
+    final id = _settings.accountId;
+    return id == null ? _storageKey : '$_storageKey:account:$id';
+  }
 
   String? get _error => _lastError;
   set _error(String? value) {
@@ -70,7 +79,9 @@ class ReminderService extends ChangeNotifier {
           defaultTargetPlatform == TargetPlatform.iOS);
   bool get permissionGranted => _permissionGranted;
   String? get error => _error;
-  List<ReminderPlan> get plans => List.unmodifiable(_plans);
+  List<ReminderPlan> get plans => _loadedKey == _requestedKey
+      ? List.unmodifiable(_plans)
+      : const [];
 
   Future<T> _serial<T>(Future<T> Function() action) {
     final result = _tail.then((_) async {
@@ -93,25 +104,6 @@ class ReminderService extends ChangeNotifier {
       _error = '本地定时提醒仅支持 Android 和 iOS';
       return;
     }
-    final raw = await _store.read(_storageKey);
-    final restored = <ReminderPlan>[];
-    if (raw != null) {
-      if (raw is! Map ||
-          raw['version'] != 1 ||
-          raw['plans'] is! List ||
-          (raw['plans'] as List).length > maxReminderPlans) {
-        throw const ReminderException('本地提醒记录格式不兼容，已保留原始记录');
-      }
-      final ids = <String>{};
-      final systemIds = <int>{};
-      for (final item in raw['plans'] as List) {
-        final plan = ReminderPlan.fromJson(item);
-        if (!ids.add(plan.id) || !systemIds.add(plan.notificationId)) {
-          throw const ReminderException('本地提醒记录包含重复编号，已保留原始记录');
-        }
-        restored.add(plan);
-      }
-    }
     timezone_data.initializeTimeZones();
     await _updateTimezone();
     final initialized = await _plugin.initialize(
@@ -127,21 +119,16 @@ class ReminderService extends ChangeNotifier {
           _openPayload(response.payload),
     );
     if (initialized != true) throw const ReminderException('本地通知插件初始化失败');
-    _plans
-      ..clear()
-      ..addAll(restored);
-    _emit();
     _ready = true;
     final launch = await _plugin.getNotificationAppLaunchDetails();
     if (launch?.didNotificationLaunchApp == true) {
       // Keep this value until the root navigator has mounted and consumed it.
       _openPayload(launch?.notificationResponse?.payload);
     }
-    _observedEnabled = _settings.value.notificationEnabled;
-    _observedImportant = _settings.value.importantIds;
+    _observeSettings();
     _settings.addListener(_settingsChanged);
     _listening = true;
-    await _reconcile();
+    unawaited(reconcile());
   });
 
   void _openPayload(String? payload) {
@@ -150,17 +137,78 @@ class ReminderService extends ChangeNotifier {
     }
   }
 
+  void _observeSettings() {
+    _observedEnabled = _settings.value.notificationEnabled;
+    _observedImportant = _settings.value.importantIds;
+    _observedProfileVersion = _settings.profileVersion;
+  }
+
   void _settingsChanged() {
     final preferences = _settings.value;
-    if (_observedEnabled == preferences.notificationEnabled &&
+    if (_observedProfileVersion == _settings.profileVersion &&
+        _observedEnabled == preferences.notificationEnabled &&
         listEquals(_observedImportant, preferences.importantIds)) {
       return;
     }
-    _observedEnabled = preferences.notificationEnabled;
-    _observedImportant = preferences.importantIds;
+    _observeSettings();
     // reconcile contains its own background error reporting; a settings save
     // never becomes an unhandled asynchronous platform exception.
     unawaited(reconcile());
+  }
+
+  Future<void> _activateProfile() async {
+    final key = _requestedKey;
+    if (_profileLoaded && key == _loadedKey) return;
+    // There is only one active OS schedule. Preserve inactive profiles on
+    // disk, but never reconcile their plans against another profile's marks.
+    if (_profileLoaded || key == null) {
+      final failures = <String>[];
+      await _clearUnexpectedSystemPlans({}, failures);
+      if (failures.isNotEmpty) throw ReminderException(failures.join('\n'));
+    }
+    _profileLoaded = false;
+    _loadedKey = null;
+    _plans.clear();
+    _emit();
+    if (key != null) {
+      final raw = await _store.read(key);
+      if (key != _requestedKey) return;
+      if (raw != null) {
+        if (raw is! Map || raw['version'] != 1 || raw['plans'] is! List ||
+            (raw['plans'] as List).length > maxReminderPlans) {
+          throw const ReminderException('本地提醒记录格式不兼容，已保留原始记录');
+        }
+        final ids = <String>{};
+        final systemIds = <int>{};
+        final restored = <ReminderPlan>[];
+        for (final item in raw['plans'] as List) {
+          final plan = ReminderPlan.fromJson(item);
+          if (!ids.add(plan.id) || !systemIds.add(plan.notificationId)) {
+            throw const ReminderException('本地提醒记录包含重复编号，已保留原始记录');
+          }
+          restored.add(plan);
+        }
+        _plans.addAll(restored);
+      }
+    }
+    _loadedKey = key;
+    _profileLoaded = true;
+    _emit();
+  }
+
+  Future<void> _forProfile(Future<void> Function() action) {
+    final version = _settings.profileVersion;
+    return _serial(() async {
+      _requireReady();
+      if (version != _settings.profileVersion || !_settings.profileReady) {
+        throw const ReminderException('账号偏好尚未加载或已切换，请重试');
+      }
+      await _activateProfile();
+      if (version != _settings.profileVersion || _loadedKey == null) {
+        throw const ReminderException('账号已切换，请重试');
+      }
+      await action();
+    });
   }
 
   void _requireReady() {
@@ -240,7 +288,7 @@ class ReminderService extends ChangeNotifier {
   }
 
   Future<void> _persist(List<ReminderPlan> next) async {
-    await _store.write(_storageKey, {
+    await _store.write(_loadedKey!, {
       'version': 1,
       'plans': next.map((plan) => plan.toJson()).toList(),
     });
@@ -259,8 +307,7 @@ class ReminderService extends ChangeNotifier {
     throw const ReminderException('本地提醒编号已用尽');
   }
 
-  Future<void> schedule(Notice notice, DateTime when) => _serial(() async {
-    _requireReady();
+  Future<void> schedule(Notice notice, DateTime when) => _forProfile(() async {
     if (!_settings.value.notificationEnabled) {
       throw const ReminderException('请先在“我的”中启用本地通知提醒');
     }
@@ -327,8 +374,7 @@ class ReminderService extends ChangeNotifier {
     }
   }
 
-  Future<void> cancel(String noticeId) => _serial(() async {
-    _requireReady();
+  Future<void> cancel(String noticeId) => _forProfile(() async {
     final plan = _plans.where((item) => item.id == noticeId).firstOrNull;
     if (plan != null) await _cancelPlan(plan);
     _error = null;
@@ -380,6 +426,10 @@ class ReminderService extends ChangeNotifier {
   }
 
   Future<void> _reconcile() async {
+    await _activateProfile();
+    final key = _loadedKey;
+    bool active() => key != null && key == _requestedKey;
+    if (!active()) return;
     final failures = <String>[];
     final blocked = <String>{};
     bool locallyEligible(ReminderPlan plan) => shouldKeepLocalReminder(
@@ -390,6 +440,7 @@ class ReminderService extends ChangeNotifier {
       now: DateTime.now(),
     );
     Future<void> discard(ReminderPlan plan) async {
+      if (!active()) return;
       blocked.add(plan.id);
       try {
         // Invalid plans must stay cancelled even if SQLite removal fails. Keep
@@ -411,6 +462,7 @@ class ReminderService extends ChangeNotifier {
     } catch (failure) {
       failures.add('读取系统通知权限失败，未重新安排提醒：$failure');
     }
+    if (!active()) return;
     if (permitted == false) {
       failures.add(await _cancelRevokedPermissionPlans());
       _error = failures.join('\n');
@@ -425,6 +477,7 @@ class ReminderService extends ChangeNotifier {
       }
       try {
         final cached = await _repository.cachedDetail(plan.id);
+        if (!active()) return;
         if (cached != null && cached.value.deadline != plan.deadline) {
           await discard(plan);
         }
@@ -447,6 +500,7 @@ class ReminderService extends ChangeNotifier {
       } catch (failure) {
         failures.add('未能核对最新截止日期，保留已有有效提醒：$failure');
       }
+      if (!active()) return;
       if (latest != null) {
         final byId = {for (final notice in latest) notice.id: notice};
         for (final plan in candidates) {
@@ -471,12 +525,14 @@ class ReminderService extends ChangeNotifier {
         permitted = null;
         failures.add('再次核对系统通知权限失败，未重新安排提醒：$failure');
       }
+      if (!active()) return;
       if (permitted == false) {
         failures.add(await _cancelRevokedPermissionPlans());
         _error = failures.join('\n');
         return;
       }
     }
+    if (!active()) return;
     final retained = _plans
         .where((plan) => !blocked.contains(plan.id))
         .toList();
@@ -494,6 +550,7 @@ class ReminderService extends ChangeNotifier {
       }
       if (timezoneReady) {
         for (final plan in retained) {
+          if (!active()) return;
           if (!locallyEligible(plan)) {
             await discard(plan);
             continue;
@@ -509,8 +566,7 @@ class ReminderService extends ChangeNotifier {
     _error = failures.isEmpty ? null : failures.join('\n');
   }
 
-  Future<void> sendTest() => _serial(() async {
-    _requireReady();
+  Future<void> sendTest() => _forProfile(() async {
     if (!_settings.value.notificationEnabled) {
       throw const ReminderException('请先启用本地通知提醒');
     }

@@ -8,6 +8,7 @@ import '../data/models.dart';
 import '../state/user_settings.dart';
 import '../ui/common.dart';
 import '../ui/notice_card.dart';
+import 'account.dart';
 import 'detail.dart';
 
 part 'organizer/preferences.dart';

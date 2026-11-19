@@ -9,25 +9,28 @@ class UserScreen extends StatefulWidget {
 }
 
 class _UserScreenState extends State<UserScreen> {
-  bool _busy = false;
+  bool _operationBusy = false;
   String? _operationError;
   bool _importantOpen = true;
   Future<void> Function()? _retryAction;
   String? _retrySuccess;
 
   UserSettings get _settings => widget.services.settings;
+  bool get _busy => _operationBusy || (widget.services.account?.busy ?? false);
 
   @override
   void initState() {
     super.initState();
     _settings.addListener(_changed);
     widget.services.reminders.addListener(_changed);
+    widget.services.account?.addListener(_changed);
   }
 
   @override
   void dispose() {
     _settings.removeListener(_changed);
     widget.services.reminders.removeListener(_changed);
+    widget.services.account?.removeListener(_changed);
     super.dispose();
   }
 
@@ -40,7 +43,7 @@ class _UserScreenState extends State<UserScreen> {
     _retryAction = action;
     _retrySuccess = success;
     setState(() {
-      _busy = true;
+      _operationBusy = true;
       _operationError = null;
     });
     try {
@@ -49,7 +52,7 @@ class _UserScreenState extends State<UserScreen> {
     } catch (error) {
       if (mounted) setState(() => _operationError = '$error');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _operationBusy = false);
     }
   }
 
@@ -122,7 +125,7 @@ class _UserScreenState extends State<UserScreen> {
     )) {
       return;
     }
-    if (!mounted) return;
+    if (!mounted || _settings.accountMode) return;
     await _run(() async {
       await _settings.resetOnboarding();
       if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
@@ -136,6 +139,7 @@ class _UserScreenState extends State<UserScreen> {
         final granted = await reminders.requestPermission();
         if (!granted) throw StateError('未获得系统通知权限，请在系统设置中允许通知后重试。');
       }
+      if (!mounted) return;
       await _settings.update(
         _settings.value.copyWith(notificationEnabled: enabled),
       );
@@ -179,7 +183,8 @@ class _UserScreenState extends State<UserScreen> {
             Text('你的校园信息工作台', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 8),
             Text(
-              '无需登录 · 数据保存在本机${identity == null ? '' : ' · ${identity.title}'}',
+              '${_settings.accountMode ? '账号模式' : '无需登录 · 数据保存在本机'}'
+              '${identity == null ? '' : ' · ${identity.title}'}',
             ),
             const SizedBox(height: 16),
             Wrap(
@@ -220,12 +225,13 @@ class _UserScreenState extends State<UserScreen> {
                     ),
                   ),
           ),
-          ListTile(
-            leading: const Icon(Icons.restart_alt),
-            title: const Text('重新进行身份引导'),
-            subtitle: const Text('保留收藏、目录与阅读数据'),
-            onTap: _busy || _settings.readOnly ? null : _resetOnboarding,
-          ),
+          if (!_settings.accountMode)
+            ListTile(
+              leading: const Icon(Icons.restart_alt),
+              title: const Text('重新进行身份引导'),
+              subtitle: const Text('保留收藏、目录与阅读数据'),
+              onTap: _busy || _settings.readOnly ? null : _resetOnboarding,
+            ),
         ],
       ),
     );
@@ -323,7 +329,9 @@ class _UserScreenState extends State<UserScreen> {
 
   Widget _backupSection() => _Section(
     '备份与恢复',
-    description: 'JSON 备份兼容网页版，包含订阅、收藏、目录、标签与阅读记录。导入会替换本机偏好，请先导出备份。',
+    description: _settings.accountMode
+        ? '可导出当前偏好和本机阅读记录。账号模式不提供 JSON 导入。'
+        : 'JSON 备份兼容网页版，包含订阅、收藏、目录、标签与阅读记录。导入会替换本机偏好，请先导出备份。',
     child: Card(
       child: Column(
         children: [
@@ -337,27 +345,27 @@ class _UserScreenState extends State<UserScreen> {
                     () => widget.services.actions.exportPreferences(_settings),
                   ),
           ),
-          ListTile(
-            leading: const Icon(Icons.file_download_outlined),
-            title: const Text('导入偏好备份'),
-            subtitle: const Text('选择已有的 NotifAI JSON 文件'),
-            onTap: _busy || _settings.readOnly
-                ? null
-                : () async {
-                    if (!await _confirm(
-                      context,
-                      '导入并替换本机偏好？',
-                      '请确认已备份当前设置。文件校验失败时不会覆盖现有数据；取消文件选择不会更改设置。',
-                    )) {
-                      return;
-                    }
-                    if (!mounted) return;
-                    await _run(
-                      () =>
-                          widget.services.actions.importPreferences(_settings),
-                    );
-                  },
-          ),
+          if (!_settings.accountMode)
+            ListTile(
+              leading: const Icon(Icons.file_download_outlined),
+              title: const Text('导入偏好备份'),
+              subtitle: const Text('选择已有的 NotifAI JSON 文件'),
+              onTap: _busy || _settings.readOnly
+                  ? null
+                  : () async {
+                      if (!await _confirm(
+                        context,
+                        '导入并替换本机偏好？',
+                        '请确认已备份当前设置。文件校验失败时不会覆盖现有数据；取消文件选择不会更改设置。',
+                      )) {
+                        return;
+                      }
+                      if (!mounted || _settings.accountMode) return;
+                      await _run(
+                        () => widget.services.actions.importPreferences(_settings),
+                      );
+                    },
+            ),
         ],
       ),
     ),
@@ -484,7 +492,8 @@ class _UserScreenState extends State<UserScreen> {
         children: [
           _summary(),
           const SizedBox(height: 24),
-          if (_busy) const LinearProgressIndicator(semanticsLabel: '正在保存或处理操作'),
+          if (_operationBusy)
+            const LinearProgressIndicator(semanticsLabel: '正在保存或处理操作'),
           if (_operationError != null)
             ErrorNotice(
               message: _operationError!,
@@ -493,8 +502,18 @@ class _UserScreenState extends State<UserScreen> {
                   : () => _run(_retryAction!, success: _retrySuccess),
             ),
           if (_settings.error != null) ErrorNotice(message: _settings.error!),
-          if (_settings.readOnly)
+          if (_settings.profileReady && _settings.readOnly)
             const ErrorNotice(message: '本机偏好由更新版本创建，当前只读。请先升级应用，避免覆盖数据。'),
+          if (widget.services.account case final account?)
+            _Section(
+              '账号与同步',
+              description: '登录可同步订阅、收藏和重要标记等偏好。已读记录、外观和提醒设置仅保存在此设备。',
+              child: AccountPanel(
+                account: account,
+                disabled: _operationBusy,
+                allowLogin: !_settings.accountMode,
+              ),
+            ),
           _Section('订阅与身份', child: _subscriptions()),
           _Section(
             '重要 DDL',

@@ -1,11 +1,16 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'app.dart';
+import 'data/account_api.dart';
 import 'data/local_store.dart';
 import 'data/notice_repository.dart';
 import 'services/platform_actions.dart';
 import 'services/reminder_service.dart';
+import 'state/account.dart';
 import 'state/user_settings.dart';
 
 void main() {
@@ -23,6 +28,38 @@ Future<AppServices> createAppServices({
     final repository = NoticeRepository(store: store, baseUrl: apiBase);
     final settings = UserSettings(store);
     await settings.initialize();
+    final actions = PlatformActions(webBaseUrl: webBase);
+    const secrets = FlutterSecureStorage(
+      iOptions: IOSOptions(accessibility: KeychainAccessibility.unlocked_this_device),
+    );
+    final apiUri = Uri.parse(apiBase.trim());
+    final sessionBase = apiUri.replace(path: apiUri.path.replaceFirst(RegExp(r'/+$'), ''));
+    final sessionKey = 'session.v1:$sessionBase|${Uri.parse(webBase).origin}';
+    final account = AccountController(
+      api: AccountApi(baseUrl: apiBase, webBaseUrl: webBase),
+      settings: settings,
+      readSession: () async {
+        final raw = await secrets.read(key: sessionKey);
+        if (raw == null) return null;
+        final value = jsonDecode(raw);
+        if (value is! Map<String, dynamic> ||
+            value['userId'] is! String ||
+            value['token'] is! String ||
+            !RegExp(r'^[a-f0-9]{32}$').hasMatch(value['userId'] as String) ||
+            !RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(value['token'] as String)) {
+          throw const FormatException('本机会话格式无效');
+        }
+        return (userId: value['userId'] as String, token: value['token'] as String);
+      },
+      writeSession: (session) => session == null
+          ? secrets.delete(key: sessionKey)
+          : secrets.write(
+              key: sessionKey,
+              value: jsonEncode({'userId': session.userId, 'token': session.token}),
+            ),
+      openWeb: () => actions.openUrl(Uri.parse(webBase).replace(fragment: '/user').toString()),
+    );
+    await account.initialize();
     final reminders = ReminderService(store, repository, settings);
     try {
       await reminders.initialize();
@@ -34,8 +71,9 @@ Future<AppServices> createAppServices({
       store: store,
       repository: repository,
       settings: settings,
-      actions: PlatformActions(webBaseUrl: webBase),
+      actions: actions,
       reminders: reminders,
+      account: account,
     );
   } catch (_) {
     await store.close();

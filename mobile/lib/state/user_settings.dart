@@ -417,11 +417,22 @@ class UserSettings extends ChangeNotifier {
   Future<void>? _initialization;
   Future<void> _pending = Future<void>.value();
   int _folderSequence = 0;
+  int _profileVersion = 0;
+  String? _accountId;
+  bool _accountMode = false;
+  bool _accountReady = false;
+  bool _switching = false;
+
+  String? get accountId => _accountId;
+  bool get accountMode => _accountMode;
+  bool get profileReady => !_switching && (!_accountMode || _accountReady);
+  int get profileVersion => _profileVersion;
+  String get _accountDeviceKey => 'account-device.v1:$_accountId';
 
   UserPreferences get value => _value;
   bool get onboarded => _onboarded;
   String get identity => _identity;
-  bool get readOnly => _readOnly;
+  bool get readOnly => _readOnly || !profileReady;
   String? get error => _error;
 
   void clearError() {
@@ -447,7 +458,7 @@ class UserSettings extends ChangeNotifier {
         (decoded['schemaVersion'] as num) > 3;
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool notify = true}) async {
     try {
       final raw = await _store.read(settingsStorageKey);
       if (raw != null) {
@@ -485,12 +496,84 @@ class UserSettings extends ChangeNotifier {
     } catch (exception) {
       _error ??= '入门设置读取失败：$exception';
     }
+    if (notify) notifyListeners();
+  }
+
+  Future<void> switchProfile({
+    required bool account,
+    String? accountId,
+    UserPreferences? cloud,
+  }) {
+    final version = ++_profileVersion;
+    _switching = true;
+    final operation = _pending.then((_) async {
+      if (version != _profileVersion) return;
+      _value = UserPreferences.defaults();
+      _error = null;
+      _futureRaw = null;
+      _readOnly = false;
+      _onboarded = account;
+      _identity = account ? 'custom' : 'freshman';
+      _accountMode = account;
+      _accountId = accountId;
+      _accountReady = accountId != null;
+      if (!account) {
+        await _load(notify: false);
+      } else if (accountId != null) {
+        var device = _value;
+        try {
+          final raw = await _store.read(_accountDeviceKey);
+          if (raw != null) device = UserPreferences.fromJson(raw);
+        } catch (_) {
+          _error = '账号的设备偏好读取失败';
+        }
+        _value = _withDevice(cloud ?? UserPreferences.defaults(), device);
+      }
+      if (version == _profileVersion) {
+        _switching = false;
+        notifyListeners();
+      }
+    });
+    _track(operation);
+    return operation;
+  }
+
+  static UserPreferences _withDevice(
+    UserPreferences cloud,
+    UserPreferences device,
+  ) => cloud.copyWith(
+    readIds: device.readIds,
+    darkMode: device.darkMode,
+    notificationEnabled: device.notificationEnabled,
+  );
+
+  Future<void> replaceCloud(
+    UserPreferences? cloud, {
+    UserPreferences? expected,
+  }) => _enqueue(() async {
+    if (!_accountReady) throw StateError('账号偏好尚未加载');
+    if (expected != null && !identical(_value, expected)) {
+      throw StateError('偏好在读取云端版本时已更改，请重试');
+    }
+    _value = _withDevice(cloud ?? UserPreferences.defaults(), _value);
+    _error = null;
     notifyListeners();
+  });
+
+  void _track(Future<void> operation) {
+    // A rejected write must not poison subsequent queued actions.
+    _pending = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
   }
 
   Future<void> _enqueue(Future<void> Function() action) {
+    final version = _profileVersion;
+    if (!profileReady) return Future.error(StateError('账号偏好尚未加载，请重试'));
     final operation = _pending.then((_) async {
       await initialize();
+      if (version != _profileVersion) throw StateError('账号已切换，请重新操作');
       try {
         if (_readOnly) throw StateError(_futureError);
         await action();
@@ -503,11 +586,7 @@ class UserSettings extends ChangeNotifier {
         rethrow;
       }
     });
-    // A rejected write must not poison subsequent queued actions.
-    _pending = operation.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace _) {},
-    );
+    _track(operation);
     return operation;
   }
 
@@ -517,6 +596,27 @@ class UserSettings extends ChangeNotifier {
     bool? onboarded,
     String? identity,
   }) async {
+    if (_accountMode) {
+      if (extra.isNotEmpty || !_accountReady) throw StateError('当前账号不支持此操作');
+      if (!listEquals(next.subscribedDepts, _value.subscribedDepts)) {
+        _checkSourceLimit(next.subscribedDepts);
+      }
+      _checkPreferenceBytes(_backupJson(next.toJson()));
+      if (!listEquals(next.readIds, _value.readIds) ||
+          next.darkMode != _value.darkMode ||
+          next.notificationEnabled != _value.notificationEnabled) {
+        await _store.write(_accountDeviceKey, {
+          'schemaVersion': 3,
+          'readIds': next.readIds,
+          'darkMode': next.darkMode,
+          'notificationEnabled': next.notificationEnabled,
+        });
+      }
+      _value = next;
+      _error = null;
+      notifyListeners();
+      return;
+    }
     final stored = await _store.read(settingsStorageKey);
     if (stored != null && _isFuture(stored)) {
       _readOnly = true;
@@ -795,6 +895,7 @@ class UserSettings extends ChangeNotifier {
   });
 
   Future<void> importBackup(String json) => _enqueue(() async {
+    if (_accountMode) throw StateError('请退出账号后再导入本机 JSON 备份');
     _checkPreferenceBytes(json);
     final imported = UserPreferences.fromJson(
       jsonDecode(json),

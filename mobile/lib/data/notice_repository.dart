@@ -47,6 +47,9 @@ class NoticeRepository {
   bool _disposed = false;
   String? _cacheWarning;
   String? get cacheWarning => _cacheWarning;
+  Future<List<SourceItem>>? _sourceRequest;
+  Set<String>? _liveSourceNames;
+  Set<String>? get liveSourceNames => _liveSourceNames;
   static const _listLimit = 16 * 1024 * 1024;
   static const _detailLimit = 8 * 1024 * 1024;
   String get _prefix => 'notice-cache.v1:${_base.toString()}:';
@@ -218,9 +221,15 @@ class NoticeRepository {
     return items;
   }
 
-  Future<List<SourceItem>> sources() async {
+  Future<List<SourceItem>> sources() =>
+      _sourceRequest ??= _fetchSources().whenComplete(() => _sourceRequest = null);
+
+  Future<List<SourceItem>> _fetchSources() async {
     final json = await _request('sources');
     final items = _parse(() => _sourceItems(json));
+    if (items.isNotEmpty) {
+      _liveSourceNames = Set.unmodifiable(items.map((item) => item.name));
+    }
     await _tryCache(
       () => _serial(
         () => _saveCatalog('sources', items.map((s) => s.toJson()).toList()),
@@ -321,14 +330,23 @@ class NoticeRepository {
     if (json is! List || json.length > 1000) {
       throw const DataValidationException('来源目录必须是至多 1000 项的数组');
     }
-    final names = <String>{};
-    final items = json.map(SourceItem.fromJson).toList();
-    for (final item in items) {
-      if (!names.add(item.name)) {
+    final rawNames = <String>{};
+    final items = <String, SourceItem>{};
+    for (final raw in json) {
+      final item = SourceItem.fromJson(raw);
+      if (!rawNames.add((raw as Map)['name'] as String)) {
         throw const DataValidationException('来源目录存在重复名称');
       }
+      final previous = items[item.name];
+      items[item.name] = previous == null
+          ? item
+          : SourceItem(
+              name: item.name,
+              group: previous.group,
+              noticeCount: validatedCount(previous.noticeCount + item.noticeCount),
+            );
     }
-    return List.unmodifiable(items);
+    return List.unmodifiable(items.values);
   }
 
   List<CategoryItem> _categoryItems(Object? json) {

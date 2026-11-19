@@ -408,7 +408,7 @@ class _PreferenceEditorState extends State<_PreferenceEditor> {
         .toList();
     return _Section(
       collegeOnly ? '选择你的学院' : '选择关注来源',
-      description: '目录来自实时接口。未在当前目录出现的已有订阅会保留，不会因离线或目录变化被移除。空选择按全部来源处理。',
+      description: '已选来源会保留。只有实时目录成功刷新并确认缺少的来源才不参与筛选；离线或仅有缓存时不会据此排除。空选择按全部来源处理。',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -436,7 +436,7 @@ class _PreferenceEditorState extends State<_PreferenceEditor> {
           if (collegeOnly || !widget.onboarding) _sourceChoices(group: '二级学院'),
           if (!_allSources && unknown.isNotEmpty) ...[
             const SizedBox(height: 12),
-            const Text('目录暂未包含的已选来源（来源已合并或暂不可用，仍会保留）'),
+            const Text('当前目录未列出的已选来源（仍保留在订阅中）'),
             Wrap(
               spacing: 8,
               runSpacing: 4,
@@ -578,6 +578,15 @@ class _PreferenceEditorState extends State<_PreferenceEditor> {
           padding: const EdgeInsets.all(20),
           children: [
             if (widget.onboarding) ...[
+              if (_step == 0 && widget.services.account != null)
+                _Section(
+                  '已有 NotifAI 账号？',
+                  description: '可直接登录并读取云端偏好，无需先完成游客引导。',
+                  child: AccountPanel(
+                    account: widget.services.account!,
+                    disabled: _saving,
+                  ),
+                ),
               Semantics(
                 liveRegion: true,
                 child: Text(
@@ -618,7 +627,7 @@ class _PreferenceEditorState extends State<_PreferenceEditor> {
                 message: _saveError!,
                 onRetry: _saving ? null : _save,
               ),
-            if (widget.services.settings.readOnly)
+            if (widget.services.settings.profileReady && widget.services.settings.readOnly)
               const ErrorNotice(message: '当前设置来自更新版本，处于只读状态，无法保存。请先升级应用。'),
             Wrap(
               alignment: WrapAlignment.spaceBetween,

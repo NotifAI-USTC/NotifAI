@@ -348,4 +348,45 @@ void main() {
     expect(settings.value.starredIds, contains('one'));
     expect(settings.value.importantIds, contains('one'));
   });
+
+  test('仅实时非空目录确认失效来源；全失效不退化为全站请求', () async {
+    await settings.update(settings.value.copyWith(
+      subscriptionMode: 'custom',
+      subscribedDepts: ['旧来源'],
+    ));
+    final requests = <Uri>[];
+    var known = <Map<String, Object>>[];
+    handle = (request) async {
+      requests.add(request.uri);
+      if (request.uri.path.endsWith('/sources')) {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode(known));
+        await request.response.close();
+      } else {
+        respond(request, [], 0);
+      }
+    };
+    feed = NoticeFeed(repository, settings);
+    await repository.sources();
+    expect(feed!.applyLiveSourceCatalog(), isFalse);
+    await feed!.refresh();
+    expect(requests.last.queryParametersAll['sources[]'], ['旧来源']);
+
+    known = [{'name': '教务处', 'group': '校级部门', 'noticeCount': 1}];
+    await repository.sources();
+    expect(feed!.applyLiveSourceCatalog(), isTrue);
+    final count = requests.length;
+    await feed!.refresh();
+    await feed!.loadMore();
+    expect(requests.length, count);
+    expect(feed!.visible, isEmpty);
+    expect(feed!.finished, isTrue);
+    expect(settings.value.subscribedDepts, ['旧来源']);
+
+    known = [{'name': '旧来源', 'group': '校级部门', 'noticeCount': 1}];
+    await repository.sources();
+    expect(feed!.applyLiveSourceCatalog(), isTrue);
+    await feed!.refresh();
+    expect(requests.last.queryParametersAll['sources[]'], ['旧来源']);
+  });
 }

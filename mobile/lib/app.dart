@@ -12,6 +12,7 @@ import 'features/organizer.dart';
 import 'services/notice_link.dart';
 import 'services/platform_actions.dart';
 import 'services/reminder_service.dart';
+import 'state/account.dart';
 import 'state/user_settings.dart';
 
 const defaultApiBase = String.fromEnvironment(
@@ -30,12 +31,14 @@ class AppServices {
     required this.settings,
     required this.actions,
     required this.reminders,
+    this.account,
   });
   final LocalStore store;
   final NoticeRepository repository;
   final UserSettings settings;
   final PlatformActions actions;
   final ReminderService reminders;
+  final AccountController? account;
 }
 
 ThemeData appTheme(Brightness brightness) {
@@ -78,8 +81,10 @@ class NotifaiApp extends StatefulWidget {
 }
 
 class _NotifaiAppState extends State<NotifaiApp> with WidgetsBindingObserver {
-  final _navigator = GlobalKey<NavigatorState>();
-  final _messenger = GlobalKey<ScaffoldMessengerState>();
+  var _navigator = GlobalKey<NavigatorState>();
+  var _messenger = GlobalKey<ScaffoldMessengerState>();
+  late int _profileVersion;
+  int _tab = 0;
   StreamSubscription<Uri>? _links;
   String? _pendingNotice;
   bool _navigationQueued = false;
@@ -88,6 +93,7 @@ class _NotifaiAppState extends State<NotifaiApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.services.reminders.openedNotice.addListener(_notificationOpened);
+    _profileVersion = widget.services.settings.profileVersion;
     widget.services.settings.addListener(_settingsChanged);
     _notificationOpened();
     if (widget.handleAppLinks) unawaited(_listenLinks());
@@ -129,6 +135,13 @@ class _NotifaiAppState extends State<NotifaiApp> with WidgetsBindingObserver {
   }
 
   void _settingsChanged() {
+    final version = widget.services.settings.profileVersion;
+    if (version != _profileVersion) {
+      // Detail, subscription and dialog routes may hold old account state.
+      _profileVersion = version;
+      _navigator = GlobalKey<NavigatorState>();
+      _messenger = GlobalKey<ScaffoldMessengerState>();
+    }
     _flushNavigation();
   }
 
@@ -168,6 +181,8 @@ class _NotifaiAppState extends State<NotifaiApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      final account = widget.services.account;
+      if (account != null) unawaited(account.checkSession());
       unawaited(widget.services.reminders.reconcile());
     }
   }
@@ -202,7 +217,11 @@ class _NotifaiAppState extends State<NotifaiApp> with WidgetsBindingObserver {
         supportedLocales: const [Locale('zh', 'CN'), Locale('en')],
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
         home: settings.onboarded || settings.readOnly
-            ? _MainShell(services: widget.services)
+            ? _MainShell(
+                services: widget.services,
+                index: _tab,
+                onDestinationSelected: (index) => setState(() => _tab = index),
+              )
             : OnboardingScreen(services: widget.services),
         builder: (context, child) => Column(
           children: [
@@ -237,15 +256,15 @@ class _NotifaiAppState extends State<NotifaiApp> with WidgetsBindingObserver {
   );
 }
 
-class _MainShell extends StatefulWidget {
-  const _MainShell({required this.services});
+class _MainShell extends StatelessWidget {
+  const _MainShell({
+    required this.services,
+    required this.index,
+    required this.onDestinationSelected,
+  });
   final AppServices services;
-  @override
-  State<_MainShell> createState() => _MainShellState();
-}
-
-class _MainShellState extends State<_MainShell> {
-  int _index = 0;
+  final int index;
+  final ValueChanged<int> onDestinationSelected;
   static const _destinations = [
     NavigationDestination(
       icon: Icon(Icons.home_outlined),
@@ -270,11 +289,11 @@ class _MainShellState extends State<_MainShell> {
   ];
   @override
   Widget build(BuildContext context) {
-    final page = switch (_index) {
-      0 => FeedScreen(services: widget.services),
-      1 => CalendarScreen(services: widget.services),
-      2 => FavoritesScreen(services: widget.services),
-      _ => UserScreen(services: widget.services),
+    final page = switch (index) {
+      0 => FeedScreen(services: services),
+      1 => CalendarScreen(services: services),
+      2 => FavoritesScreen(services: services),
+      _ => UserScreen(services: services),
     };
     if (MediaQuery.sizeOf(context).width >= 720) {
       return Scaffold(
@@ -283,9 +302,8 @@ class _MainShellState extends State<_MainShell> {
             children: [
               NavigationRail(
                 scrollable: true,
-                selectedIndex: _index,
-                onDestinationSelected: (index) =>
-                    setState(() => _index = index),
+                selectedIndex: index,
+                onDestinationSelected: onDestinationSelected,
                 labelType: NavigationRailLabelType.all,
                 destinations: [
                   for (final destination in _destinations)
@@ -306,8 +324,8 @@ class _MainShellState extends State<_MainShell> {
     return Scaffold(
       body: page,
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (index) => setState(() => _index = index),
+        selectedIndex: index,
+        onDestinationSelected: onDestinationSelected,
         destinations: _destinations,
       ),
     );

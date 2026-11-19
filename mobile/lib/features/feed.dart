@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
 import '../app.dart';
 import '../data/models.dart';
+import '../data/notice_repository.dart';
 import '../state/notice_feed.dart';
 import '../ui/common.dart';
 import '../ui/deadline_notice_bar.dart';
@@ -35,6 +37,7 @@ class _FeedScreenState extends State<FeedScreen> {
     widget.services.settings.addListener(_settingsChanged);
     unawaited(feed.refresh(useCache: true));
     unawaited(_loadOverview());
+    unawaited(_loadSourceCatalog());
   }
 
   void _loadNearEnd() {
@@ -47,20 +50,42 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   void _settingsChanged() {
-    final p = widget.services.settings.value;
-    final key = '${p.subscriptionMode}:${p.subscribedDepts.join('|')}';
-    if (key != _sourceKey) unawaited(_loadOverview());
+    if (jsonEncode(feed.subscribedSources) != _sourceKey) {
+      unawaited(_loadOverview());
+      if (widget.services.repository.liveSourceNames == null) {
+        unawaited(_loadSourceCatalog());
+      }
+    }
+  }
+
+  Future<void> _loadSourceCatalog() async {
+    if (feed.subscribedSources == null) return;
+    try {
+      await widget.services.repository.sources();
+    } on ApiException {
+      // A failed refresh is not evidence that any saved source disappeared.
+      return;
+    }
+    if (!mounted || !feed.applyLiveSourceCatalog()) return;
+    await Future.wait([feed.refresh(useCache: true), _loadOverview()]);
   }
 
   Future<void> _loadOverview() async {
     final sequence = ++_ddlGeneration;
-    final p = widget.services.settings.value;
-    _sourceKey = '${p.subscriptionMode}:${p.subscribedDepts.join('|')}';
+    final sources = feed.subscribedSources;
+    _sourceKey = jsonEncode(sources);
+    if (sources?.isEmpty == true) {
+      setState(() {
+        _deadlines = [];
+        _ddlError = null;
+      });
+      return;
+    }
     final repository = widget.services.repository;
     try {
       final entries = await repository.deadlines(
         days: 3,
-        sources: p.subscriptionMode == 'custom' ? p.subscribedDepts : const [],
+        sources: sources ?? const [],
         pageSize: 10,
       );
       if (mounted && sequence == _ddlGeneration) {
@@ -76,7 +101,8 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
-  Future<void> _refresh() => Future.wait([feed.refresh(), _loadOverview()]);
+  Future<void> _refresh() =>
+      Future.wait([feed.refresh(useCache: true), _loadOverview(), _loadSourceCatalog()]);
   @override
   void dispose() {
     _ddlGeneration++;
@@ -123,14 +149,17 @@ class _FeedScreenState extends State<FeedScreen> {
             builder: (context, _) {
               final visible = feed.visible;
               final p = widget.services.settings.value;
+              final activeSources = feed.subscribedSources?.toSet();
               final deadlines = _deadlines
                   .where(
-                    (entry) => !p.blacklistKeywords.any(
-                      (word) =>
-                          '${entry.title} ${entry.source} ${entry.aiSummary}'
-                              .toLowerCase()
-                              .contains(word.toLowerCase()),
-                    ),
+                    (entry) =>
+                        (activeSources == null || activeSources.contains(entry.source)) &&
+                        !p.blacklistKeywords.any(
+                          (word) =>
+                              '${entry.title} ${entry.source} ${entry.aiSummary}'
+                                  .toLowerCase()
+                                  .contains(word.toLowerCase()),
+                        ),
                   )
                   .toList();
               return Column(
@@ -254,7 +283,7 @@ class _FeedScreenState extends State<FeedScreen> {
                                 ),
                                 child: ErrorNotice(
                                   message: feed.error!,
-                                  onRetry: () => feed.refresh(useCache: true),
+                                  onRetry: _refresh,
                                 ),
                               ),
                             ),
@@ -286,7 +315,9 @@ class _FeedScreenState extends State<FeedScreen> {
                                 title: feed.finished
                                     ? '没有匹配的通知'
                                     : '已扫描的数据暂无匹配项',
-                                message: feed.finished
+                                message: feed.subscribedSources?.isEmpty == true
+                                    ? '已订阅的来源当前均不可用，可在订阅管理中调整。'
+                                    : feed.finished
                                     ? '试试调整来源、分类或关键词。'
                                     : '本地筛选可能需要继续读取后续页面。',
                               ),

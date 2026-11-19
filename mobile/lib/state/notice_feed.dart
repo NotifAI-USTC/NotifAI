@@ -27,6 +27,7 @@ class FeedFilters {
 
 class NoticeFeed extends ChangeNotifier {
   NoticeFeed(this.repository, this.settings) {
+    _availableSources = repository.liveSourceNames;
     _preferenceKey = _preferencesKey();
     settings.addListener(_onPreferences);
   }
@@ -42,13 +43,33 @@ class NoticeFeed extends ChangeNotifier {
   String? _cursor;
   bool _cursorMode = false, _disposed = false;
   late String _preferenceKey;
+  Set<String>? _availableSources;
   List<Notice> get loaded => List.unmodifiable(_items);
+
+  // null means all sources; an empty custom intersection means no results.
+  List<String>? get subscribedSources {
+    final preferences = settings.value;
+    if (preferences.subscriptionMode != 'custom') return null;
+    final known = _availableSources;
+    return known == null
+        ? preferences.subscribedDepts
+        : preferences.subscribedDepts.where(known.contains).toList();
+  }
+
+  bool applyLiveSourceCatalog() {
+    final known = repository.liveSourceNames;
+    if (known == null || identical(_availableSources, known)) return false;
+    _availableSources = known;
+    final key = _preferencesKey();
+    if (key == _preferenceKey) return false;
+    _preferenceKey = key;
+    return true;
+  }
 
   String _preferencesKey() {
     final p = settings.value;
     return jsonEncode([
-      p.subscriptionMode,
-      p.subscribedDepts,
+      subscribedSources,
       p.categoryMode,
       p.subscribedCategories,
       p.blacklistKeywords,
@@ -78,7 +99,7 @@ class NoticeFeed extends ChangeNotifier {
       categories:
           filters?.categories ??
           (p.categoryMode == 'custom' ? p.subscribedCategories : const []),
-      sources: p.subscriptionMode == 'custom' ? p.subscribedDepts : const [],
+      sources: subscribedSources ?? const [],
       dateFrom: filters?.dateFrom,
       dateTo: filters?.dateTo,
       hasDeadline: filters?.hasDeadline,
@@ -118,6 +139,7 @@ class NoticeFeed extends ChangeNotifier {
   }
 
   List<Notice> get visible {
+    if (subscribedSources?.isEmpty == true) return const [];
     final q = query;
     final entries = _items.where((n) => _matches(n, q)).toList();
     final order = {for (var i = 0; i < _items.length; i++) _items[i].id: i};
@@ -150,6 +172,16 @@ class NoticeFeed extends ChangeNotifier {
 
   Future<void> refresh({bool useCache = false, bool clear = false}) async {
     final generation = ++_generation;
+    if (subscribedSources?.isEmpty == true) {
+      // Omitting sources[] would otherwise request every source.
+      _items.clear();
+      total = invalidItemCount = 0;
+      loading = scanPaused = false;
+      finished = true;
+      error = cacheMessage = null;
+      _notify();
+      return;
+    }
     final q = query;
     loading = true;
     error = null;

@@ -181,13 +181,16 @@ class _DetailScreenState extends State<DetailScreen> {
     if (confirmed != true || !mounted) return;
     await perform(context, () async {
       final granted = await services.reminders.requestPermission();
+      if (!mounted) return;
       if (!granted) throw StateError(services.reminders.error ?? '系统通知权限未获准');
       await services.settings.update(
         services.settings.value.copyWith(notificationEnabled: true),
       );
+      if (!mounted) return;
       if (!services.settings.value.importantIds.contains(notice.id)) {
         await services.settings.toggleImportant(notice.id);
       }
+      if (!mounted) return;
       await services.reminders.schedule(notice, when);
       if (mounted) {
         setState(() {});
