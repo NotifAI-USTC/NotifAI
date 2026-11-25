@@ -99,6 +99,17 @@ pnpm run check
 
 在 GitHub 仓库的 Settings → Pages 中选择从 `gh-pages` 分支部署即可启用站点。
 
+### 网站备案号
+
+在前端目录的 `.env` 或 `.env.local` 填写完整备案号；GitHub Pages 部署则在 **Settings → Secrets and variables → Actions → Variables → Repository variables** 中配置：
+
+| 页脚展示 | 前端 `.env` 变量 | GitHub Actions 仓库变量 |
+| --- | --- | --- |
+| ICP 备案号 | `VITE_ICP_RECORD_NUMBER` | `ICP_RECORD_NUMBER` |
+| 公安联网备案号 | `VITE_POLICE_RECORD_NUMBER` | `POLICE_RECORD_NUMBER` |
+
+两项独立显示，留空则隐藏对应链接，两项都为空时不显示备案页脚。修改后需重启开发服务器；已部署站点需重新构建部署，可手动运行 **Build & Deploy to GitHub Pages**。
+
 ### 可选账号与跨设备同步
 
 Web 默认提供登录入口，游客仍可浏览通知。维护者按 [后端部署说明](https://github.com/NotifAI-USTC/backend#账号服务) 配置 Web Origin，并按需创建密码账号。后端配置 OIDC 时，登录框显示「使用单点登录」。首次使用未绑定的身份时只需填写昵称，提交后自动创建账号并登录；这类账号没有用户名或密码。第三方密码只在身份提供方页面输入。

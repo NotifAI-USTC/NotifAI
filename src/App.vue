@@ -21,6 +21,13 @@ import AccountLoginDialog from './components/AccountLoginDialog.vue'
 import SsoSignupDialog from './components/SsoSignupDialog.vue'
 import AppBanner from './components/AppBanner.vue'
 
+const icpRecordNumber = import.meta.env.VITE_ICP_RECORD_NUMBER?.trim()
+const policeRecordNumber = import.meta.env.VITE_POLICE_RECORD_NUMBER?.trim()
+const policeRecordCode = policeRecordNumber?.match(/\d+(?=\s*号?$)/)?.[0]
+const policeRecordUrl = policeRecordCode
+  ? `https://beian.mps.gov.cn/#/query/webSearch?code=${policeRecordCode}`
+  : 'https://beian.mps.gov.cn/'
+
 const router = useRouter()
 const store = useUserSettingsStore()
 const account = useAccountStore()
@@ -283,6 +290,26 @@ watch(
         <span>{{ tab.label }}</span>
       </v-btn>
     </v-bottom-navigation>
+    <v-footer
+      v-if="icpRecordNumber || policeRecordNumber"
+      app
+      :order="1"
+      class="d-flex flex-wrap align-center justify-center ga-2 text-body-small"
+    >
+      <a v-if="icpRecordNumber" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">
+        {{ icpRecordNumber }}
+      </a>
+      <a
+        v-if="policeRecordNumber"
+        :href="policeRecordUrl"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="d-inline-flex align-center ga-1"
+      >
+        <img src="/icons/police-record.png" alt="" width="20" height="20" />
+        {{ policeRecordNumber }}
+      </a>
+    </v-footer>
     <!-- 全局提示 -->
     <v-snackbar
       v-model="snackbar.show.value"
